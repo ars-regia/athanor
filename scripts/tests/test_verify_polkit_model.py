@@ -54,8 +54,13 @@ class PolkitModelTest(unittest.TestCase):
         root = SCRIPT.parents[1]
         declared = "forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy"
         policy = (root / declared).read_text(encoding="utf-8")
-        doc = (root / "docs/architecture/doc_threat_model.md").read_text(encoding="utf-8")
-        for action, active in (("os.athanor.update.postpone", "yes"), ("os.athanor.update.set-automatic", "auth_admin")):
+        doc = (root / "docs/architecture/doc_threat_model.md").read_text(
+            encoding="utf-8"
+        )
+        for action, active in (
+            ("os.athanor.update.postpone", "yes"),
+            ("os.athanor.update.set-automatic", "auth_admin"),
+        ):
             self.assertIn(f'<action id="{action}">', policy)
             self.assertIn(f"| `{action}` | `{declared}` | `{active}` | yes |", doc)
 
@@ -119,7 +124,6 @@ class PolkitModelTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("20-y.rules", found[0])
 
-
     def unreadable(self, text):
         files = dict(FILES)
         files["pkg/rules.d/20-y.rules"] = text
@@ -144,9 +148,11 @@ class PolkitModelTest(unittest.TestCase):
 
     def test_spacing_and_single_quotes_are_read(self):
         files = dict(FILES)
-        files[RULES_PATH] = RULES.replace("polkit.addRule(", "polkit.addRule (").replace(
-            '"org.example.eject"', "'org.example.eject'"
-        ).replace("==", "===")
+        files[RULES_PATH] = (
+            RULES.replace("polkit.addRule(", "polkit.addRule (")
+            .replace('"org.example.eject"', "'org.example.eject'")
+            .replace("==", "===")
+        )
         self.assertEqual(problems(HEADER + ROWS, files), [])
 
     def test_comments_are_not_rules(self):
@@ -159,13 +165,17 @@ class PolkitModelTest(unittest.TestCase):
 
     def test_not_handled_can_be_written_in_the_table(self):
         files = dict(FILES)
-        files[RULES_PATH] = RULES.replace("polkit.Result.AUTH_ADMIN", "polkit.Result.NOT_HANDLED")
+        files[RULES_PATH] = RULES.replace(
+            "polkit.Result.AUTH_ADMIN", "polkit.Result.NOT_HANDLED"
+        )
         rows = ROWS.replace("`auth_admin` otherwise", "`not_handled` otherwise")
         self.assertEqual(problems(HEADER + rows, files), [])
 
     def test_a_policy_action_without_an_id_fails(self):
         files = dict(FILES)
-        files["pkg/bad.policy"] = "<policyconfig><action><defaults/></action></policyconfig>"
+        files["pkg/bad.policy"] = (
+            "<policyconfig><action><defaults/></action></policyconfig>"
+        )
         found = problems(HEADER + ROWS, files)
         self.assertEqual(len(found), 1, found)
         self.assertIn("bad.policy", found[0])
@@ -271,7 +281,9 @@ class PolkitModelTest(unittest.TestCase):
         )
 
     def test_eval_fails(self):
-        self.unreadable('eval("polkit.addRule(function(a){return polkit.Result.YES})");\n')
+        self.unreadable(
+            'eval("polkit.addRule(function(a){return polkit.Result.YES})");\n'
+        )
 
     def test_code_beside_the_calls_fails(self):
         self.unreadable(
@@ -307,16 +319,22 @@ class PolkitModelTest(unittest.TestCase):
             "  }\n"
             "});\n"
         )
-        rows = ROWS.replace("`yes` for wheel, `auth_admin` otherwise", "`yes` for runner")
+        rows = ROWS.replace(
+            "`yes` for wheel, `auth_admin` otherwise", "`yes` for runner"
+        )
         self.assertEqual(problems(HEADER + rows, files), [])
 
     def test_a_udev_rule_naming_polkit_in_a_comment_is_skipped(self):
         files = dict(FILES)
-        files["pkg/udev/rules.d/72-x.rules"] = '# access is granted via polkit\nSUBSYSTEM=="usb", MODE="0660"\n'
+        files["pkg/udev/rules.d/72-x.rules"] = (
+            '# access is granted via polkit\nSUBSYSTEM=="usb", MODE="0660"\n'
+        )
         self.assertEqual(problems(HEADER + ROWS, files), [])
 
     def test_a_rules_file_outside_udev_that_never_names_addRule_fails(self):
-        self.unreadable('polkit["add" + "Rule"](function(action, subject) { return "yes"; });\n')
+        self.unreadable(
+            'polkit["add" + "Rule"](function(action, subject) { return "yes"; });\n'
+        )
 
     def test_an_identifier_outside_the_closed_set_fails(self):
         self.unreadable(
@@ -345,7 +363,8 @@ class PolkitModelTest(unittest.TestCase):
 
     def test_a_carriage_return_ends_a_comment(self):
         self.unreadable(
-            RULES + "// x\rpolkit.addRule(function(action, subject) { return polkit.Result.YES; });\n"
+            RULES
+            + "// x\rpolkit.addRule(function(action, subject) { return polkit.Result.YES; });\n"
         )
 
     def test_a_backslash_outside_a_string_fails(self):
@@ -364,17 +383,23 @@ class PolkitModelTest(unittest.TestCase):
             "  }\n"
             "});\n"
         )
-        rows = ROWS.replace("`yes` for wheel, `auth_admin` otherwise", "`yes` for runner")
+        rows = ROWS.replace(
+            "`yes` for wheel, `auth_admin` otherwise", "`yes` for runner"
+        )
         self.assertEqual(problems(HEADER + rows, files), [])
 
     def test_two_rules_on_one_action_merge_their_results(self):
-        declared, unreadable = verify.polkit_declared({
-            RULES_PATH: (
-                'polkit.addRule(function(action, subject) { if (action.id == "org.example.a" && subject.isInGroup("wheel")) { return polkit.Result.YES; } });\n'
-                'polkit.addRule(function(action, subject) { if (action.id == "org.example.a") { return polkit.Result.NO; } });\n'
-            )
-        })
-        self.assertEqual((declared, unreadable), ({("org.example.a", RULES_PATH): {"yes", "no"}}, []))
+        declared, unreadable = verify.polkit_declared(
+            {
+                RULES_PATH: (
+                    'polkit.addRule(function(action, subject) { if (action.id == "org.example.a" && subject.isInGroup("wheel")) { return polkit.Result.YES; } });\n'
+                    'polkit.addRule(function(action, subject) { if (action.id == "org.example.a") { return polkit.Result.NO; } });\n'
+                )
+            }
+        )
+        self.assertEqual(
+            (declared, unreadable), ({("org.example.a", RULES_PATH): {"yes", "no"}}, [])
+        )
 
     def test_an_assignment_in_the_guard_fails(self):
         self.unreadable(
@@ -382,23 +407,35 @@ class PolkitModelTest(unittest.TestCase):
         )
 
     def test_an_assignment_in_an_admin_rule_fails(self):
-        self.unreadable("polkit.addAdminRule(function(action, subject) { polkit.Result.NO = polkit.Result.YES; });\n")
+        self.unreadable(
+            "polkit.addAdminRule(function(action, subject) { polkit.Result.NO = polkit.Result.YES; });\n"
+        )
 
     def test_an_action_id_in_code_is_read_whole_hyphens_included(self):
         line = 'pub const ACTION: &str = "os.athanor.update.apply-multi-session";'
-        self.assertEqual(verify.POLKIT_ACTION_IN_CODE.findall(line), ["os.athanor.update.apply-multi-session"])
+        self.assertEqual(
+            verify.POLKIT_ACTION_IN_CODE.findall(line),
+            ["os.athanor.update.apply-multi-session"],
+        )
 
     def test_an_undeclared_hyphenated_action_in_code_fails_the_polkit_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "system/x/src").mkdir(parents=True)
-            (root / "system/x/src/main.rs").write_text('const A: &str = "os.athanor.x.apply-multi-session";\n')
-            (root / "system/x/os.athanor.x.policy").write_text('<policyconfig><action id="os.athanor.x.apply"/></policyconfig>\n')
-            (root / "system/x/x.spec").write_text("%{_datadir}/polkit-1/actions/os.athanor.x.policy\n")
+            (root / "system/x/src/main.rs").write_text(
+                'const A: &str = "os.athanor.x.apply-multi-session";\n'
+            )
+            (root / "system/x/os.athanor.x.policy").write_text(
+                '<policyconfig><action id="os.athanor.x.apply"/></policyconfig>\n'
+            )
+            (root / "system/x/x.spec").write_text(
+                "%{_datadir}/polkit-1/actions/os.athanor.x.policy\n"
+            )
             with mock.patch.object(verify, "ROOT", root):
                 result = verify.check_polkit()
         self.assertEqual(len(result.problems), 1, result.problems)
         self.assertIn("os.athanor.x.apply-multi-session", result.problems[0])
+
 
 if __name__ == "__main__":
     unittest.main()

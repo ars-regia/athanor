@@ -74,7 +74,9 @@ def appears(app, module, seconds=5):
 
 
 def step(name, ok, detail=""):
-    print(f"{'ok  ' if ok else 'FAIL'} {name}{f': {detail}' if detail and not ok else ''}")
+    print(
+        f"{'ok  ' if ok else 'FAIL'} {name}{f': {detail}' if detail and not ok else ''}"
+    )
     if not ok:
         sys.exit(1)
 
@@ -82,28 +84,52 @@ def step(name, ok, detail=""):
 def system_call(name, path, interface, method, args=None):
     bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
     try:
-        return bus.call_sync(name, path, interface, method, args, None, Gio.DBusCallFlags.NONE, 5000, None).unpack()
+        return bus.call_sync(
+            name,
+            path,
+            interface,
+            method,
+            args,
+            None,
+            Gio.DBusCallFlags.NONE,
+            5000,
+            None,
+        ).unpack()
     except GLib.Error:
         return None
 
 
 def has_adapter():
-    reply = system_call("org.bluez", "/", "org.freedesktop.DBus.ObjectManager", "GetManagedObjects")
-    return reply is not None and any("org.bluez.Adapter1" in interfaces for interfaces in reply[0].values())
+    reply = system_call(
+        "org.bluez", "/", "org.freedesktop.DBus.ObjectManager", "GetManagedObjects"
+    )
+    return reply is not None and any(
+        "org.bluez.Adapter1" in interfaces for interfaces in reply[0].values()
+    )
 
 
 def has_battery():
     reply = system_call(
-        "org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice",
-        "org.freedesktop.DBus.Properties", "GetAll", GLib.Variant("(s)", ("org.freedesktop.UPower.Device",)),
+        "org.freedesktop.UPower",
+        "/org/freedesktop/UPower/devices/DisplayDevice",
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+        GLib.Variant("(s)", ("org.freedesktop.UPower.Device",)),
     )
-    return reply is not None and reply[0].get("Type") == 2 and reply[0].get("IsPresent") is True
+    return (
+        reply is not None
+        and reply[0].get("Type") == 2
+        and reply[0].get("IsPresent") is True
+    )
 
 
 def default_sink_percent():
     """The default sink's volume in percent, from wireplumber's wpctl: "Volume: 0.40"."""
     text = subprocess.run(
-        ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], check=True, capture_output=True, text=True
+        ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     return round(float(text.split()[1]) * 100)
 
@@ -128,7 +154,10 @@ def main():
     network = wait_for(lambda: showing(app, "button", "Network"), 10)
     step("the network module shows NetworkManager's state", bool(network))
     network[0].do_action(0)
-    step("the wired connection is shown", bool(wait_for(lambda: showing(app, "label", "Wired: connected"), 5)))
+    step(
+        "the wired connection is shown",
+        bool(wait_for(lambda: showing(app, "label", "Wired: connected"), 5)),
+    )
     network[0].do_action(0)
 
     # A module that should show gets the time to load its service; one that should hide gets

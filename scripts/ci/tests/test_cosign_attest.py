@@ -29,7 +29,9 @@ def run_check(**env):
 
 class PinnedVersion(unittest.TestCase):
     def test_workflows_install_the_cosign_the_check_runs(self):
-        pinned = re.search(r"^COSIGN_INSTALLER=([0-9a-f]{40})$", INSTALL.read_text(), re.M)
+        pinned = re.search(
+            r"^COSIGN_INSTALLER=([0-9a-f]{40})$", INSTALL.read_text(), re.M
+        )
         self.assertIsNotNone(pinned)
         used = set()
         for workflow in WORKFLOWS.glob("*.yml"):

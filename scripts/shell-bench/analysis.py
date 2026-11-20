@@ -74,32 +74,66 @@ def parse_journal(entries):
             continue
         unit = entry.get("_SYSTEMD_USER_UNIT", "").removesuffix(".service")
         if record["bench"] == "frame" and record["presented_us"] > 0:
-            frames.append(Frame(unit, record["surface"], int(entry.get("_PID", 0)), record["frame"],
-                                record["presented_us"] * 1000, record["refresh_us"] * 1000))
+            frames.append(
+                Frame(
+                    unit,
+                    record["surface"],
+                    int(entry.get("_PID", 0)),
+                    record["frame"],
+                    record["presented_us"] * 1000,
+                    record["refresh_us"] * 1000,
+                )
+            )
         elif record["bench"] == "surface":
-            placements.append(Placement(unit, record["surface"], record["x"], record["y"], record["w"],
-                                        record["h"], record["output_w"], record["output_h"]))
+            placements.append(
+                Placement(
+                    unit,
+                    record["surface"],
+                    record["x"],
+                    record["y"],
+                    record["w"],
+                    record["h"],
+                    record["output_w"],
+                    record["output_h"],
+                )
+            )
     return frames, placements
 
 
 def targets(placement, nodes):
     """The buttons of the window of `nodes` (tree.py's lines) that is `placement`'s surface,
     aimed at their centre in output coordinates."""
-    windows = [n["toplevel"] for n in nodes if "toplevel" in n and (n["w"], n["h"]) == (placement.w, placement.h)]
+    windows = [
+        n["toplevel"]
+        for n in nodes
+        if "toplevel" in n and (n["w"], n["h"]) == (placement.w, placement.h)
+    ]
     if len(windows) != 1:
-        raise RuntimeError(f"{len(windows)} windows of {placement.unit} match its {placement.surface} "
-                           f"surface of {placement.w}x{placement.h}: the bench needs exactly one")
+        raise RuntimeError(
+            f"{len(windows)} windows of {placement.unit} match its {placement.surface} "
+            f"surface of {placement.w}x{placement.h}: the bench needs exactly one"
+        )
     return [
-        Target(placement.unit, placement.surface, n["name"], n["popup"],
-               placement.x + n["x"] + n["w"] // 2, placement.y + n["y"] + n["h"] // 2,
-               placement.output_w, placement.output_h)
+        Target(
+            placement.unit,
+            placement.surface,
+            n["name"],
+            n["popup"],
+            placement.x + n["x"] + n["w"] // 2,
+            placement.y + n["y"] + n["h"] // 2,
+            placement.output_w,
+            placement.output_h,
+        )
         for n in nodes
         if n.get("window") == windows[0] and n["role"] in BUTTON_ROLES and n["w"] > 0
     ]
 
 
 def _of(frames, unit, surface):
-    return sorted((f for f in frames if f.unit == unit and f.surface == surface), key=lambda f: f.presented_ns)
+    return sorted(
+        (f for f in frames if f.unit == unit and f.surface == surface),
+        key=lambda f: f.presented_ns,
+    )
 
 
 def responses_ms(times_ns, frames, unit, surface, inputs_ns=()):
@@ -155,7 +189,7 @@ def settled(times_ns, frames, unit, surface, limit_ns, horizon_ns):
 
 def cpu_ticks(stat):
     """utime + stime of a /proc/<pid>/stat line (fields 14 and 15 of proc(5))."""
-    fields = stat[stat.rindex(")") + 2:].split()
+    fields = stat[stat.rindex(")") + 2 :].split()
     return int(fields[11]) + int(fields[12])
 
 
@@ -179,7 +213,7 @@ def read_ppm(data):
     match = _PPM.match(data)
     if match is None:
         raise ValueError("not a binary PPM with maxval 255")
-    return int(match[1]), int(match[2]), data[match.end():]
+    return int(match[1]), int(match[2]), data[match.end() :]
 
 
 def changed(a, b, rows, tolerance=24):
@@ -196,8 +230,16 @@ def changed(a, b, rows, tolerance=24):
             i = base + x * 3
             if max(abs(pa[i + c] - pb[i + c]) for c in range(3)) > tolerance:
                 count += 1
-                box = (x, y, x, y) if box is None else (
-                    min(box[0], x), min(box[1], y), max(box[2], x), max(box[3], y))
+                box = (
+                    (x, y, x, y)
+                    if box is None
+                    else (
+                        min(box[0], x),
+                        min(box[1], y),
+                        max(box[2], x),
+                        max(box[3], y),
+                    )
+                )
     return count, box
 
 

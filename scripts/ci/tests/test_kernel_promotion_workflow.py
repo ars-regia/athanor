@@ -18,7 +18,9 @@ class PublishTest(unittest.TestCase):
         self.publish = jobs("kernel-build.yml")["publish"]
 
     def test_publish_accepts_a_skipped_build_only_when_promoted(self):
-        self.assertIn(f"(needs.build.result == 'skipped' && {PROMOTED})", self.publish["if"])
+        self.assertIn(
+            f"(needs.build.result == 'skipped' && {PROMOTED})", self.publish["if"]
+        )
         self.assertIn("needs.boot.result == 'success'", self.publish["if"])
         self.assertIn("github.event_name != 'pull_request'", self.publish["if"])
 
@@ -32,7 +34,8 @@ class PublishTest(unittest.TestCase):
         download = next(
             i
             for i, s in enumerate(self.publish["steps"])
-            if "download-artifact" in s.get("uses", "") and s["with"]["name"] == "kernel-promotion"
+            if "download-artifact" in s.get("uses", "")
+            and s["with"]["name"] == "kernel-promotion"
         )
         # The decision is on disk before anything is pushed.
         self.assertLess(download, names.index("Publish the four OCI images"))
@@ -45,7 +48,9 @@ class PublishTest(unittest.TestCase):
 class InputsTest(unittest.TestCase):
     def setUp(self):
         self.inputs = jobs("kernel-build.yml")["inputs"]
-        self.promotion = next(s for s in self.inputs["steps"] if s.get("id") == "promotion")
+        self.promotion = next(
+            s for s in self.inputs["steps"] if s.get("id") == "promotion"
+        )
 
     def test_only_a_push_to_iso_v0_runs_the_promotion(self):
         condition = self.promotion["if"]
@@ -59,7 +64,9 @@ class InputsTest(unittest.TestCase):
             self.inputs["permissions"],
             {"contents": "read", "actions": "read", "pull-requests": "read"},
         )
-        self.assertEqual(self.promotion["env"]["GH_TOKEN"], "${{ secrets.GITHUB_TOKEN }}")
+        self.assertEqual(
+            self.promotion["env"]["GH_TOKEN"], "${{ secrets.GITHUB_TOKEN }}"
+        )
 
     def test_the_promoted_rpms_take_the_build_jobs_artifact_names(self):
         # boot, kmod (devel-artifact) and publish download these names from the run.
@@ -69,7 +76,10 @@ class InputsTest(unittest.TestCase):
             if "upload-artifact" in s.get("uses", "")
             and s["if"] == "${{ steps.promotion.outputs.promoted == 'true' }}"
         }
-        self.assertEqual(promoted, {"kernel-build", "kernel-boot", "kernel-devel", "kernel-promotion"})
+        self.assertEqual(
+            promoted,
+            {"kernel-build", "kernel-boot", "kernel-devel", "kernel-promotion"},
+        )
 
     def test_pr_yml_grants_what_the_mirrored_inputs_job_asks(self):
         granted = jobs("pr.yml")["kernel"]["permissions"]
@@ -97,7 +107,9 @@ class DownstreamTest(unittest.TestCase):
 
     def test_the_gate_accepts_a_skipped_build_when_promoted(self):
         gate = self.jobs["gate"]
-        self.assertEqual(gate["env"]["PROMOTED"], "${{ needs.inputs.outputs.promoted }}")
+        self.assertEqual(
+            gate["env"]["PROMOTED"], "${{ needs.inputs.outputs.promoted }}"
+        )
         self.assertIn("$PROMOTED == true", gate["steps"][0]["run"])
 
 

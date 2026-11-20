@@ -27,19 +27,75 @@ UI_DEV_CREATE, UI_DEV_DESTROY = 0x5501, 0x5502
 ABS_CNT, BUS_VIRTUAL = 64, 0x06
 SHIFT = 42
 NAMED = {
-    "super": 125, "shift": SHIFT, "ctrl": 29, "alt": 56, "enter": 28, "escape": 1, "tab": 15,
-    "down": 108, "up": 103, "left": 105, "right": 106,
+    "super": 125,
+    "shift": SHIFT,
+    "ctrl": 29,
+    "alt": 56,
+    "enter": 28,
+    "escape": 1,
+    "tab": 15,
+    "down": 108,
+    "up": 103,
+    "left": 105,
+    "right": 106,
     # KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP of linux/input-event-codes.h.
-    "mute": 113, "voldown": 114, "volup": 115,
+    "mute": 113,
+    "voldown": 114,
+    "volup": 115,
 }
 # Linux input event codes of the US layout: unshifted characters, then shifted ones.
-PLAIN = dict(zip("1234567890-=qwertyuiopasdfghjklzxcvbnm./ '", [
-    2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
-    16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    30, 31, 32, 33, 34, 35, 36, 37, 38,
-    44, 45, 46, 47, 48, 49, 50, 52, 53, 57, 40,
-]))
-SHIFTED = {"+": 13, "*": 9, "_": 12, "#": 4, "%": 6, "&": 8, "?": 53} | {c.upper(): k for c, k in PLAIN.items() if c.isalpha()}
+PLAIN = dict(
+    zip(
+        "1234567890-=qwertyuiopasdfghjklzxcvbnm./ '",
+        [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            52,
+            53,
+            57,
+            40,
+        ],
+    )
+)
+SHIFTED = {"+": 13, "*": 9, "_": 12, "#": 4, "%": 6, "&": 8, "?": 53} | {
+    c.upper(): k for c, k in PLAIN.items() if c.isalpha()
+}
 # How long the compositor takes to add a new input device.
 SETTLE_S = 1.5
 # The delay between two repeats of a held key.
@@ -48,7 +104,9 @@ REPEAT_S = 0.03
 
 def key_code(name):
     """The event code of a key named after an @, or None."""
-    return NAMED.get(name) or (PLAIN[name] if len(name) == 1 and name in PLAIN else None)
+    return NAMED.get(name) or (
+        PLAIN[name] if len(name) == 1 and name in PLAIN else None
+    )
 
 
 def emit(fd, kind, code, value):
@@ -101,7 +159,9 @@ def strokes(tokens):
 
 
 def main():
-    keys = list(strokes(sys.argv[1:]))  # refuse an untypable token before creating the device
+    keys = list(
+        strokes(sys.argv[1:])
+    )  # refuse an untypable token before creating the device
     fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
     try:
         fcntl.ioctl(fd, UI_SET_EVBIT, EV_SYN)
@@ -110,10 +170,22 @@ def main():
             fcntl.ioctl(fd, UI_SET_KEYBIT, code)
         zeros = [0] * ABS_CNT
         # struct uinput_user_dev: name, input_id, ff_effects_max, absmax, absmin, absfuzz, absflat
-        os.write(fd, struct.pack(
-            f"80sHHHHi{4 * ABS_CNT}i", b"athanor-acceptance-keyboard",
-            BUS_VIRTUAL, 0, 0, 1, 0, *zeros, *zeros, *zeros, *zeros,
-        ))
+        os.write(
+            fd,
+            struct.pack(
+                f"80sHHHHi{4 * ABS_CNT}i",
+                b"athanor-acceptance-keyboard",
+                BUS_VIRTUAL,
+                0,
+                0,
+                1,
+                0,
+                *zeros,
+                *zeros,
+                *zeros,
+                *zeros,
+            ),
+        )
         fcntl.ioctl(fd, UI_DEV_CREATE)
         try:
             time.sleep(SETTLE_S)

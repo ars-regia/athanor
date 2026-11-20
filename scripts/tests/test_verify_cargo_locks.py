@@ -43,7 +43,9 @@ class StaleLockProblemsTest(unittest.TestCase):
 
     def test_a_workspace_root_that_inherits_keeps_its_lock(self):
         both = ROOT + '\n[package]\nname = "r"\nversion.workspace = true\n'
-        self.assertEqual(verify.stale_lock_problems(["Cargo.lock"], {"Cargo.toml": both}), [])
+        self.assertEqual(
+            verify.stale_lock_problems(["Cargo.lock"], {"Cargo.toml": both}), []
+        )
 
     def test_a_vendored_crate_is_left_alone(self):
         for lock in ["x/vendor/dep/Cargo.lock", "vendor/dep/Cargo.lock"]:

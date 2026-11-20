@@ -147,10 +147,18 @@ class CiMode(unittest.TestCase):
         asked the held one (#1108 covered only the serial console)."""
         text = RUN.read_text()
         calls = re.findall(r"^\s*session_probes (\S+) (\S+)$", text, re.M)
-        self.assertEqual(calls, [("upgraded-", "SESSION"), ("rolled-back-", "SESSION_HELD")])
+        self.assertEqual(
+            calls, [("upgraded-", "SESSION"), ("rolled-back-", "SESSION_HELD")]
+        )
         for _, name in calls:
             printed = subprocess.run(
-                ["python3", "-B", str(RUN.parents[3] / "forge/test/iso/console.py"), "--print-probe", name],
+                [
+                    "python3",
+                    "-B",
+                    str(RUN.parents[3] / "forge/test/iso/console.py"),
+                    "--print-probe",
+                    name,
+                ],
                 capture_output=True,
             )
             self.assertEqual(printed.returncode, 0, printed.stderr)
@@ -199,10 +207,17 @@ class CiMode(unittest.TestCase):
                 # The stages go on to upgrade, which the login on ttyS0 stops.
                 self.guest("downloaded", FEATURE_LINE, reason=reason)
                 result = self.run_sh("--ci", "seed", env=self.ci)
-                self.assertIn(f"reads {reason} before any update", result.stdout, result.stderr)
+                self.assertIn(
+                    f"reads {reason} before any update", result.stdout, result.stderr
+                )
 
     def test_seed_refuses_any_other_verdict(self):
-        for reason in ("policy-not-in-force", "reference-out-of-scope", "key-not-in-policy", ""):
+        for reason in (
+            "policy-not-in-force",
+            "reference-out-of-scope",
+            "key-not-in-policy",
+            "",
+        ):
             with self.subTest(reason=reason):
                 self.guest("none", "", reason=reason)
                 result = self.run_sh("--ci", "seed", env=self.ci)
@@ -279,13 +294,17 @@ class CiMode(unittest.TestCase):
     def test_upgrade_goes_on_through_apply_with_a_client_that_predates_the_reader(self):
         self.guest("downloaded", "", reader=1)
         result = self.run_sh("--ci", "upgrade", env=self.ci)
-        self.assertIn("NOTE  UD18 3: the booted client predates", result.stdout, result.stderr)
+        self.assertIn(
+            "NOTE  UD18 3: the booted client predates", result.stdout, result.stderr
+        )
         self.assertNotIn("PASS  UD18 3", result.stdout)
         self.assertIn("PASS  UD18 4", result.stdout, result.stderr)
         # The stage reached Apply(), which the login on ttyS0 stops.
         self.assertIn("ttyS0", result.stderr)
 
-    def test_upgrade_refuses_a_security_candidate_with_a_client_that_predates_the_reader(self):
+    def test_upgrade_refuses_a_security_candidate_with_a_client_that_predates_the_reader(
+        self,
+    ):
         self.guest("downloaded", "", reader=1)
         security = {**self.ci, "ATHANOR_UPDATE_CLASS": "security"}
         result = self.run_sh("--ci", "upgrade", env=security)
@@ -297,21 +316,29 @@ class CiMode(unittest.TestCase):
         self.guest("downloaded", FEATURE_LINE, reader=2)
         result = self.run_sh("--ci", "upgrade", env=self.ci)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("the booted client could not be read: grep exited 2", result.stderr)
+        self.assertIn(
+            "the booted client could not be read: grep exited 2", result.stderr
+        )
         self.assertNotIn("NOTE  UD18 3", result.stdout)
 
     def test_check_requires_the_reader_in_the_candidates_client(self):
         # The candidate is the :stable the next run upgrades from (#784).
-        for reader, expected in ((0, "PASS  UD18 5: the candidate's client reads release attestations"),
-                                 (1, "FAIL  UD18 5: the candidate's client has no attestation reader")):
+        for reader, expected in (
+            (0, "PASS  UD18 5: the candidate's client reads release attestations"),
+            (1, "FAIL  UD18 5: the candidate's client has no attestation reader"),
+        ):
             with self.subTest(reader=reader):
                 self.guest("none", "", reader=reader)
                 result = self.run_sh("--ci", "check", env=self.ci)
                 self.assertIn(expected, result.stdout + result.stderr)
 
     def test_the_reader_is_found_by_a_message_of_the_client(self):
-        marker = re.search(r'^ATTESTATION_READER="([^"]+)"$', RUN.read_text(), re.MULTILINE)
-        self.assertIsNotNone(marker, "run.sh no longer looks for the attestation reader")
+        marker = re.search(
+            r'^ATTESTATION_READER="([^"]+)"$', RUN.read_text(), re.MULTILINE
+        )
+        self.assertIsNotNone(
+            marker, "run.sh no longer looks for the attestation reader"
+        )
         # A tracing message of candidate_class: rewording it must reword the marker too.
         self.assertRegex(
             CHECK_RS.read_text(),

@@ -45,7 +45,10 @@ class AllowList(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
         self.write(verify.GLOBALS_FILE, GLOBALS)
-        self.write(verify.PACKAGES_JSON, '{"upstream_desktop": ["cosmic-idle", "cosmic-osd"]}\n')
+        self.write(
+            verify.PACKAGES_JSON,
+            '{"upstream_desktop": ["cosmic-idle", "cosmic-osd"]}\n',
+        )
         self.lines("")
 
     def tearDown(self):
@@ -126,7 +129,9 @@ class AllowList(unittest.TestCase):
     def problems(self, upstream=None):
         """The problems of the fixture tree, which installs no executable of OUTSIDE_THE_LIST
         and has no line of UPSTREAM's unless `upstream` names them."""
-        return verify.allow_list_problems(self.root, outside=set(), upstream=upstream or {})
+        return verify.allow_list_problems(
+            self.root, outside=set(), upstream=upstream or {}
+        )
 
     def exempt(self):
         """(problems, notes) of the fixture tree with the shipped OUTSIDE_THE_LIST."""
@@ -249,7 +254,9 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-idle",
             dependency,
-            {"src/main.rs": "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n"},
+            {
+                "src/main.rs": "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n"
+            },
         )
         self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
         self.assertEqual(self.problems(), [])
@@ -267,9 +274,7 @@ class AllowList(unittest.TestCase):
                 self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
     def test_a_disabled_optional_dependency_is_not_followed(self):
-        self.write(
-            "system/athanor-sal/Cargo.toml", '[package]\nname = "athanor-sal"\n'
-        )
+        self.write("system/athanor-sal/Cargo.toml", '[package]\nname = "athanor-sal"\n')
         self.write(
             "system/athanor-sal/src/lib.rs",
             "pub fn surface() { s.set_layer(Layer::Top); }\n",
@@ -303,7 +308,9 @@ class AllowList(unittest.TestCase):
             dependency,
             {"src/main.rs": "use athanor_sulphur_client::connect;\nfn main() {}\n"},
         )
-        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
         self.package(
             "athanor-launcher",
@@ -325,9 +332,13 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-control-center",
             dependency,
-            {"src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { panel.close(); }\n"},
+            {
+                "src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { panel.close(); }\n"
+            },
         )
-        self.lines("/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
         for call in (
             "client.window_actions().close(id)",
@@ -338,7 +349,9 @@ class AllowList(unittest.TestCase):
                 self.package(
                     "athanor-bar",
                     dependency,
-                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                    {
+                        "src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"
+                    },
                 )
                 self.lines(
                     "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
@@ -354,7 +367,9 @@ class AllowList(unittest.TestCase):
                 )
                 self.assertEqual(self.problems(), [])
 
-    def test_the_toplevel_manager_counts_only_for_a_target_that_watches_the_windows(self):
+    def test_the_toplevel_manager_counts_only_for_a_target_that_watches_the_windows(
+        self,
+    ):
         # The client binds athanor-sulphur's toplevel manager at the first
         # `Client::watch_windows` only: the OSD, which reads the workspaces and the outputs and
         # never the windows (doc_osd.md OD8), needs no grant of it.
@@ -363,16 +378,22 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-osd",
             dependency,
-            {"src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.workspaces(); }\n"},
+            {
+                "src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.workspaces(); }\n"
+            },
         )
-        self.lines("/usr/bin/athanor-osd athanor-osd.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-osd athanor-osd.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
         for call in ("client.watch_windows()", "Client::watch_windows(&client)"):
             with self.subTest(call):
                 self.package(
                     "athanor-dock",
                     dependency,
-                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                    {
+                        "src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"
+                    },
                 )
                 self.lines(
                     "/usr/bin/athanor-osd athanor-osd.service ext_foreign_toplevel_list_v1\n"
@@ -397,16 +418,25 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-control-center",
             dependency,
-            {"src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.keyboard_group(); }\n"},
+            {
+                "src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.keyboard_group(); }\n"
+            },
         )
-        self.lines("/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
-        for call in ("client.watch_keyboard_group()", "Client::watch_keyboard_group(&client)"):
+        for call in (
+            "client.watch_keyboard_group()",
+            "Client::watch_keyboard_group(&client)",
+        ):
             with self.subTest(call):
                 self.package(
                     "athanor-bar",
                     dependency,
-                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                    {
+                        "src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"
+                    },
                 )
                 self.lines(
                     "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
@@ -430,16 +460,25 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-control-center",
             dependency,
-            {"src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.accessibility(); }\n"},
+            {
+                "src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.accessibility(); }\n"
+            },
         )
-        self.lines("/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
-        for call in ("client.watch_accessibility()", "Client::watch_accessibility(&client)"):
+        for call in (
+            "client.watch_accessibility()",
+            "Client::watch_accessibility(&client)",
+        ):
             with self.subTest(call):
                 self.package(
                     "athanor-bar",
                     dependency,
-                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                    {
+                        "src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"
+                    },
                 )
                 self.lines(
                     "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
@@ -464,16 +503,22 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-dock",
             dependency,
-            {"src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.set_tiling(id, tiling); }\n"},
+            {
+                "src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.set_tiling(id, tiling); }\n"
+            },
         )
-        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
         for call in ("client.watch_tiling()", "Client::watch_tiling(&client)"):
             with self.subTest(call):
                 self.package(
                     "athanor-bar",
                     dependency,
-                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                    {
+                        "src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"
+                    },
                 )
                 self.lines(
                     "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
@@ -506,41 +551,49 @@ class AllowList(unittest.TestCase):
         self.client()
         dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
         dock = "use athanor_sulphur_client::Client;\nfn f() { Client::connect(&d); w.set_layer(Layer::Top); }\n"
-        launcher = "use athanor_sulphur_client::Client;\nfn f() { client.capture(id); }\n"
+        launcher = (
+            "use athanor_sulphur_client::Client;\nfn f() { client.capture(id); }\n"
+        )
         cases = {
             # What the client binds at connect, missing from the line.
             "a missing connect name": (
-                "athanor-dock", dock,
+                "athanor-dock",
+                dock,
                 "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1\n",
                 "ext_foreign_toplevel_list_v1",
             ),
             # What the client binds at the first capture, missing from a capturing target's line.
             "a missing capture grant": (
-                "athanor-launcher", launcher,
+                "athanor-launcher",
+                launcher,
                 "/usr/bin/athanor-launcher athanor-launcher.service ext_foreign_toplevel_list_v1\n",
                 "ext_image_copy_capture_manager_v1",
             ),
             # A name that is no privileged or layer-gated row, as a new version of a global.
             "an unknown name": (
-                "athanor-dock", dock,
+                "athanor-dock",
+                dock,
                 "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
                 "ext_foreign_toplevel_list_v1 ext_workspace_manager_v2\n",
                 "ext_workspace_manager_v2",
             ),
             "a trailing comment": (
-                "athanor-dock", dock,
+                "athanor-dock",
+                dock,
                 "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
                 "ext_foreign_toplevel_list_v1 #dock\n",
                 "names #dock",
             ),
             "a line with no interface": (
-                "athanor-dock", dock,
+                "athanor-dock",
+                dock,
                 "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
                 "ext_foreign_toplevel_list_v1\n/usr/bin/athanor-dock athanor-dock.service\n",
                 "grant nothing at all",
             ),
             "a standard global": (
-                "athanor-dock", dock,
+                "athanor-dock",
+                dock,
                 "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
                 "ext_foreign_toplevel_list_v1 wl_compositor\n",
                 "wl_compositor",
@@ -572,28 +625,51 @@ class AllowList(unittest.TestCase):
         self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
         self.assertEqual(self.problems(), [])
         cases = {
-            "no privileged row": (verify.GLOBALS_FILE, "zwlr_layer_shell_v1 layer-gated\n", "no privileged row"),
+            "no privileged row": (
+                verify.GLOBALS_FILE,
+                "zwlr_layer_shell_v1 layer-gated\n",
+                "no privileged row",
+            ),
             "a row with a trailing comment": (
-                verify.GLOBALS_FILE, GLOBALS + "zwlr_output_manager_v1 privileged # the control center\n",
+                verify.GLOBALS_FILE,
+                GLOBALS + "zwlr_output_manager_v1 privileged # the control center\n",
                 "zwlr_output_manager_v1 privileged # the control center",
             ),
-            "a row of no class": (verify.GLOBALS_FILE, GLOBALS + "wl_shm everyone\n", "wl_shm everyone"),
+            "a row of no class": (
+                verify.GLOBALS_FILE,
+                GLOBALS + "wl_shm everyone\n",
+                "wl_shm everyone",
+            ),
             "a client whose connect names no privileged global": (
-                f"{CLIENT}/src/connection.rs", "pub fn connect() {}\n", "binds at connect",
+                f"{CLIENT}/src/connection.rs",
+                "pub fn connect() {}\n",
+                "binds at connect",
             ),
             "a client whose capture moved": (
-                f"{CLIENT}/src/capture.rs", "\n", "binds at the first capture",
+                f"{CLIENT}/src/capture.rs",
+                "\n",
+                "binds at the first capture",
             ),
             "a client whose window actions moved": (
-                f"{CLIENT}/src/actions.rs", "\n", "binds at the first window action",
+                f"{CLIENT}/src/actions.rs",
+                "\n",
+                "binds at the first window action",
             ),
             "a client whose tiling watch moved": (
-                f"{CLIENT}/src/workspace_tiling.rs", "\n", "binds at the first watch of the tiling",
+                f"{CLIENT}/src/workspace_tiling.rs",
+                "\n",
+                "binds at the first watch of the tiling",
             ),
             "a client whose window watch moved": (
-                f"{CLIENT}/src/windows.rs", "\n", "binds at the first watch of the windows",
+                f"{CLIENT}/src/windows.rs",
+                "\n",
+                "binds at the first watch of the windows",
             ),
-            "no target": ("forge/specs/athanor-dock/athanor-dock.spec", "Name: athanor-dock\n", "no target"),
+            "no target": (
+                "forge/specs/athanor-dock/athanor-dock.spec",
+                "Name: athanor-dock\n",
+                "no target",
+            ),
         }
         for case, (path, text, problem) in cases.items():
             with self.subTest(case):
@@ -720,7 +796,10 @@ class AllowList(unittest.TestCase):
         out = self.problems(idle)
         self.assertEqual(len(out), 1, out)
         self.assertIn("starts no cosmic-idle.scope", out[0])
-        self.write(verify.SESSION_COMPONENTS, "systemd-run --user --scope --unit=cosmic-idle.scope cosmic-idle\n")
+        self.write(
+            verify.SESSION_COMPONENTS,
+            "systemd-run --user --scope --unit=cosmic-idle.scope cosmic-idle\n",
+        )
         self.assertEqual(self.problems(idle), [])
 
     def test_an_upstream_scope_the_supervisor_only_mentions_fails(self):
@@ -766,7 +845,12 @@ class AllowList(unittest.TestCase):
         self.assertEqual(self.problems(), [])
 
     def test_another_binary_installed_as_the_compositor_is_checked(self):
-        self.package("athanor-bar", files={"src/main.rs": "fn main() {\n    window.set_layer(Layer::Overlay);\n}\n"})
+        self.package(
+            "athanor-bar",
+            files={
+                "src/main.rs": "fn main() {\n    window.set_layer(Layer::Overlay);\n}\n"
+            },
+        )
         self.write(
             "forge/specs/athanor-bar/athanor-bar.spec",
             "Name:           athanor-bar\n%build\ncargo build --release --locked -p %{name}\n%install\n"
@@ -834,13 +918,17 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-wallpaper",
             dependency,
-            {"src/main.rs": "use athanor_sal::LayerOptions;\nfn f() { LayerOptions::new(Layer::Background); }\n"},
+            {
+                "src/main.rs": "use athanor_sal::LayerOptions;\nfn f() { LayerOptions::new(Layer::Background); }\n"
+            },
         )
         self.assertEqual(self.problems(), [])
         self.package(
             "athanor-wallpaper",
             dependency,
-            {"src/main.rs": "use athanor_sal::LayerOptions;\nfn f() { LayerOptions::new(Layer::Top); }\n"},
+            {
+                "src/main.rs": "use athanor_sal::LayerOptions;\nfn f() { LayerOptions::new(Layer::Top); }\n"
+            },
         )
         out = self.problems()
         self.assertEqual(len(out), 1, out)
@@ -896,9 +984,13 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-dock",
             manifest,
-            {"src/main.rs": "use athanor_mid::Client;\nfn f(c: Client) { c.watch_windows(); }\n"},
+            {
+                "src/main.rs": "use athanor_mid::Client;\nfn f(c: Client) { c.watch_windows(); }\n"
+            },
         )
-        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+        )
         out = self.problems()
         self.assertEqual(len(out), 1, out)
         self.assertIn("athanor_toplevel_manager_v1", out[0])
@@ -1045,7 +1137,9 @@ class AllowList(unittest.TestCase):
             dependency,
             {"src/main.rs": "use athanor_sulphur_client::connect;\nfn main() {}\n"},
         )
-        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
+        self.lines(
+            "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+        )
         self.assertEqual(self.problems(), [])
         self.lines(
             "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
@@ -1095,7 +1189,9 @@ class AllowList(unittest.TestCase):
 
     def test_the_trusted_prompt_mark_is_the_compositors(self):
         """verify.py reads the mark as identity.rs does: a line it accepts is a line honoured."""
-        source = (ROOT / "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/identity.rs")
+        source = (
+            ROOT / "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/identity.rs"
+        )
         mark = re.search(r'pub const MARK: &str = "([^"]+)";', source.read_text())
         self.assertIsNotNone(mark, "identity.rs names no MARK")
         self.assertEqual(mark.group(1), verify.TRUSTED_PROMPT)

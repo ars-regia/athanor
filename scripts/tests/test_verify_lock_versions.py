@@ -104,7 +104,9 @@ class LockVersionProblemsTest(unittest.TestCase):
         found = problems(root, [("smithay", "0.7.0", SMITHAY.format("bbb"))])
         self.assertEqual(len(found), 1)
         self.assertNotIn("--precise", found[0])
-        self.assertIn("cargo update --manifest-path fuzz/Cargo.toml -p smithay", found[0])
+        self.assertIn(
+            "cargo update --manifest-path fuzz/Cargo.toml -p smithay", found[0]
+        )
 
     def test_a_registry_crate_the_root_takes_from_git_names_the_source(self):
         found = problems(

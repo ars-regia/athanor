@@ -20,9 +20,22 @@ GATES = ("iso-acceptance", "signature", "upgrade-acceptance")
 # deployment GoBack() returns to (doc_update_delivery.md UD4, UD18).
 REQUIRED_CHECKS = {
     "iso-acceptance": ("secure-boot",),
-    "upgrade-acceptance": ("secure-boot", "upgrade-stages", "upgraded-secure-boot", "rolled-back-secure-boot"),
+    "upgrade-acceptance": (
+        "secure-boot",
+        "upgrade-stages",
+        "upgraded-secure-boot",
+        "rolled-back-secure-boot",
+    ),
 }
-FIELDS = {"gate", "image", "digest", "run_id", "verdict", "workflow_run_url", "finished_at"}
+FIELDS = {
+    "gate",
+    "image",
+    "digest",
+    "run_id",
+    "verdict",
+    "workflow_run_url",
+    "finished_at",
+}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IMAGE = re.compile(r"^athanor-[a-z0-9-]+$")
 
@@ -44,7 +57,11 @@ def args(argv):
     w.add_argument("--out", required=True, type=pathlib.Path)
     sub.choices["check"].add_argument("--dir", required=True, type=pathlib.Path)
     a = p.parse_args(argv)
-    if not (IMAGE.match(a.image) and DIGEST.match(a.digest) and re.fullmatch(r"[0-9]+", a.run_id)):
+    if not (
+        IMAGE.match(a.image)
+        and DIGEST.match(a.digest)
+        and re.fullmatch(r"[0-9]+", a.run_id)
+    ):
         p.error("--image, --digest or --run-id is malformed")
     return a
 
@@ -54,7 +71,12 @@ def verdict_of(paths, required=()):
     them; an unreadable one is a fail."""
     try:
         verdicts = [json.loads(p.read_text()) for p in paths]
-        held = {name for v in verdicts for name, ok in v.get("checks", {}).items() if ok is True}
+        held = {
+            name
+            for v in verdicts
+            for name, ok in v.get("checks", {}).items()
+            if ok is True
+        }
         ok = all(v.get("pass") is True for v in verdicts) and held.issuperset(required)
     except (OSError, ValueError, AttributeError):
         return "fail"
@@ -64,9 +86,16 @@ def verdict_of(paths, required=()):
 def write(a):
     a.out.mkdir(parents=True, exist_ok=True)
     data = {
-        "gate": a.gate, "image": a.image, "digest": a.digest, "run_id": int(a.run_id),
-        "verdict": a.verdict or verdict_of(a.verdict_json, REQUIRED_CHECKS.get(a.gate, ())), "workflow_run_url": a.run_url,
-        "finished_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "gate": a.gate,
+        "image": a.image,
+        "digest": a.digest,
+        "run_id": int(a.run_id),
+        "verdict": a.verdict
+        or verdict_of(a.verdict_json, REQUIRED_CHECKS.get(a.gate, ())),
+        "workflow_run_url": a.run_url,
+        "finished_at": datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
     }
     (a.out / f"{a.gate}.{a.image}.json").write_text(json.dumps(data, indent=2) + "\n")
     return 0
@@ -78,14 +107,23 @@ def check(a):
         return refuse(f"no {a.gate} evidence for {a.image} ({path})")
     try:
         data = json.loads(path.read_text())
-        finished = datetime.datetime.strptime(data["finished_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+        finished = datetime.datetime.strptime(
+            data["finished_at"], "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=datetime.timezone.utc)
     except (ValueError, KeyError, TypeError):
         return refuse(f"{path} is malformed")
     if set(data) != FIELDS:
         return refuse(f"{path} is malformed: fields {sorted(data)}")
-    for field, want in (("gate", a.gate), ("image", a.image), ("digest", a.digest), ("run_id", int(a.run_id))):
+    for field, want in (
+        ("gate", a.gate),
+        ("image", a.image),
+        ("digest", a.digest),
+        ("run_id", int(a.run_id)),
+    ):
         if data[field] != want:
-            return refuse(f"{path}: {field.replace('_', ' ')} is {data[field]}, not {want}")
+            return refuse(
+                f"{path}: {field.replace('_', ' ')} is {data[field]}, not {want}"
+            )
     if data["verdict"] != "pass":
         return refuse(f"{path}: verdict is {data['verdict']}")
     print(int(finished.timestamp()))

@@ -18,7 +18,9 @@ class ModuleTest(unittest.TestCase):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 bound[node.name] += 1
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
                 for target in targets:
                     for name in ast.walk(target):
                         if isinstance(name, ast.Name):

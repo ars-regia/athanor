@@ -35,14 +35,26 @@ def updateinfo(*updates, package=("openssl", "3.5.1")):
 
 
 class Fake(rc.Sources):
-    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False, was="45", now="45", kernels=("0:7.2.5-300.azoth.fc45",) * 2):
+    def __init__(
+        self,
+        root,
+        old="3.5.1-1.fc45",
+        new="3.5.1-3.fc45",
+        info=None,
+        fail=False,
+        was="45",
+        now="45",
+        kernels=("0:7.2.5-300.azoth.fc45",) * 2,
+    ):
         self.repo_root = root
         self.ids = {f"{REPO}@{OLD}": was, f"{REPO}@{NEW}": now}
         self.pkgs = {
             f"{REPO}@{OLD}": {"openssl": f"0:{old}"},
             f"{REPO}@{NEW}": {"openssl": f"0:{new}"},
         }
-        self.pkgs[f"{REPO}@{OLD}"]["kernel"], self.pkgs[f"{REPO}@{NEW}"]["kernel"] = kernels
+        self.pkgs[f"{REPO}@{OLD}"]["kernel"], self.pkgs[f"{REPO}@{NEW}"]["kernel"] = (
+            kernels
+        )
         self.info, self.fail = info if info is not None else updateinfo(), fail
 
     def packages(self, ref):
@@ -95,7 +107,12 @@ class Derive(unittest.TestCase):
     def test_no_baseline_is_feature(self):
         got = self.derive(None, self.commit())
         self.assertEqual(
-            (got["class"], got["advisories"], got["class_reason"], got["baseline_digest"]),
+            (
+                got["class"],
+                got["advisories"],
+                got["class_reason"],
+                got["baseline_digest"],
+            ),
             ("feature", [], "no-baseline", None),
         )
 
@@ -103,15 +120,25 @@ class Derive(unittest.TestCase):
         self.commit("2026-10-21-x", SECURITY)
         head = self.commit()
         got = self.derive("", head)
-        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("feature", [], "unlabelled-baseline"))
-        got = self.derive("", head, info=updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45")))
-        self.assertEqual((got["class"], got["advisories"]), ("security", ["FEDORA-2026-aaaa"]))
+        self.assertEqual(
+            (got["class"], got["advisories"], got["class_reason"]),
+            ("feature", [], "unlabelled-baseline"),
+        )
+        got = self.derive(
+            "", head, info=updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45"))
+        )
+        self.assertEqual(
+            (got["class"], got["advisories"]), ("security", ["FEDORA-2026-aaaa"])
+        )
 
     def test_security_release_class_toml_in_range_sets_the_class(self):
         base = self.commit()
         head = self.commit("2026-10-21-x", SECURITY)
         got = self.derive(base, head)
-        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("security", ["CVE-2026-0001"], ""))
+        self.assertEqual(
+            (got["class"], got["advisories"], got["class_reason"]),
+            ("security", ["CVE-2026-0001"], ""),
+        )
 
     def test_a_file_outside_the_range_is_not_claimed(self):
         self.commit("2026-10-21-x", SECURITY)
@@ -123,35 +150,54 @@ class Derive(unittest.TestCase):
         scoped = SECURITY + 'repositories = ["athanor-system-nvidia"]\n'
         head = self.commit("2026-10-21-x", scoped)
         self.assertEqual(self.derive(base, head)["class"], "feature")
-        head = self.commit("2026-10-21-y", SECURITY + 'repositories = ["athanor-system"]\n')
+        head = self.commit(
+            "2026-10-21-y", SECURITY + 'repositories = ["athanor-system"]\n'
+        )
         self.assertEqual(self.derive(base, head)["class"], "security")
 
     def test_fedora_advisory_between_latest_and_candidate_is_claimed(self):
         head = self.commit()
-        for rel, ids in (("2.fc45", ["FEDORA-2026-aaaa"]), ("1.fc45", []), ("4.fc45", [])):
+        for rel, ids in (
+            ("2.fc45", ["FEDORA-2026-aaaa"]),
+            ("1.fc45", []),
+            ("4.fc45", []),
+        ):
             with self.subTest(fixed=rel):
-                got = self.derive("", head, info=updateinfo(("FEDORA-2026-aaaa", "security", rel)))
+                got = self.derive(
+                    "", head, info=updateinfo(("FEDORA-2026-aaaa", "security", rel))
+                )
                 self.assertEqual(got["advisories"], ids)
 
     def test_a_change_of_fedora_release_counts_no_fedora_advisory(self):
         info = updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45"))
         got = self.derive("", self.commit(), info=info, was="43", now="45")
-        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("feature", [], "unlabelled-baseline,base-change:43->45"))
+        self.assertEqual(
+            (got["class"], got["advisories"], got["class_reason"]),
+            ("feature", [], "unlabelled-baseline,base-change:43->45"),
+        )
         self.assertIsNone(got["updateinfo_timestamp"])
 
     def test_a_change_of_fedora_release_keeps_the_git_half(self):
         base = self.commit()
         head = self.commit("2026-10-21-x", SECURITY)
         got = self.derive(base, head, was="43", now="45")
-        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("security", ["CVE-2026-0001"], "base-change:43->45"))
+        self.assertEqual(
+            (got["class"], got["advisories"], got["class_reason"]),
+            ("security", ["CVE-2026-0001"], "base-change:43->45"),
+        )
 
     def test_the_same_fedora_release_still_counts_its_advisories(self):
         info = updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45"))
         got = self.derive("", self.commit(), info=info)
-        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("security", ["FEDORA-2026-aaaa"], "unlabelled-baseline"))
+        self.assertEqual(
+            (got["class"], got["advisories"], got["class_reason"]),
+            ("security", ["FEDORA-2026-aaaa"], "unlabelled-baseline"),
+        )
 
     def test_only_security_advisories_count(self):
-        got = self.derive("", self.commit(), info=updateinfo(("FEDORA-2026-bbbb", "bugfix", "2.fc45")))
+        got = self.derive(
+            "", self.commit(), info=updateinfo(("FEDORA-2026-bbbb", "bugfix", "2.fc45"))
+        )
         self.assertEqual((got["class"], got["advisories"]), ("feature", []))
 
     def test_label_commit_absent_fails(self):
@@ -179,31 +225,50 @@ class Derive(unittest.TestCase):
 
     def test_advisories_are_the_sorted_union(self):
         base = self.commit()
-        both = 'class = "security"\nadvisories = ["FEDORA-2026-aaaa", "CVE-2026-0001"]\n'
+        both = (
+            'class = "security"\nadvisories = ["FEDORA-2026-aaaa", "CVE-2026-0001"]\n'
+        )
         head = self.commit("2026-10-21-x", both)
-        got = self.derive(base, head, info=updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45")))
+        got = self.derive(
+            base, head, info=updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45"))
+        )
         self.assertEqual(got["advisories"], ["CVE-2026-0001", "FEDORA-2026-aaaa"])
 
-    def kernel_change(self, base, head, fixed, kind="security", package="kernel", kernels=("7.2.5", "7.2.11")):
+    def kernel_change(
+        self,
+        base,
+        head,
+        fixed,
+        kind="security",
+        package="kernel",
+        kernels=("7.2.5", "7.2.11"),
+    ):
         return self.derive(
             base,
             head,
             kernels=tuple(f"0:{v}-300.azoth.fc45" for v in kernels),
-            info=updateinfo(("FEDORA-2026-kkkk", kind, "300.fc45"), package=(package, fixed)),
+            info=updateinfo(
+                ("FEDORA-2026-kkkk", kind, "300.fc45"), package=(package, fixed)
+            ),
         )
 
     def test_a_kernel_change_that_closes_an_advisory_needs_a_class_file(self):
         head = self.commit()
         # The same version as the candidate, with a release that compares later than Azoth's.
         for fixed in ("7.2.6", "7.2.9", "7.2.11"):
-            with self.subTest(fixed=fixed), self.assertRaisesRegex(rc.ClassError, "FEDORA-2026-kkkk"):
+            with (
+                self.subTest(fixed=fixed),
+                self.assertRaisesRegex(rc.ClassError, "FEDORA-2026-kkkk"),
+            ):
                 self.kernel_change(head, head, fixed)
 
     def test_a_class_file_answers_for_the_kernel_and_only_its_ids_count(self):
         base = self.commit()
         head = self.commit("2026-10-21-kernel", SECURITY)
         got = self.kernel_change(base, head, "7.2.9")
-        self.assertEqual((got["class"], got["advisories"]), ("security", ["CVE-2026-0001"]))
+        self.assertEqual(
+            (got["class"], got["advisories"]), ("security", ["CVE-2026-0001"])
+        )
 
     def test_a_class_file_of_another_repository_does_not_answer_for_the_kernel(self):
         base = self.commit()
@@ -216,14 +281,18 @@ class Derive(unittest.TestCase):
         # 7.2.5 is the version of the baseline: only the Fedora release looks newer than Azoth's.
         for fixed in ("7.2.4", "7.2.5", "7.2.12"):
             with self.subTest(fixed=fixed):
-                self.assertEqual(self.kernel_change(head, head, fixed)["class"], "feature")
+                self.assertEqual(
+                    self.kernel_change(head, head, fixed)["class"], "feature"
+                )
 
     def test_a_kernel_advisory_that_is_no_security_fix_asks_for_nothing(self):
         got = self.kernel_change(*[self.commit()] * 2, "7.2.9", kind="bugfix")
         self.assertEqual(got["class"], "feature")
 
     def test_a_kernel_downgrade_closes_nothing(self):
-        got = self.kernel_change(*[self.commit()] * 2, "7.2.9", kernels=("7.2.11", "7.2.5"))
+        got = self.kernel_change(
+            *[self.commit()] * 2, "7.2.9", kernels=("7.2.11", "7.2.5")
+        )
         self.assertEqual(got["class"], "feature")
 
     def test_a_kernel_subpackage_neither_asks_nor_claims(self):
@@ -232,23 +301,50 @@ class Derive(unittest.TestCase):
             head,
             head,
             kernels=("0:7.2.5-300.azoth.fc45", "0:7.2.11-300.azoth.fc45"),
-            info=updateinfo(("FEDORA-2026-kkkk", "security", "300.fc45"), package=("kernel-core", "7.2.9")),
+            info=updateinfo(
+                ("FEDORA-2026-kkkk", "security", "300.fc45"),
+                package=("kernel-core", "7.2.9"),
+            ),
         )
         self.assertEqual((got["class"], got["advisories"]), ("feature", []))
         old, new = {"kernel-core": "0:1-1"}, {"kernel-core": "0:3-1"}
-        self.assertEqual(rc.fedora_half(old, new, [rc.Advisory("A", "security", {"kernel-core": "0:2-1"})]), [])
-        self.assertEqual(rc.fedora_half({"kernelshark": "0:1-1"}, {"kernelshark": "0:3-1"}, [rc.Advisory("A", "security", {"kernelshark": "0:2-1"})]), ["A"])
+        self.assertEqual(
+            rc.fedora_half(
+                old, new, [rc.Advisory("A", "security", {"kernel-core": "0:2-1"})]
+            ),
+            [],
+        )
+        self.assertEqual(
+            rc.fedora_half(
+                {"kernelshark": "0:1-1"},
+                {"kernelshark": "0:3-1"},
+                [rc.Advisory("A", "security", {"kernelshark": "0:2-1"})],
+            ),
+            ["A"],
+        )
 
     def test_a_kernel_advisory_never_sets_the_class(self):
-        self.assertEqual(rc.fedora_half({"kernel": "0:1-1"}, {"kernel": "0:3-1"}, [rc.Advisory("A", "security", {"kernel": "0:2-1"})]), [])
+        self.assertEqual(
+            rc.fedora_half(
+                {"kernel": "0:1-1"},
+                {"kernel": "0:3-1"},
+                [rc.Advisory("A", "security", {"kernel": "0:2-1"})],
+            ),
+            [],
+        )
 
     def test_an_unlabelled_baseline_has_no_file_to_ask_for(self):
         got = self.kernel_change("", self.commit(), "7.2.9")
-        self.assertEqual((got["class"], got["class_reason"]), ("feature", "unlabelled-baseline"))
+        self.assertEqual(
+            (got["class"], got["class_reason"]), ("feature", "unlabelled-baseline")
+        )
 
     def test_malformed_release_class_toml_fails(self):
         base = self.commit()
-        for text in ('class = "urgent"\nadvisories = ["CVE-2026-0001"]\n', 'class = "security"\nadvisories = "CVE-2026-0001"\n'):
+        for text in (
+            'class = "urgent"\nadvisories = ["CVE-2026-0001"]\n',
+            'class = "security"\nadvisories = "CVE-2026-0001"\n',
+        ):
             with self.subTest(text=text):
                 head = self.commit("2026-10-21-bad", text)
                 with self.assertRaisesRegex(rc.ClassError, REPO):
@@ -259,7 +355,11 @@ class GitHalf(Derive):
     def test_a_file_renamed_in_the_range_is_claimed(self):
         self.commit("2026-10-20-old", SECURITY)
         base = self.commit()
-        self.git("mv", "release/class/2026-10-20-old.toml", "release/class/2026-10-21-new.toml")
+        self.git(
+            "mv",
+            "release/class/2026-10-20-old.toml",
+            "release/class/2026-10-21-new.toml",
+        )
         self.git("commit", "-q", "-m", "rename")
         got = self.derive(base, self.git("rev-parse", "HEAD"))
         self.assertEqual(got["advisories"], ["CVE-2026-0001"])
@@ -386,7 +486,10 @@ class Podman(unittest.TestCase):
     def test_the_timestamp_is_the_one_of_the_repomd_entry(self):
         s = self.sources()
         s._fetch = lambda url: b"<updates/>"
-        self.assertEqual(s._updateinfo("https://m/", self.repomd("1760000001.5")), (1760000001, b"<updates/>"))
+        self.assertEqual(
+            s._updateinfo("https://m/", self.repomd("1760000001.5")),
+            (1760000001, b"<updates/>"),
+        )
         self.assertIsNone(s._updateinfo("https://m/", self.repomd(None))[0])
         with self.assertRaisesRegex(rc.ClassError, "not a number"):
             s._updateinfo("https://m/", self.repomd("soon"))
@@ -405,7 +508,9 @@ class Malformed(Derive):
 
     def test_an_advisory_id_with_a_trailing_newline_fails(self):
         with self.assertRaisesRegex(rc.ClassError, REPO):
-            self.derive("", self.commit(), info=updateinfo(("FEDORA-1\n", "security", "2.fc45")))
+            self.derive(
+                "", self.commit(), info=updateinfo(("FEDORA-1\n", "security", "2.fc45"))
+            )
 
     def test_a_bad_epoch_is_a_class_error(self):
         with self.assertRaises(rc.ClassError):
@@ -418,20 +523,36 @@ class Malformed(Derive):
 
     def test_an_advisory_id_outside_the_schema_pattern_fails(self):
         with self.assertRaisesRegex(rc.ClassError, REPO):
-            self.derive("", self.commit(), info=updateinfo(("FEDORA 2026", "security", "2.fc45")))
-
+            self.derive(
+                "",
+                self.commit(),
+                info=updateinfo(("FEDORA 2026", "security", "2.fc45")),
+            )
 
 
 class ClassReasonSchema(unittest.TestCase):
-    PATTERN = schema.load("release-candidate")["properties"]["classes"]["items"]["properties"]["class_reason"]
+    PATTERN = schema.load("release-candidate")["properties"]["classes"]["items"][
+        "properties"
+    ]["class_reason"]
 
     def test_every_reason_derive_writes_is_valid(self):
-        for value in ("", "no-baseline", "unlabelled-baseline", "base-change:43->45", "unlabelled-baseline,base-change:43->45"):
+        for value in (
+            "",
+            "no-baseline",
+            "unlabelled-baseline",
+            "base-change:43->45",
+            "unlabelled-baseline,base-change:43->45",
+        ):
             with self.subTest(value=value):
                 schema.validate(value, self.PATTERN)
 
     def test_a_malformed_reason_is_rejected(self):
-        for value in ("unlabelled-baseline,", "no-baseline,base-change:43->45", "base-change:43->", "base-change:f43->45"):
+        for value in (
+            "unlabelled-baseline,",
+            "no-baseline,base-change:43->45",
+            "base-change:43->",
+            "base-change:f43->45",
+        ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 schema.validate(value, self.PATTERN)
 

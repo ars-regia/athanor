@@ -41,7 +41,9 @@ class MirrorTest(unittest.TestCase):
         for name in ("kernel-build.yml", "call-kernel.yml"):
             with self.subTest(workflow=name):
                 text = (WORKFLOWS / name).read_text()
-                self.assertNotIn('--certificate-identity-regexp "^${GITHUB_SERVER_URL}', text)
+                self.assertNotIn(
+                    '--certificate-identity-regexp "^${GITHUB_SERVER_URL}', text
+                )
 
 
 def verdict(name, job, results, **env):
@@ -52,7 +54,12 @@ def verdict(name, job, results, **env):
         values = {"REUSE": "false", "PROMOTED": "false", "UNCHANGED": "", **env}
         return subprocess.run(
             ["bash", "-c", step],
-            env={**os.environ, **values, "RESULTS": json.dumps(needs), "GITHUB_STEP_SUMMARY": summary.name},
+            env={
+                **os.environ,
+                **values,
+                "RESULTS": json.dumps(needs),
+                "GITHUB_STEP_SUMMARY": summary.name,
+            },
             capture_output=True,
         ).returncode
 
@@ -61,7 +68,9 @@ class UnchangedInputsTest(unittest.TestCase):
     """A pull request whose kernel inputs equal its base's skips build, boot and kmod
     (scripts/ci/kernel_unchanged.py); pushes, dispatches and the reuse path are unchanged."""
 
-    def test_only_a_pull_request_whose_kernel_is_not_published_compares_with_its_base(self):
+    def test_only_a_pull_request_whose_kernel_is_not_published_compares_with_its_base(
+        self,
+    ):
         for name in ("kernel-build.yml", "call-kernel.yml"):
             with self.subTest(workflow=name):
                 inputs = jobs(name)["inputs"]
@@ -70,14 +79,22 @@ class UnchangedInputsTest(unittest.TestCase):
                 self.assertLess(ids.index("key"), ids.index("base"))
                 self.assertIn("github.event_name == 'pull_request'", step["if"])
                 self.assertIn("steps.key.outputs.reuse != 'true'", step["if"])
-                self.assertEqual(step["env"]["BASE"], "${{ github.event.pull_request.base.sha }}")
+                self.assertEqual(
+                    step["env"]["BASE"], "${{ github.event.pull_request.base.sha }}"
+                )
                 self.assertIn("python3 -B scripts/ci/kernel_unchanged.py", step["run"])
-                self.assertEqual(inputs["outputs"]["unchanged"], "${{ steps.base.outputs.unchanged }}")
+                self.assertEqual(
+                    inputs["outputs"]["unchanged"],
+                    "${{ steps.base.outputs.unchanged }}",
+                )
 
     def test_unchanged_inputs_skip_the_build_and_a_fork_never_reaches_the_runner(self):
         condition = jobs("call-kernel.yml")["build"]["if"]
         self.assertIn("needs.inputs.outputs.unchanged != 'true'", condition)
-        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", condition)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            condition,
+        )
 
     @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
     def test_the_verdicts_pass_skipped_jobs_only_with_unchanged_inputs(self):
@@ -88,11 +105,28 @@ class UnchangedInputsTest(unittest.TestCase):
                 self.assertEqual(verdict(name, job, skipped, UNCHANGED="true"), 0)
                 # Negative controls: nothing else lets skipped jobs pass.
                 self.assertNotEqual(verdict(name, job, skipped), 0)
-                self.assertNotEqual(verdict(name, job, {**skipped, "boot": "failure"}, UNCHANGED="true"), 0)
-                self.assertNotEqual(verdict(name, job, {**skipped, "inputs": "failure"}, UNCHANGED="true"), 0)
-                built = {**green, "build": "success", "boot": "success", "kmod": "success"}
+                self.assertNotEqual(
+                    verdict(
+                        name, job, {**skipped, "boot": "failure"}, UNCHANGED="true"
+                    ),
+                    0,
+                )
+                self.assertNotEqual(
+                    verdict(
+                        name, job, {**skipped, "inputs": "failure"}, UNCHANGED="true"
+                    ),
+                    0,
+                )
+                built = {
+                    **green,
+                    "build": "success",
+                    "boot": "success",
+                    "kmod": "success",
+                }
                 self.assertEqual(verdict(name, job, built), 0)
-                self.assertEqual(verdict(name, job, {**built, "build": "skipped"}, REUSE="true"), 0)
+                self.assertEqual(
+                    verdict(name, job, {**built, "build": "skipped"}, REUSE="true"), 0
+                )
                 self.assertNotEqual(verdict(name, job, {**built, "kmod": "failure"}), 0)
 
 

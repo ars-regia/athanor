@@ -71,8 +71,15 @@ def kill_all() -> None:
         kill_group(child)
 
 
-def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, int, str, float]:
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(directory), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
+def run_class(
+    name: str, directory: pathlib.Path, timeout: float
+) -> tuple[str, int, str, float]:
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            [str(directory), os.environ.get("PYTHONPATH", "")]
+        ).rstrip(os.pathsep),
+    }
     started = time.monotonic()
     # The output goes to a file, not a pipe: a helper that left the group cannot hold it open and
     # stall the report. Its own session lets a timeout or an interrupt kill the helpers the tests
@@ -80,7 +87,10 @@ def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, 
     with tempfile.TemporaryFile() as out:
         child = subprocess.Popen(
             [sys.executable, "-B", "-m", "unittest", "-v", name],
-            stdout=out, stderr=subprocess.STDOUT, env=env, start_new_session=True,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            env=env,
+            start_new_session=True,
         )
         LIVE.add(child)
         timed_out = False
@@ -99,7 +109,12 @@ def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, 
         out.seek(0)
         text = out.read().decode(errors="replace")
     if timed_out:
-        return name, 124, f"{text}\nTIMEOUT: {name} was killed after {timeout:g}s\n", time.monotonic() - started
+        return (
+            name,
+            124,
+            f"{text}\nTIMEOUT: {name} was killed after {timeout:g}s\n",
+            time.monotonic() - started,
+        )
     return name, child.returncode, text, time.monotonic() - started
 
 
@@ -135,14 +150,19 @@ def main(argv: list[str]) -> int:
     for name in broken:
         print(f"cannot load {name}", file=sys.stderr)
     if not names or broken:
-        print(f"{directory}: {'no test class found' if not names else 'a module failed to load'}", file=sys.stderr)
+        print(
+            f"{directory}: {'no test class found' if not names else 'a module failed to load'}",
+            file=sys.stderr,
+        )
         return 1
     failed = []
     started = time.monotonic()
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=jobs)
     try:
         # Longest first is unknown here; the pool keeps `jobs` classes running as they end.
-        for name, code, output, seconds in pool.map(lambda n: run_class(n, directory, timeout), names):
+        for name, code, output, seconds in pool.map(
+            lambda n: run_class(n, directory, timeout), names
+        ):
             print(f"=== {name} ({seconds:.1f}s, exit {code})\n{output}", flush=True)
             if code != 0:
                 failed.append(name)
@@ -153,7 +173,9 @@ def main(argv: list[str]) -> int:
         raise
     finally:
         pool.shutdown(wait=True)
-    print(f"{len(names)} classes, {jobs} at a time, {time.monotonic() - started:.1f}s; failed: {', '.join(failed) or 'none'}")
+    print(
+        f"{len(names)} classes, {jobs} at a time, {time.monotonic() - started:.1f}s; failed: {', '.join(failed) or 'none'}"
+    )
     return 1 if failed else 0
 
 

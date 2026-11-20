@@ -19,9 +19,11 @@ import bench
 import machine
 
 THEME = "~/.config/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
-NOTIFY = ("gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications "
-          "--method org.freedesktop.Notifications.Notify \"'shell-bench'\" 0 \"''\" \"'soak {n}'\" \"''\" "
-          "'[]' '{{}}' 5000 > /dev/null")
+NOTIFY = (
+    "gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications "
+    "--method org.freedesktop.Notifications.Notify \"'shell-bench'\" 0 \"''\" \"'soak {n}'\" \"''\" "
+    "'[]' '{{}}' 5000 > /dev/null"
+)
 WARMUP_S = 1800  # memory is compared from the first sample after half an hour
 
 
@@ -35,15 +37,21 @@ def allowed(path):
 
 
 def pss(m):
-    return {unit: analysis.pss_kb(m.run(f"cat /proc/{m.main_pid(unit)}/smaps_rollup").decode())
-            for unit in machine.UNITS}
+    return {
+        unit: analysis.pss_kb(
+            m.run(f"cat /proc/{m.main_pid(unit)}/smaps_rollup").decode()
+        )
+        for unit in machine.UNITS
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host", required=True)
     parser.add_argument("--hours", type=float, default=24)
-    parser.add_argument("--suspend-every", type=float, default=3600, help="seconds between suspends")
+    parser.add_argument(
+        "--suspend-every", type=float, default=3600, help="seconds between suspends"
+    )
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
     m = machine.Machine(args.host)
@@ -56,16 +64,30 @@ def main():
     with bench.instrumented(m) as since:
         try:
             start = last_suspend = time.monotonic()
-            restarts = {u: m.systemctl("show", "-p", "NRestarts", "--value", u).strip() for u in machine.UNITS}
+            restarts = {
+                u: m.systemctl("show", "-p", "NRestarts", "--value", u).strip()
+                for u in machine.UNITS
+            }
             targets = [t for t in bench.locate(m, since) if t.popup]
             ops = []
             for t in targets:
                 dock = t.unit == "athanor-dock"
                 side = " right" if dock else ""
                 # Escape closes neither (spike Q2): the bar's button again, the desktop for the dock.
-                close = [f"move {bench.DESKTOP[0]} {bench.DESKTOP[1]}", "click"] if dock else ["click"]
-                ops += [f"move {t.x} {t.y}", "wait 200", "press" + side, "release" + side, "wait 600",
-                        *close, "wait 300"]
+                close = (
+                    [f"move {bench.DESKTOP[0]} {bench.DESKTOP[1]}", "click"]
+                    if dock
+                    else ["click"]
+                )
+                ops += [
+                    f"move {t.x} {t.y}",
+                    "wait 200",
+                    "press" + side,
+                    "release" + side,
+                    "wait 600",
+                    *close,
+                    "wait 300",
+                ]
             while time.monotonic() - start < args.hours * 3600:
                 cycle += 1
                 bench.inject(m, targets[0].output_w, targets[0].output_h, ops)
@@ -83,21 +105,45 @@ def main():
                     last_suspend = time.monotonic()
         finally:
             m.run(f"echo {theme} > {THEME}" if theme else f"rm -f {THEME}")
-        after = {u: m.systemctl("show", "-p", "NRestarts", "--value", u).strip() for u in machine.UNITS}
+        after = {
+            u: m.systemctl("show", "-p", "NRestarts", "--value", u).strip()
+            for u in machine.UNITS
+        }
         errors = [
             (e.get("_SYSTEMD_USER_UNIT", ""), e.get("MESSAGE", ""))
             for e in m.journal(since)
             if int(e.get("PRIORITY", 7)) <= 3
-            and not any(e.get("_SYSTEMD_USER_UNIT", "").startswith(u) and r.search(str(e.get("MESSAGE", ""))) for u, r in rules)
+            and not any(
+                e.get("_SYSTEMD_USER_UNIT", "").startswith(u)
+                and r.search(str(e.get("MESSAGE", "")))
+                for u, r in rules
+            )
         ]
-    growth = {u: analysis.verdict(analysis.growth(samples[0][u], samples[-1][u]) if samples else None,
-                                  analysis.THRESHOLDS["growth"]) for u in machine.UNITS}
-    result = {"hours": args.hours, "cycles": cycle, "restarts_unchanged": restarts == after,
-              "err_lines": errors[:50], "no_err_lines": not errors, "growth": growth}
+    growth = {
+        u: analysis.verdict(
+            analysis.growth(samples[0][u], samples[-1][u]) if samples else None,
+            analysis.THRESHOLDS["growth"],
+        )
+        for u in machine.UNITS
+    }
+    result = {
+        "hours": args.hours,
+        "cycles": cycle,
+        "restarts_unchanged": restarts == after,
+        "err_lines": errors[:50],
+        "no_err_lines": not errors,
+        "growth": growth,
+    }
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "soak.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps({k: v for k, v in result.items() if k != "err_lines"}))
-    return 0 if result["restarts_unchanged"] and not errors and all(g["pass"] for g in growth.values()) else 1
+    return (
+        0
+        if result["restarts_unchanged"]
+        and not errors
+        and all(g["pass"] for g in growth.values())
+        else 1
+    )
 
 
 if __name__ == "__main__":

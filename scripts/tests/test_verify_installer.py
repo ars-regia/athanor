@@ -126,19 +126,30 @@ class Installer(unittest.TestCase):
             ],
         )
 
-
     def test_a_certificate_that_differs_from_the_pin_fails(self):
-        (self.root / "forge/specs/azoth/keys/secureboot/athanor-secureboot.der").write_bytes(b"another certificate")
+        (
+            self.root / "forge/specs/azoth/keys/secureboot/athanor-secureboot.der"
+        ).write_bytes(b"another certificate")
         problems = verify.installer_problems(self.root)
         self.assertEqual(len(problems), 1, problems)
-        self.assertTrue(problems[0].startswith("forge/specs/azoth/keys/secureboot/athanor-secureboot.der: SHA-256 "), problems)
-        self.assertIn("a key rotation updates the pin in the same pull request", problems[0])
+        self.assertTrue(
+            problems[0].startswith(
+                "forge/specs/azoth/keys/secureboot/athanor-secureboot.der: SHA-256 "
+            ),
+            problems,
+        )
+        self.assertIn(
+            "a key rotation updates the pin in the same pull request", problems[0]
+        )
 
     def test_a_pin_on_another_file_fails(self):
         self.edit(verify.SECUREBOOT_PIN, "  forge/", "  system/")
         problems = verify.installer_problems(self.root)
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("but system/Containerfile ships forge/specs/azoth/keys/secureboot/athanor-secureboot.der", problems[0])
+        self.assertIn(
+            "but system/Containerfile ships forge/specs/azoth/keys/secureboot/athanor-secureboot.der",
+            problems[0],
+        )
 
 
 if __name__ == "__main__":

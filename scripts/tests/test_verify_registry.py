@@ -60,7 +60,9 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(len(found), 2, found)
 
     def test_test_fixtures_are_outside(self):
-        found = self.problems({"scripts/tests/test_x.py": 'FIXTURE = "ghcr.io/someone/athanor-system"\n'})
+        found = self.problems(
+            {"scripts/tests/test_x.py": 'FIXTURE = "ghcr.io/someone/athanor-system"\n'}
+        )
         self.assertEqual(found, [])
 
     def test_unit_test_placeholders_are_not_owners(self):

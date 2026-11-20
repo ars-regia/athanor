@@ -78,7 +78,10 @@ def showing(accessible, role, label):
     try:
         visit(accessible)
     except GLib.Error as err:
-        print(f"     the walk for {role} {label!r} read a vanished node: {err.message}", file=sys.stderr)
+        print(
+            f"     the walk for {role} {label!r} read a vanished node: {err.message}",
+            file=sys.stderr,
+        )
         return []
     return found
 

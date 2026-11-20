@@ -30,7 +30,7 @@ class BuilderTest(unittest.TestCase):
         self.assertEqual(
             select["outputs"]["builder_image"], "${{ steps.builder.outputs.image }}"
         )
-        self.assertIn('image=%s', lookup["run"])
+        self.assertIn("image=%s", lookup["run"])
         build = self.jobs["build"]
         self.assertEqual(
             build["env"]["BUILDER_IMAGE"], "${{ needs.select.outputs.builder_image }}"
@@ -39,7 +39,7 @@ class BuilderTest(unittest.TestCase):
             s["run"] for s in build["steps"] if "run_spec_build.sh" in s.get("run", "")
         )
         # The verified digest, never the tag again: the tag can move after the lookup.
-        self.assertIn('builder_image.sh resolve', run)
+        self.assertIn("builder_image.sh resolve", run)
         self.assertIn('"$BUILDER_IMAGE"', run)
         self.assertNotIn("athanor-builder:", run)
 
@@ -49,8 +49,12 @@ class BuilderTest(unittest.TestCase):
         self.assertIn("needs.select.outputs.specs != '[]'", condition)
 
     def test_the_registry_lookup_is_retried(self):
-        lookup = next(s for s in self.jobs["select"]["steps"] if s.get("id") == "builder")
-        self.assertIn("scripts/retry.sh bash scripts/check_idempotency.sh", lookup["run"])
+        lookup = next(
+            s for s in self.jobs["select"]["steps"] if s.get("id") == "builder"
+        )
+        self.assertIn(
+            "scripts/retry.sh bash scripts/check_idempotency.sh", lookup["run"]
+        )
 
 
 if __name__ == "__main__":

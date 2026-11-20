@@ -12,7 +12,13 @@ spec = importlib.util.spec_from_file_location("changes", SCRIPT)
 changes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(changes)
 
-NONE = {"kernel": False, "specs": False, "shell": False, "rust_audit": False, "docs_only": False}
+NONE = {
+    "kernel": False,
+    "specs": False,
+    "shell": False,
+    "rust_audit": False,
+    "docs_only": False,
+}
 ALL = {area: True for area in NONE}
 
 
@@ -52,7 +58,11 @@ class ClassifyTest(unittest.TestCase):
                     {**NONE, "specs": True},
                 )
         # The builder and the retry wrapper serve the Rust audit as well.
-        for path in ("forge/builder/Containerfile", "flake.lock", "forge/scripts/retry.sh"):
+        for path in (
+            "forge/builder/Containerfile",
+            "flake.lock",
+            "forge/scripts/retry.sh",
+        ):
             with self.subTest(path=path):
                 self.assertEqual(
                     changes.classify([path]),
@@ -86,7 +96,9 @@ class ClassifyTest(unittest.TestCase):
 
     def test_the_own_compositor_selects_the_visual_tests_and_its_package(self):
         self.assertEqual(
-            changes.classify(["forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/main.rs"]),
+            changes.classify(
+                ["forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/main.rs"]
+            ),
             {**NONE, "specs": True, "shell": True, "rust_audit": True},
         )
 
@@ -99,7 +111,10 @@ class ClassifyTest(unittest.TestCase):
 
     def test_a_crate_the_rig_does_not_draw_selects_the_audit_only(self):
         # Its unit tests run in `just check` on every change; no build area is needed for them.
-        for path in ("system/athanor-bus-api/src/lib.rs", "system/athanor-portal/src/lib.rs"):
+        for path in (
+            "system/athanor-bus-api/src/lib.rs",
+            "system/athanor-portal/src/lib.rs",
+        ):
             with self.subTest(path=path):
                 self.assertEqual(changes.classify([path]), {**NONE, "rust_audit": True})
 
@@ -120,13 +135,23 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(changes.classify([path])["rust_audit"])
         # A name anywhere matches the whole name, an extension the end of the name only.
-        for path in ("docs/MyCargo.toml", "system/x/Cargo.toml.orig", "scripts/notes.rst", "x/myclippy.toml"):
+        for path in (
+            "docs/MyCargo.toml",
+            "system/x/Cargo.toml.orig",
+            "scripts/notes.rst",
+            "x/myclippy.toml",
+        ):
             with self.subTest(path=path):
                 self.assertFalse(changes.classify([path])["rust_audit"])
 
     def test_a_change_selects_every_area_it_feeds(self):
         self.assertEqual(
-            changes.classify(["system/kernel-artifacts.sh", "forge/specs/athanor-bar/athanor-bar.spec"]),
+            changes.classify(
+                [
+                    "system/kernel-artifacts.sh",
+                    "forge/specs/athanor-bar/athanor-bar.spec",
+                ]
+            ),
             {**NONE, "kernel": True, "specs": True, "shell": True},
         )
 
@@ -166,7 +191,9 @@ class OnlyAddsMembersTest(unittest.TestCase):
     def test_a_new_member_only(self):
         added = MANIFEST.replace('["system/a"]', '["system/a", "system/b"]')
         self.assertTrue(changes.only_adds_members("Cargo.toml", MANIFEST, added))
-        self.assertTrue(changes.only_adds_members("Cargo.lock", LOCK, LOCK + NEW_MEMBER))
+        self.assertTrue(
+            changes.only_adds_members("Cargo.lock", LOCK, LOCK + NEW_MEMBER)
+        )
 
     def test_anything_else_in_the_manifest(self):
         for new in (
@@ -183,7 +210,9 @@ class OnlyAddsMembersTest(unittest.TestCase):
                 self.assertFalse(changes.only_adds_members("Cargo.toml", MANIFEST, new))
 
     def test_anything_else_in_the_lock(self):
-        external = '\n[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "git+https://x"\n'
+        external = (
+            '\n[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "git+https://x"\n'
+        )
         for new in (
             LOCK + external,
             LOCK.replace('"0.2.0"', '"0.2.1"'),
@@ -197,16 +226,26 @@ class OnlyAddsMembersTest(unittest.TestCase):
     def test_a_changed_type_is_a_change(self):
         # Python's == takes true for 1 and 1 for 1.0; cargo does not.
         old = MANIFEST + "[profile.release]\ndebug = true\n"
-        self.assertFalse(changes.only_adds_members("Cargo.toml", old, old.replace("true", "1")))
+        self.assertFalse(
+            changes.only_adds_members("Cargo.toml", old, old.replace("true", "1"))
+        )
         lock = LOCK + '\n[[package]]\nname = "c"\nversion = "0.1.0"\nn = 1\n'
-        self.assertFalse(changes.only_adds_members("Cargo.lock", lock, lock.replace("n = 1", "n = 1.0")))
+        self.assertFalse(
+            changes.only_adds_members(
+                "Cargo.lock", lock, lock.replace("n = 1", "n = 1.0")
+            )
+        )
 
     def test_a_members_only_file_selects_the_audit_but_not_the_shell(self):
         self.assertEqual(
-            changes.classify(["Cargo.toml", "Cargo.lock"], ["Cargo.toml", "Cargo.lock"]),
+            changes.classify(
+                ["Cargo.toml", "Cargo.lock"], ["Cargo.toml", "Cargo.lock"]
+            ),
             {**NONE, "rust_audit": True},
         )
-        self.assertTrue(changes.classify(["Cargo.toml", "Cargo.lock"], ["Cargo.toml"])["shell"])
+        self.assertTrue(
+            changes.classify(["Cargo.toml", "Cargo.lock"], ["Cargo.toml"])["shell"]
+        )
 
 
 class MainTest(unittest.TestCase):
@@ -284,7 +323,9 @@ class MainTest(unittest.TestCase):
         self.assertTrue(written["rust_audit"])
         # The same member with a new external package selects the shell.
         (self.root / "Cargo.lock").write_text(
-            LOCK + NEW_MEMBER + '\n[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "registry+y"\n'
+            LOCK
+            + NEW_MEMBER
+            + '\n[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "registry+y"\n'
         )
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "external")

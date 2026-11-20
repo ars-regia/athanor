@@ -13,7 +13,9 @@ verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
 KARGS = "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml"
-NVIDIA_KARGS = "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml"
+NVIDIA_KARGS = (
+    "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml"
+)
 SITES = ["forge/specs/azoth/cmdline", KARGS, NVIDIA_KARGS]
 
 
@@ -47,30 +49,62 @@ class Cmdline(unittest.TestCase):
 
     def test_a_parameter_the_decisions_reject_is_named_where_it_is_found(self):
         cases = [
-            ("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 zswap.enabled=1", "zswap.enabled=1", "D15"),
-            (KARGS, '"page_alloc.shuffle=1",', '"page_alloc.shuffle=1",\n    "oops=panic",', "oops=panic", "D19"),
-            (NVIDIA_KARGS, '"nvidia-drm.modeset=1",', '"nvidia-drm.modeset=1", "iommu=pt",', "iommu=pt", "D16"),
+            (
+                "forge/specs/azoth/cmdline",
+                "page_alloc.shuffle=1",
+                "page_alloc.shuffle=1 zswap.enabled=1",
+                "zswap.enabled=1",
+                "D15",
+            ),
+            (
+                KARGS,
+                '"page_alloc.shuffle=1",',
+                '"page_alloc.shuffle=1",\n    "oops=panic",',
+                "oops=panic",
+                "D19",
+            ),
+            (
+                NVIDIA_KARGS,
+                '"nvidia-drm.modeset=1",',
+                '"nvidia-drm.modeset=1", "iommu=pt",',
+                "iommu=pt",
+                "D16",
+            ),
         ]
         for site, old, new, parameter, why in cases:
             with self.subTest(site=site):
                 self.edit(site, old, new)
                 found = self.problems()
-                self.assertTrue(any(site in p and parameter in p and why in p for p in found), found)
+                self.assertTrue(
+                    any(site in p and parameter in p and why in p for p in found), found
+                )
                 self.edit(site, new, old)
 
     def test_every_zswap_parameter_is_rejected(self):
-        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 zswap.compressor=zstd")
+        self.edit(
+            "forge/specs/azoth/cmdline",
+            "page_alloc.shuffle=1",
+            "page_alloc.shuffle=1 zswap.compressor=zstd",
+        )
         self.assertTrue(any("zswap.compressor=zstd" in p for p in self.problems()))
 
     def test_a_parameter_that_only_contains_a_rejected_one_passes(self):
-        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 xiommu=pt not_iommu=pt")
+        self.edit(
+            "forge/specs/azoth/cmdline",
+            "page_alloc.shuffle=1",
+            "page_alloc.shuffle=1 xiommu=pt not_iommu=pt",
+        )
         self.assertEqual(self.problems(), [])
 
     def test_a_site_whose_line_cannot_be_read_is_reported(self):
         self.edit(NVIDIA_KARGS, "kargs =", "arguments =")
-        self.assertTrue(any("01-nvidia.toml" in p and "cannot read" in p for p in self.problems()))
+        self.assertTrue(
+            any("01-nvidia.toml" in p and "cannot read" in p for p in self.problems())
+        )
         (self.root / "forge/specs/azoth/cmdline").unlink()
-        self.assertTrue(any("azoth/cmdline" in p and "cannot read" in p for p in self.problems()))
+        self.assertTrue(
+            any("azoth/cmdline" in p and "cannot read" in p for p in self.problems())
+        )
 
 
 if __name__ == "__main__":

@@ -105,7 +105,10 @@ class AdvisoryLocks(unittest.TestCase):
 
     def test_a_cargo_deny_loop_that_drifts_is_named(self):
         self.write(verify.AUDITED_LOCKFILES, "# none\n")
-        self.write("scripts/ci/security-audit.sh", "for manifest in Cargo.toml fuzz/Cargo.toml; do\n")
+        self.write(
+            "scripts/ci/security-audit.sh",
+            "for manifest in Cargo.toml fuzz/Cargo.toml; do\n",
+        )
         problems = verify.advisory_lock_problems(self.root)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("does not match DENY_LOCKFILES", problems[0])

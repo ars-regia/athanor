@@ -190,7 +190,9 @@ def main():
         sys.exit("working tree non pulito: commit o stash prima della rinomina")
     before = verify_report(root)
     lint_before = (
-        None if args.skip_tools or args.dry_run else actionlint_findings(root, args.actionlint)
+        None
+        if args.skip_tools or args.dry_run
+        else actionlint_findings(root, args.actionlint)
     )
 
     paths = tracked(root)

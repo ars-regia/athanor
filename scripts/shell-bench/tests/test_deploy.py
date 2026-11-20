@@ -17,9 +17,17 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(unit.is_file(), unit)
 
     def test_shelld_installs_its_dbus_activation_files(self):
-        destinations = {str(dst) for _, dst in deploy.plan("athanor-shelld", pathlib.Path("/b"))}
-        self.assertIn("/usr/share/dbus-1/services/org.freedesktop.Notifications.service", destinations)
-        self.assertIn("/usr/share/dbus-1/services/org.kde.StatusNotifierWatcher.service", destinations)
+        destinations = {
+            str(dst) for _, dst in deploy.plan("athanor-shelld", pathlib.Path("/b"))
+        }
+        self.assertIn(
+            "/usr/share/dbus-1/services/org.freedesktop.Notifications.service",
+            destinations,
+        )
+        self.assertIn(
+            "/usr/share/dbus-1/services/org.kde.StatusNotifierWatcher.service",
+            destinations,
+        )
 
     def test_every_data_source_exists(self):
         for crate in deploy.CRATES:
@@ -35,7 +43,9 @@ class PlanTest(unittest.TestCase):
 class MeasurementGuardTest(unittest.TestCase):
     def test_refuses_while_a_measurement_runs(self):
         with self.assertRaises(SystemExit):
-            deploy.refuse_while_measuring(lambda: ["1234 python3 scripts/shell-bench/soak.py"])
+            deploy.refuse_while_measuring(
+                lambda: ["1234 python3 scripts/shell-bench/soak.py"]
+            )
 
     def test_passes_when_idle(self):
         deploy.refuse_while_measuring(lambda: [])

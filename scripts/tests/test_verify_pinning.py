@@ -23,7 +23,9 @@ class PinningTest(unittest.TestCase):
 
     def test_an_unpinned_reference_in_a_workflow_is_reported(self):
         found = self.problems(
-            {".github/workflows/x.yml": "run: nix shell nixpkgs#cosign -c bash system/tier-digests.sh verify\n"}
+            {
+                ".github/workflows/x.yml": "run: nix shell nixpkgs#cosign -c bash system/tier-digests.sh verify\n"
+            }
         )
         self.assertEqual(len(found), 1)
         self.assertIn(".github/workflows/x.yml:1: nixpkgs#cosign", found[0])
@@ -39,12 +41,16 @@ class PinningTest(unittest.TestCase):
 
     def test_a_branch_ref_is_reported_even_with_inputs_from(self):
         found = self.problems(
-            {"system/x.sh": "nix shell --inputs-from . nixpkgs/nixos-unstable#cosign -c true\n"}
+            {
+                "system/x.sh": "nix shell --inputs-from . nixpkgs/nixos-unstable#cosign -c true\n"
+            }
         )
         self.assertEqual(len(found), 1)
 
     def test_inputs_from_after_the_reference_does_not_pin_it(self):
-        found = self.problems({"scripts/x.sh": "nix run nixpkgs#jq --inputs-from . -- .\n"})
+        found = self.problems(
+            {"scripts/x.sh": "nix run nixpkgs#jq --inputs-from . -- .\n"}
+        )
         self.assertEqual(len(found), 1)
 
     def test_inputs_from_pins_only_its_own_nix_command(self):
@@ -61,22 +67,34 @@ class PinningTest(unittest.TestCase):
                 self.assertIn("nixpkgs#b", found[0])
 
     def test_two_tools_of_one_pinned_command_pass(self):
-        found = self.problems({"scripts/x.sh": "nix shell --inputs-from . nixpkgs#a nixpkgs#b -c true\n"})
+        found = self.problems(
+            {"scripts/x.sh": "nix shell --inputs-from . nixpkgs#a nixpkgs#b -c true\n"}
+        )
         self.assertEqual(found, [])
 
     def test_remote_and_alias_references_are_reported_even_with_inputs_from(self):
-        for ref in ("github:NixOS/nixpkgs#cosign", "github:nixos/nixpkgs/nixos-unstable#cosign",
-                    "git+https://github.com/NixOS/nixpkgs#cosign", "nixpkgs-unstable#cosign",
-                    "flake:nixpkgs#cosign", "registry:nixpkgs#cosign",
-                    "github:NixOS/nixpkgs?ref=nixos-unstable#cosign", "nixpkgs?ref=master#cosign"):
+        for ref in (
+            "github:NixOS/nixpkgs#cosign",
+            "github:nixos/nixpkgs/nixos-unstable#cosign",
+            "git+https://github.com/NixOS/nixpkgs#cosign",
+            "nixpkgs-unstable#cosign",
+            "flake:nixpkgs#cosign",
+            "registry:nixpkgs#cosign",
+            "github:NixOS/nixpkgs?ref=nixos-unstable#cosign",
+            "nixpkgs?ref=master#cosign",
+        ):
             with self.subTest(ref=ref):
-                found = self.problems({"scripts/x.sh": f"nix run --inputs-from . {ref} -- version\n"})
+                found = self.problems(
+                    {"scripts/x.sh": f"nix run --inputs-from . {ref} -- version\n"}
+                )
                 self.assertEqual(len(found), 1, found)
                 self.assertIn(ref, found[0])
 
     def test_inputs_from_on_a_continued_line_pins_the_reference(self):
         found = self.problems(
-            {"scripts/x.sh": "nix shell --inputs-from . \\\n  nixpkgs#cosign -c true\nnix run \\\n  nixpkgs#jq\n"}
+            {
+                "scripts/x.sh": "nix shell --inputs-from . \\\n  nixpkgs#cosign -c true\nnix run \\\n  nixpkgs#jq\n"
+            }
         )
         self.assertEqual(len(found), 1, found)
         self.assertIn("scripts/x.sh:3: nixpkgs#jq", found[0])

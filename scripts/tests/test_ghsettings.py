@@ -283,7 +283,8 @@ class GhSettings(unittest.TestCase):
         result = self.run_script("diff")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(
-            "note rulesets protect-main.bypass_actors: 0 actor(s) as in the file", result.stdout
+            "note rulesets protect-main.bypass_actors: 0 actor(s) as in the file",
+            result.stdout,
         )
         self.assertIn("not readable with this token", result.stdout)
 

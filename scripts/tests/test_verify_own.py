@@ -149,8 +149,11 @@ class Own(unittest.TestCase):
         self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root)[0])
 
     def test_an_underscore_build_dependency_counts(self):
-        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[build_dependencies]\n'
-                   'gtk4 = "0.10"\n')
+        self.write(
+            "kiosk/Cargo.toml",
+            '[package]\nname = "athanor-kiosk"\n\n[build_dependencies]\n'
+            'gtk4 = "0.10"\n',
+        )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("athanor-kiosk: reaches gtk4", problems[0])
@@ -158,21 +161,36 @@ class Own(unittest.TestCase):
     def test_a_subcrate_of_a_toolkit_counts(self):
         for sub in ("gtk4-sys", "libadwaita-sys", "iced_core"):
             with self.subTest(sub=sub):
-                self.write("Cargo.lock", LOCK.replace('name = "gtk4"', f'name = "{sub}"')
-                           .replace('dependencies = ["gtk4"]', f'dependencies = ["{sub}"]'))
-                self.assertEqual(verify.toolkit_crates(self.root)[0].get("athanor-style"), {sub})
+                self.write(
+                    "Cargo.lock",
+                    LOCK.replace('name = "gtk4"', f'name = "{sub}"').replace(
+                        'dependencies = ["gtk4"]', f'dependencies = ["{sub}"]'
+                    ),
+                )
+                self.assertEqual(
+                    verify.toolkit_crates(self.root)[0].get("athanor-style"), {sub}
+                )
 
     def test_a_crate_that_only_shares_a_prefix_does_not_count(self):
         for other in ("gtk4ish", "iced-x86"):
             with self.subTest(other=other):
-                self.write("Cargo.lock", LOCK.replace('name = "gtk4"', f'name = "{other}"')
-                           .replace('dependencies = ["gtk4"]', f'dependencies = ["{other}"]'))
+                self.write(
+                    "Cargo.lock",
+                    LOCK.replace('name = "gtk4"', f'name = "{other}"').replace(
+                        'dependencies = ["gtk4"]', f'dependencies = ["{other}"]'
+                    ),
+                )
                 self.assertNotIn("athanor-style", verify.toolkit_crates(self.root)[0])
 
     def test_a_crate_no_lockfile_holds_counts_when_it_names_a_subcrate(self):
-        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n'
-                   '[target.\'cfg(unix)\'.build_dependencies]\ngtk4-sys = "0.10"\n')
-        self.assertEqual(verify.toolkit_crates(self.root)[0].get("athanor-kiosk"), {"gtk4-sys"})
+        self.write(
+            "kiosk/Cargo.toml",
+            '[package]\nname = "athanor-kiosk"\n\n'
+            "[target.'cfg(unix)'.build_dependencies]\ngtk4-sys = \"0.10\"\n",
+        )
+        self.assertEqual(
+            verify.toolkit_crates(self.root)[0].get("athanor-kiosk"), {"gtk4-sys"}
+        )
 
     def test_an_entry_that_no_longer_applies_fails(self):
         self.write(
@@ -207,15 +225,20 @@ class Own(unittest.TestCase):
         self.assertNotIn("athanor-other", verify.toolkit_crates(self.root)[0])
 
     def test_a_crate_no_lockfile_holds_counts_when_it_names_a_toolkit(self):
-        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[dependencies]\n'
-                   'gtk4 = { workspace = true }\n')
+        self.write(
+            "kiosk/Cargo.toml",
+            '[package]\nname = "athanor-kiosk"\n\n[dependencies]\n'
+            "gtk4 = { workspace = true }\n",
+        )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("athanor-kiosk: reaches gtk4", problems[0])
 
     def test_a_crate_no_lockfile_holds_counts_whatever_its_name(self):
-        self.write("kiosk/Cargo.toml", '[package]\nname = "kiosk-portal"\n\n[dependencies]\n'
-                   'gtk4 = "0.10"\n')
+        self.write(
+            "kiosk/Cargo.toml",
+            '[package]\nname = "kiosk-portal"\n\n[dependencies]\ngtk4 = "0.10"\n',
+        )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("kiosk-portal: reaches gtk4", problems[0])
@@ -226,13 +249,17 @@ class Own(unittest.TestCase):
             LOCK + '\n[[package]]\nname = "wayland-backend"\n'
             'version = "0.3.0"\ndependencies = ["gtk4"]\n',
         )
-        self.write("x/vendor/wayland-backend/Cargo.toml",
-                   '[package]\nname = "wayland-backend"\n\n[dependencies]\ngtk4 = "0.10"\n')
+        self.write(
+            "x/vendor/wayland-backend/Cargo.toml",
+            '[package]\nname = "wayland-backend"\n\n[dependencies]\ngtk4 = "0.10"\n',
+        )
         self.assertNotIn("wayland-backend", verify.toolkit_crates(self.root)[0])
 
     def test_a_crate_no_lockfile_holds_fails_when_its_toolkits_cannot_be_read(self):
-        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[dependencies]\n'
-                   'relm4 = "0.9"\n')
+        self.write(
+            "kiosk/Cargo.toml",
+            '[package]\nname = "athanor-kiosk"\n\n[dependencies]\nrelm4 = "0.9"\n',
+        )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("athanor-kiosk: no tracked Cargo.lock holds it", problems[0])

@@ -287,7 +287,9 @@ def main(argv):
     r = sub.add_parser("prior")
     r.add_argument("--dir", required=True, type=pathlib.Path)
     r.add_argument("--keys-dir", required=True, type=pathlib.Path)
-    r.add_argument("--timeout", type=int, default=TIMEOUT, help="seconds for one cosign call")
+    r.add_argument(
+        "--timeout", type=int, default=TIMEOUT, help="seconds for one cosign call"
+    )
     c = sub.add_parser("class")
     c.add_argument("--keys-dir", required=True, type=pathlib.Path)
     c.add_argument("ref")

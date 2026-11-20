@@ -188,8 +188,14 @@ class Response(unittest.TestCase):
         # A missed opening must not borrow the frame the following click caused.
         frames = [frame("athanor-bar", "popover", 900)]
         self.assertEqual(
-            analysis.responses_ms([100 * MS], frames, "athanor-bar", "popover",
-                                  inputs_ns=[100 * MS, 800 * MS]), [None]
+            analysis.responses_ms(
+                [100 * MS],
+                frames,
+                "athanor-bar",
+                "popover",
+                inputs_ns=[100 * MS, 800 * MS],
+            ),
+            [None],
         )
 
     def test_a_miss_is_infinitely_slow_in_the_percentile(self):
@@ -276,7 +282,6 @@ class Verdict(unittest.TestCase):
         self.assertFalse(analysis.verdict(0.98, 0.99, at_least=True)["pass"])
 
 
-
 class Restore(unittest.TestCase):
     def test_a_raising_stage_still_unsets_the_variable(self):
         calls = []
@@ -292,9 +297,14 @@ class Restore(unittest.TestCase):
         with self.assertRaises(ZeroDivisionError):
             with bench.instrumented(Fake(), settle_s=0):
                 1 / 0
-        self.assertEqual(calls[-3:], [("unset-environment", "ATHANOR_SHELL_BENCH"),
-                                      ("reset-failed", "athanor-bar", "athanor-dock"),
-                                      ("restart", "athanor-bar", "athanor-dock")])
+        self.assertEqual(
+            calls[-3:],
+            [
+                ("unset-environment", "ATHANOR_SHELL_BENCH"),
+                ("reset-failed", "athanor-bar", "athanor-dock"),
+                ("restart", "athanor-bar", "athanor-dock"),
+            ],
+        )
 
     def test_the_bench_restarts_do_not_spend_the_start_limit(self):
         # The units give up after 10 starts in 10 minutes (SH8); a run of several stages
@@ -307,7 +317,9 @@ class Restore(unittest.TestCase):
                 return b""
 
         bench.restart(Fake(), "athanor-dock")
-        self.assertEqual(calls, [("reset-failed", "athanor-dock"), ("restart", "athanor-dock")])
+        self.assertEqual(
+            calls, [("reset-failed", "athanor-dock"), ("restart", "athanor-dock")]
+        )
 
 
 class Start(unittest.TestCase):
@@ -337,12 +349,18 @@ class Start(unittest.TestCase):
         with mock.patch("builtins.input"), mock.patch.object(bench.time, "sleep"):
             bench.stage_start(Fake(), None)
         self.assertEqual(calls[0], ("journal", 0, {"this_boot": True}))
-        self.assertEqual(calls[-3:], [("unset-environment", "ATHANOR_SHELL_BENCH"),
-                                      ("reset-failed", "athanor-bar", "athanor-dock"),
-                                      ("restart", "athanor-bar", "athanor-dock")])
+        self.assertEqual(
+            calls[-3:],
+            [
+                ("unset-environment", "ATHANOR_SHELL_BENCH"),
+                ("reset-failed", "athanor-bar", "athanor-dock"),
+                ("restart", "athanor-bar", "athanor-dock"),
+            ],
+        )
 
     def test_the_journal_of_this_boot_alone(self):
         import machine
+
         seen = []
         m = machine.Machine.__new__(machine.Machine)
         m.session = lambda cmd: seen.append(cmd) or b""
@@ -352,9 +370,22 @@ class Start(unittest.TestCase):
 
 class Report(unittest.TestCase):
     def test_a_scenario_is_reported_with_its_detail(self):
-        text = bench.report({"date": "d", "commit": "c", "scenarios": {
-            "dock-autohide/rest": {"pass": False, "register": None, "detail": "nothing drawn"}}})
-        self.assertIn("| scenarios | dock-autohide/rest | nothing drawn | ST6 | **no** |", text)
+        text = bench.report(
+            {
+                "date": "d",
+                "commit": "c",
+                "scenarios": {
+                    "dock-autohide/rest": {
+                        "pass": False,
+                        "register": None,
+                        "detail": "nothing drawn",
+                    }
+                },
+            }
+        )
+        self.assertIn(
+            "| scenarios | dock-autohide/rest | nothing drawn | ST6 | **no** |", text
+        )
 
 
 class Growth(unittest.TestCase):

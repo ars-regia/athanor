@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """Read the facts of the merge card of a pull request and print it (CLAUDE.md, "Merging").
 
-Usage: merge_card.py [-R OWNER/REPO] [--base-rules-from FILE] PR
-       merge_card.py [-R OWNER/REPO] PR --verify-approval CARD_TIME --head SHA [--base-sha SHA]
+Usage: merge_card.py [-R OWNER/REPO] PR
+       merge_card.py [-R OWNER/REPO] PR --verify-approval CARD_TIME --head SHA --base-sha SHA
                      [--approver LOGIN ...]
 
 The script only reads: it never approves, merges, comments or pushes, and it reads no token.
 It prints the card, then one `REFUSED:` line on stderr per precondition that does not hold,
 and exits 1 when there is one. A 404 on the branch protection means only the rulesets count.
---base-rules-from reads the rules of the base from a file (the JSON of
-`gh api repos/<repo>/rules/branches/<base>`) in place of the API.
 --verify-approval is the re-check just before the merge: it repeats the reading and adds that
 the head and the base are the card's and that a code owner approved at the card's head after
-CARD_TIME (ISO 8601, e.g. 2026-11-20T20:00:00Z). Without --approver the owners are those of
-the `*` line of .github/CODEOWNERS on the base.
+CARD_TIME (ISO 8601, e.g. 2026-11-20T20:00:00Z). The approver is `hr-mes` (the rule of CLAUDE.md,
+"Merging") unless --approver names others; the last `*` line of .github/CODEOWNERS at the base sha must
+list each approver, else the script refuses.
 
 The hunks of the card come from scripts/merge_card_categories.json.
 """
@@ -59,7 +58,9 @@ def check_state(item):
         return {"SUCCESS": "pass", "PENDING": "pending", "EXPECTED": "pending"}.get(
             item.get("state"), "fail"
         )
-    if item.get("status") != "COMPLETED":
+    # A queued rerun carries startedAt 0001-01-01: not a usable time, so it is not finished.
+    started = item.get("startedAt") or ""
+    if item.get("status") != "COMPLETED" or started[:4] < "2000":
         return "pending"
     return {"SUCCESS": "pass", "NEUTRAL": "pass", "SKIPPED": "skipping"}.get(
         item.get("conclusion"), "fail"
@@ -67,14 +68,21 @@ def check_state(item):
 
 
 def latest_checks(rollup):
-    """name -> (state, entry): the newest entry of each name, since a rerun adds one."""
+    """(workflow, name) -> (state, entry). A rerun adds an entry: one that is not finished
+    wins over an older one, otherwise the newest wins."""
     found = {}
     for item in rollup:
-        name = item.get("name") or item.get("context")
+        key = (item.get("workflowName") or "", item.get("name") or item.get("context"))
+        state = check_state(item)
         stamp = item.get("startedAt") or item.get("createdAt") or ""
-        if name not in found or stamp >= found[name][0]:
-            found[name] = (stamp, item)
-    return {name: (check_state(item), item) for name, (_, item) in found.items()}
+        old = found.get(key)
+        if (
+            old is None
+            or (state == "pending") > (old[0] == "pending")
+            or ((state == "pending") == (old[0] == "pending") and stamp >= old[2])
+        ):
+            found[key] = (state, item, stamp)
+    return {key: (state, item) for key, (state, item, _) in found.items()}
 
 
 def required_checks(rules, protection):
@@ -101,13 +109,41 @@ def latest_reviews(reviews):
 
 
 def parse_diff(diff):
-    """[(path, [changed line, ...])] from a unified diff."""
-    files = []
-    for line in diff.splitlines():
+    """[(path, [changed line, ...])] from a unified diff.
+
+    Split on newlines only (a form feed or a NEL inside a changed line is text). A file
+    starts at a `diff --git` line that begins a line outside a hunk: inside a hunk every line
+    starts with a space, `+`, `-` or a backslash. The paths come from the header lines (`--- a/`,
+    `+++ b/`, `rename from`, `copy from`, and their targets), so a rename or a deletion still
+    names the path it left; `+++` and `---` are headers only before the first `@@`.
+    """
+    files, header, paths, lines = [], False, set(), []
+
+    def close():
+        for p in sorted(paths):
+            files.append((p, lines))
+
+    for line in diff.split("\n"):
         if line.startswith("diff --git "):
-            files.append((line.rsplit(" b/", 1)[1], []))
-        elif files and line[:1] in "+-" and not line.startswith(("+++", "---")):
-            files[-1][1].append(line)
+            close()
+            header, paths, lines = True, set(), []
+            if " b/" in line:
+                paths.add(line.rsplit(" b/", 1)[1])
+            continue
+        if header:
+            if line.startswith("@@"):
+                header = False
+            else:
+                for prefix in ("rename from ", "rename to ", "copy from ", "copy to "):
+                    if line.startswith(prefix):
+                        paths.add(line[len(prefix) :])
+                for prefix in ("--- a/", "+++ b/"):
+                    if line.startswith(prefix):
+                        paths.add(line[len(prefix) :])
+                continue
+        if line[:1] in ("+", "-"):
+            lines.append(line)
+    close()
     return files
 
 
@@ -168,7 +204,7 @@ def stale_base(repo, pr, base_sha, checks, has_queue):
     landed = when(
         api(f"repos/{repo}/commits/{base_sha}")["commit"]["committer"]["date"]
     )
-    for name, (_, item) in sorted(checks.items()):
+    for (_, name), (_, item) in sorted(checks.items()):
         run = re.search(r"/runs/(\d+)", item.get("detailsUrl") or "")
         if not run:
             return f"the head does not contain the base and check {name} has no workflow run"
@@ -180,18 +216,23 @@ def stale_base(repo, pr, base_sha, checks, has_queue):
     return None
 
 
-def code_owners(repo, base):
+APPROVER = "hr-mes"  # the code owner whose approval CLAUDE.md ("Merging") requires
+
+
+def code_owners(repo, base_sha):
+    """The owners on the last `*` line of CODEOWNERS at the pinned base sha, comments removed."""
     raw = gh(
         "api",
         "-H",
         "Accept: application/vnd.github.raw",
-        f"repos/{repo}/contents/.github/CODEOWNERS?ref={base}",
+        f"repos/{repo}/contents/.github/CODEOWNERS?ref={base_sha}",
     )
-    for line in raw.splitlines():
-        parts = line.split()
+    owners = set()
+    for line in raw.split("\n"):
+        parts = line.split("#", 1)[0].split()
         if parts[:1] == ["*"]:
-            return {o.lstrip("@") for o in parts[1:]}
-    return set()
+            owners = {o.lstrip("@") for o in parts[1:]}
+    return owners
 
 
 def refusals(repo, pr, base_sha, rules, protection, args):
@@ -206,12 +247,13 @@ def refusals(repo, pr, base_sha, rules, protection, args):
     if not required:
         bad.append(f"the base {base} has no required check")
     for name in sorted(required):
-        state = checks.get(name, ("missing",))[0]
-        if state != "pass":
-            bad.append(f"required check {name} is {state}")
-    for name, (state, _) in sorted(checks.items()):
+        states = [s for (_, n), (s, _) in sorted(checks.items()) if n == name]
+        for state in states or ["missing"]:
+            if state != "pass":
+                bad.append(f"required check {name} is {state}")
+    for (workflow, name), (state, _) in sorted(checks.items()):
         if name not in required and state not in ("pass", "skipping"):
-            bad.append(f"check {name} is {state}")
+            bad.append(f"check {workflow + ' / ' if workflow else ''}{name} is {state}")
     if not any(
         r["type"] == "pull_request" and r["parameters"].get("require_code_owner_review")
         for r in rules
@@ -238,19 +280,24 @@ def refusals(repo, pr, base_sha, rules, protection, args):
     if args.verify_approval:
         if pr["headRefOid"] != args.head:
             bad.append(f"head is {pr['headRefOid']}, the card's is {args.head}")
-        if args.base_sha and base_sha != args.base_sha:
+        if base_sha != args.base_sha:
             bad.append(f"base head is {base_sha}, the card's is {args.base_sha}")
-        owners = set(args.approver or code_owners(repo, base))
+        approvers = set(args.approver or [APPROVER])
+        owners = code_owners(repo, base_sha)
+        bad += [
+            f"{who} is not a code owner in CODEOWNERS at {base_sha[:12]}"
+            for who in sorted(approvers - owners)
+        ]
         card = when(args.verify_approval)
         if not any(
             r["state"] == "APPROVED"
-            and r["author"]["login"] in owners
+            and r["author"]["login"] in approvers
             and r["commit"]["oid"] == args.head
             and when(r["submittedAt"]) > card
             for r in pr["reviews"]
         ):
             bad.append(
-                f"no APPROVED review by {sorted(owners)} at {args.head[:12]} after {args.verify_approval}"
+                f"no APPROVED review by {sorted(approvers)} at {args.head[:12]} after {args.verify_approval}"
             )
     return bad
 
@@ -266,8 +313,12 @@ def print_card(pr, base_sha, rules, protection, files, categories):
         f"reviewDecision {pr['reviewDecision'] or '(empty)'}  merge_queue {'yes' if queue else 'no'}"
     )
     print("checks:")
-    for name, (state, _) in sorted(latest_checks(pr["statusCheckRollup"]).items()):
-        print(f"  {state:8} {name}{'  [required]' if name in required else ''}")
+    for (workflow, name), (state, _) in sorted(
+        latest_checks(pr["statusCheckRollup"]).items()
+    ):
+        print(
+            f"  {state:8} {workflow + ' / ' if workflow else ''}{name}{'  [required]' if name in required else ''}"
+        )
     reviews = latest_reviews(pr["reviews"])
     print(
         "latest reviews: "
@@ -284,7 +335,8 @@ def print_card(pr, base_sha, rules, protection, files, categories):
         if cat["name"] in comments:
             where = ", ".join(comments[cat["name"]])
             n = sum(comments[cat["name"]].values())
-            print(f"  {cat['name']}: also {n} comment lines in {where}")
+            noun = "comment line" if n == 1 else "comment lines"
+            print(f"  {cat['name']}: also {n} {noun} in {where}")
     if not code and not comments:
         print("  none of the listed categories")
 
@@ -295,7 +347,6 @@ def main(argv):
     )
     ap.add_argument("pr", type=int)
     ap.add_argument("-R", "--repo")
-    ap.add_argument("--base-rules-from")
     ap.add_argument("--verify-approval", metavar="CARD_TIME")
     ap.add_argument("--head", help="the card's full head sha (with --verify-approval)")
     ap.add_argument(
@@ -303,8 +354,8 @@ def main(argv):
     )
     ap.add_argument("--approver", action="append")
     args = ap.parse_args(argv)
-    if args.verify_approval and not args.head:
-        ap.error("--verify-approval needs --head")
+    if args.verify_approval and not (args.head and args.base_sha):
+        ap.error("--verify-approval needs --head and --base-sha")
 
     repo = (
         args.repo
@@ -313,19 +364,29 @@ def main(argv):
     pr = json.loads(gh("pr", "view", str(args.pr), "-R", repo, "--json", FIELDS))
     base = pr["baseRefName"]
     base_sha = api(f"repos/{repo}/branches/{base}")["commit"]["sha"]
-    if args.base_rules_from:
-        rules = json.loads(pathlib.Path(args.base_rules_from).read_text())
-    else:
-        rules = api(f"repos/{repo}/rules/branches/{base}")
+    rules = api(f"repos/{repo}/rules/branches/{base}")
     try:
         protection = api(f"repos/{repo}/branches/{base}/protection")
     except NotFound:
         protection = None
-    files = parse_diff(gh("pr", "diff", str(args.pr), "-R", repo))
+    # The hunks belong to the head of the card: the diff is taken between the shas read above.
+    files = parse_diff(
+        gh(
+            "api",
+            "-H",
+            "Accept: application/vnd.github.diff",
+            f"repos/{repo}/compare/{base_sha}...{pr['headRefOid']}",
+        )
+    )
     categories = json.loads(CATEGORIES.read_text())["categories"]
 
     print_card(pr, base_sha, rules, protection, files, categories)
     bad = refusals(repo, pr, base_sha, rules, protection, args)
+    now = json.loads(gh("pr", "view", str(args.pr), "-R", repo, "--json", "headRefOid"))
+    if now["headRefOid"] != pr["headRefOid"]:
+        bad.append(
+            f"the head moved from {pr['headRefOid']} to {now['headRefOid']} while reading"
+        )
     for reason in bad:
         print(f"REFUSED: {reason}", file=sys.stderr)
     return 1 if bad else 0

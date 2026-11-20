@@ -11,8 +11,10 @@ import unittest
 import zlib
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "decode-drm-panic.py"
-LOG = ("[  12.345678] Kernel panic - not syncing: Attempted to kill init!\n"
-       "[  12.345679] CPU: 3 PID: 1 Comm: systemd Not tainted 7.2.5-100.azoth.fc43.x86_64\n")
+LOG = (
+    "[  12.345678] Kernel panic - not syncing: Attempted to kill init!\n"
+    "[  12.345679] CPU: 3 PID: 1 Comm: systemd Not tainted 7.2.5-100.azoth.fc43.x86_64\n"
+)
 
 
 def encode(data):
@@ -20,7 +22,7 @@ def encode(data):
     blob = zlib.compress(data)
     digits = ""
     for start in range(0, len(blob), 7):
-        group = blob[start:start + 7]
+        group = blob[start : start + 7]
         # 7 bytes are 17 digits by definition; a shorter group takes ceil(bytes * 5 / 2).
         width = 17 if len(group) == 7 else (len(group) * 5 + 1) // 2
         digits += str(int.from_bytes(group, "little")).zfill(width)
@@ -28,14 +30,20 @@ def encode(data):
 
 
 def run(*args, stdin=None):
-    return subprocess.run([sys.executable, "-B", str(SCRIPT), *args],
-                          capture_output=True, text=True, input=stdin)
+    return subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        input=stdin,
+    )
 
 
 class Decode(unittest.TestCase):
     def test_round_trip_through_the_panic_url(self):
-        url = (f"https://drm-panic.fedoraproject.org/#?a=x86_64"
-               f"&v=7.2.5-100.azoth.fc43.x86_64&z={encode(LOG.encode())}")
+        url = (
+            f"https://drm-panic.fedoraproject.org/#?a=x86_64"
+            f"&v=7.2.5-100.azoth.fc43.x86_64&z={encode(LOG.encode())}"
+        )
         done = run(url)
         self.assertEqual(done.returncode, 0, done.stderr)
         header, _, body = done.stdout.partition("\n")

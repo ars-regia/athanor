@@ -59,11 +59,12 @@ PR = {
     ],
 }
 DIFF = (
-    "diff --git a/.github/workflows/pr.yml b/.github/workflows/pr.yml\n+++ b/x\n+on: push\n"
-    "diff --git a/src/a.rs b/src/a.rs\n+++ b/src/a.rs\n+    unsafe { f() }\n"
+    "diff --git a/.github/workflows/pr.yml b/.github/workflows/pr.yml\n--- a/.github/workflows/pr.yml\n+++ b/.github/workflows/pr.yml\n@@ -1 +1 @@\n+on: push\n"
+    "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n+    unsafe { f() }\n"
 )
+CODEOWNERS = "* @someone\n# owners\n* @hr-mes  # the maintainer\n/docs/ @other\n"
 APPROVAL = {
-    "author": {"login": "owner"},
+    "author": {"login": "hr-mes"},
     "state": "APPROVED",
     "submittedAt": "2026-01-02T00:00:00Z",
     "commit": {"oid": HEAD},
@@ -79,6 +80,9 @@ def run(
     argv=(),
     behind=0,
     runs=FRESH,
+    later_head=None,
+    diff=None,
+    codeowners=None,
 ):
     """(exit code, stdout, stderr) of the script against a faked GitHub."""
     pr = {**PR, **(pr or {})}
@@ -93,16 +97,19 @@ def run(
 
     def fake_gh(*args):
         if args[:2] == ("pr", "view"):
+            if args[-1] == "headRefOid":
+                return json.dumps({"headRefOid": later_head or pr["headRefOid"]})
             return json.dumps(pr)
-        if args[:2] == ("pr", "diff"):
-            return DIFF
+        if "Accept: application/vnd.github.diff" in args:
+            return DIFF if diff is None else diff
         path = args[-1]
         if path.endswith("/protection"):
             if isinstance(protection, Exception):
                 raise protection
             return json.dumps(protection)
         if "/contents/.github/CODEOWNERS" in path:
-            return "# owners\n* @owner\n"
+            assert path.endswith(f"?ref={BASE}"), path
+            return CODEOWNERS if codeowners is None else codeowners
         for key, value in responses.items():
             if key in path:
                 return json.dumps(value)
@@ -197,7 +204,7 @@ class Card(unittest.TestCase):
             "submittedAt": "2026-01-01T00:00:00Z",
         }
         self.refused(
-            "owner's latest review is CHANGES_REQUESTED", pr={"reviews": [old]}
+            "hr-mes's latest review is CHANGES_REQUESTED", pr={"reviews": [old]}
         )
         self.assertEqual(run(pr={"reviews": [old, APPROVAL]})[0], 0)
 
@@ -231,7 +238,9 @@ class Comments(unittest.TestCase):
         return merge_card.hunks([(path, list(lines))], self.CATS)
 
     def test_a_comment_only_match_is_counted_and_has_no_hunk(self):
-        code, comments = self.hunks("a.rs", "+// unsafe here", "+/// unsafe", "-    * unsafe")
+        code, comments = self.hunks(
+            "a.rs", "+// unsafe here", "+/// unsafe", "-    * unsafe"
+        )
         self.assertEqual((code, comments), ({}, {"unsafe": {"a.rs": 3}}))
         for path in ("a.sh", "b.toml", "c.service", "d.spec", "e.py"):
             self.assertEqual(self.hunks(path, "+  # unsafe")[0], {})
@@ -239,26 +248,37 @@ class Comments(unittest.TestCase):
 
     def test_a_code_match_is_a_hunk(self):
         code, comments = self.hunks("a.rs", "+    unsafe { f() }")
-        self.assertEqual((code, comments), ({"unsafe": ["a.rs: +    unsafe { f() }"]}, {}))
+        self.assertEqual(
+            (code, comments), ({"unsafe": ["a.rs: +    unsafe { f() }"]}, {})
+        )
 
     def test_a_hash_in_rust_is_code_and_a_slash_in_shell_is_not_a_comment(self):
         self.assertIn("unsafe", self.hunks("a.rs", "+#[unsafe(no_mangle)]")[0])
         self.assertIn("unsafe", self.hunks("a.sh", "+// unsafe")[0])
 
     def test_a_mixed_file_yields_both_and_the_card_prints_the_count_line(self):
-        diff = "diff --git a/a.rs b/a.rs\n+++ b/a.rs\n+unsafe { f() }\n+// unsafe is why\n"
+        diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n+unsafe { f() }\n+// unsafe is why\n"
         files = merge_card.parse_diff(diff)
         code, comments = merge_card.hunks(files, self.CATS)
         self.assertEqual((len(code["unsafe"]), comments["unsafe"]), (1, {"a.rs": 1}))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            merge_card.print_card({**PR, "reviews": []}, BASE, RULES, None, files, self.CATS)
+            merge_card.print_card(
+                {**PR, "reviews": []}, BASE, RULES, None, files, self.CATS
+            )
         self.assertIn("unsafe: a.rs: +unsafe { f() }", out.getvalue())
-        self.assertIn("unsafe: also 1 comment lines in a.rs", out.getvalue())
+        self.assertIn("unsafe: also 1 comment line in a.rs", out.getvalue())
 
 
 class Approval(unittest.TestCase):
-    ARGS = ("--verify-approval", "2026-01-01T12:00:00Z", "--head", HEAD)
+    ARGS = (
+        "--verify-approval",
+        "2026-01-01T12:00:00Z",
+        "--head",
+        HEAD,
+        "--base-sha",
+        BASE,
+    )
 
     def test_an_owner_approval_at_the_head_after_the_card_passes(self):
         self.assertEqual(run(pr={"reviews": [APPROVAL]}, argv=self.ARGS)[0], 0)
@@ -272,18 +292,111 @@ class Approval(unittest.TestCase):
         ):
             code, _, err = run(pr={"reviews": [{**APPROVAL, **change}]}, argv=self.ARGS)
             self.assertEqual(code, 1)
-            self.assertIn("no APPROVED review by ['owner']", err)
+            self.assertIn("no APPROVED review by ['hr-mes']", err)
 
     def test_a_head_or_base_that_is_not_the_cards_is_refused(self):
         _, _, err = run(
             pr={"reviews": [APPROVAL]},
-            argv=("--verify-approval", "2026-01-01T12:00:00Z", "--head", "d" * 40),
+            argv=(
+                "--verify-approval",
+                "2026-01-01T12:00:00Z",
+                "--head",
+                "d" * 40,
+                "--base-sha",
+                BASE,
+            ),
         )
         self.assertIn("the card's is " + "d" * 40, err)
-        _, _, err = run(
-            pr={"reviews": [APPROVAL]}, argv=(*self.ARGS, "--base-sha", "e" * 40)
-        )
+        _, _, err = run(pr={"reviews": [APPROVAL]}, argv=(*self.ARGS[:-1], "e" * 40))
         self.assertIn("base head is", err)
+
+
+class Findings(unittest.TestCase):
+    """One test per finding of the audit of the first version."""
+
+    def test_the_base_sha_and_the_head_are_both_needed_to_verify(self):
+        card = "2026-01-01T12:00:00Z"
+        for argv in (
+            ("--verify-approval", card, "--head", HEAD),
+            ("--verify-approval", card, "--base-sha", BASE),
+        ):
+            with (
+                self.assertRaises(SystemExit),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                run(argv=argv)
+
+    def test_rules_come_only_from_the_api(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            run(argv=("--base-rules-from", "x.json"))
+
+    def test_the_same_job_name_in_two_workflows_hides_nothing(self):
+        pr = checks(("gate", "SUCCESS"), ("gate", "FAILURE"))
+        pr["statusCheckRollup"][0]["workflowName"] = "Pull Request"
+        pr["statusCheckRollup"][1]["workflowName"] = "Other"
+        self.assertIn("required check gate is fail", run(pr=pr)[2])
+
+    def test_a_queued_rerun_is_pending_not_hidden_by_an_older_pass(self):
+        pr = checks(("gate", "SUCCESS"), ("gate", "SUCCESS"))
+        pr["statusCheckRollup"][1].update(
+            status="QUEUED", conclusion="", startedAt="0001-01-01T00:00:00Z"
+        )
+        self.assertIn("required check gate is pending", run(pr=pr)[2])
+
+    def test_a_check_with_no_usable_start_is_pending(self):
+        pr = checks(("gate", "SUCCESS"))
+        pr["statusCheckRollup"][0]["startedAt"] = "0001-01-01T00:00:00Z"
+        self.assertIn("required check gate is pending", run(pr=pr)[2])
+
+    def test_the_approver_must_be_an_owner_at_the_pinned_base(self):
+        other = {**APPROVAL, "author": {"login": "other"}}
+        _, _, err = run(
+            pr={"reviews": [other]}, argv=(*Approval.ARGS, "--approver", "other")
+        )
+        self.assertIn("other is not a code owner in CODEOWNERS", err)
+        _, _, err = run(
+            pr={"reviews": [APPROVAL]}, argv=Approval.ARGS, codeowners="* @someone\n"
+        )
+        self.assertIn("hr-mes is not a code owner", err)
+
+    def test_the_head_that_moves_while_reading_is_refused(self):
+        self.assertIn("the head moved from", run(later_head="f" * 40)[2])
+
+    def test_a_form_feed_and_a_forged_header_in_a_changed_line_hide_nothing(self):
+        forged = "+x\x0cdiff --git a/q b/docs/q"
+        diff = (
+            "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1,2 @@\n"
+            + forged
+            + "\n+unsafe { f() }\n"
+        )
+        self.assertEqual(
+            merge_card.parse_diff(diff), [("src/a.rs", [forged, "+unsafe { f() }"])]
+        )
+
+    def test_changed_lines_starting_with_two_pluses_or_minuses_count(self):
+        diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n+++subprocess.run(x)\n---old\n"
+        self.assertEqual(
+            merge_card.parse_diff(diff), [("a.rs", ["+++subprocess.run(x)", "---old"])]
+        )
+
+    def test_a_rename_a_copy_and_a_deletion_name_the_path_they_left(self):
+        diff = (
+            "diff --git a/.github/CODEOWNERS b/docs/x\nsimilarity index 100%\n"
+            "rename from .github/CODEOWNERS\nrename to docs/x\n"
+            "diff --git a/.github/workflows/w.yml b/docs/w\n"
+            "copy from .github/workflows/w.yml\ncopy to docs/w\n"
+        )
+        paths = {p for p, _ in merge_card.parse_diff(diff)}
+        self.assertEqual(
+            paths, {".github/CODEOWNERS", "docs/x", ".github/workflows/w.yml", "docs/w"}
+        )
+        _, out, _ = run(diff=diff)
+        self.assertIn("CODEOWNERS: .github/CODEOWNERS (path)", out)
+        self.assertIn("CI workflows: .github/workflows/w.yml (path)", out)
+
+    def test_a_deleted_file_is_listed_by_its_old_path(self):
+        diff = "diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-unsafe\n"
+        self.assertEqual(merge_card.parse_diff(diff), [("gone.rs", ["-unsafe"])])
 
 
 class Categories(unittest.TestCase):

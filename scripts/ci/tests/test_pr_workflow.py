@@ -54,7 +54,14 @@ class GateShapeTest(unittest.TestCase):
                 self.assertNotIn("needs", self.jobs[name])
 
     def test_every_build_job_is_named_after_its_area(self):
-        build_jobs = set(self.jobs) - {"changes", "check-static", "check-system", "check-other", "check-rust", "gate"}
+        build_jobs = set(self.jobs) - {
+            "changes",
+            "check-static",
+            "check-system",
+            "check-other",
+            "check-rust",
+            "gate",
+        }
         self.assertLessEqual(build_jobs, set(changes.AREAS))
         for name in build_jobs:
             with self.subTest(job=name):
@@ -73,7 +80,10 @@ class ShellAreaTest(unittest.TestCase):
         self.assertNotIn("pull_request", triggers)
         self.assertIn("workflow_call", triggers)
         glob = "/" + "*" * 2
-        as_area = {p[: -len(glob) + 1] if p.endswith(glob) else p for p in triggers["push"]["paths"]}
+        as_area = {
+            p[: -len(glob) + 1] if p.endswith(glob) else p
+            for p in triggers["push"]["paths"]
+        }
         self.assertEqual(as_area, set(changes.AREAS["shell"]))
 
 
@@ -89,16 +99,25 @@ class RustAuditTest(unittest.TestCase):
 
     def test_maintenance_runs_it_daily_and_alerts(self):
         jobs = yaml.safe_load(MAINTENANCE.read_text())["jobs"]
-        self.assertEqual(jobs["rust-advisories"]["uses"], "./.github/workflows/rust-security-audit.yml")
+        self.assertEqual(
+            jobs["rust-advisories"]["uses"],
+            "./.github/workflows/rust-security-audit.yml",
+        )
         alert = jobs["alert"]
         # The hours-long mutants job has an alert job of its own, so the first one does not wait for it.
         alert_mutants = jobs["alert-mutants"]
-        self.assertEqual(set(alert["needs"]), set(jobs) - {"alert", "alert-mutants", "mutants"})
+        self.assertEqual(
+            set(alert["needs"]), set(jobs) - {"alert", "alert-mutants", "mutants"}
+        )
         self.assertEqual(set(alert_mutants["needs"]), {"mutants"})
         for job in (alert, alert_mutants):
             self.assertIn("always()", job["if"])
             self.assertIn("github.event_name == 'schedule'", job["if"])
-        writers = {n for n, j in jobs.items() if j.get("permissions", {}).get("issues") == "write"}
+        writers = {
+            n
+            for n, j in jobs.items()
+            if j.get("permissions", {}).get("issues") == "write"
+        }
         self.assertEqual(writers, {"alert", "alert-mutants"})
 
     def test_push_filter_matches_the_rust_audit_area(self):
@@ -113,11 +132,15 @@ class RustAuditTest(unittest.TestCase):
                 return path[len(any_dir) - 1 :]
             return path
 
-        self.assertEqual({as_area(p) for p in push["paths"]}, set(changes.AREAS["rust_audit"]))
+        self.assertEqual(
+            {as_area(p) for p in push["paths"]}, set(changes.AREAS["rust_audit"])
+        )
 
     def test_only_a_push_to_iso_v0_saves_the_audit_cache(self):
         steps = yaml.safe_load(AUDIT.read_text())["jobs"]["security-audit"]["steps"]
-        caches = [s for s in steps if s.get("uses", "").startswith("Swatinem/rust-cache@")]
+        caches = [
+            s for s in steps if s.get("uses", "").startswith("Swatinem/rust-cache@")
+        ]
         self.assertEqual(len(caches), 1)
         self.assertEqual(
             caches[0]["with"].get("save-if"),

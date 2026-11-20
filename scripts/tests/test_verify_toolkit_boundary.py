@@ -43,12 +43,16 @@ class ToolkitBoundary(unittest.TestCase):
 
     def test_a_pub_use_of_a_crate_module_fails(self):
         for use in ("crate::text", "self::text", "crate::{render, a11y}"):
-            self.lib(f"pub mod driver;\nmod text;\nmod render;\nmod a11y;\npub use {use};\n")
+            self.lib(
+                f"pub mod driver;\nmod text;\nmod render;\nmod a11y;\npub use {use};\n"
+            )
             self.assertTrue(self.problems(), use)
 
     def test_a_pub_use_of_items_passes(self):
-        self.lib("pub mod driver;\npub use driver::run;\npub use crate::driver::{Role, Side};\n"
-                 "pub use crate::widget::{Ui, Kind};\npub use crate::render::Error;\n")
+        self.lib(
+            "pub mod driver;\npub use driver::run;\npub use crate::driver::{Role, Side};\n"
+            "pub use crate::widget::{Ui, Kind};\npub use crate::render::Error;\n"
+        )
         self.assertEqual(self.problems(), [])
 
     def test_a_commented_pub_mod_passes(self):
@@ -66,13 +70,21 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertIn("`pub mod gpu`", out[0])
 
     def test_a_pub_use_of_a_module_in_any_spelling_fails(self):
-        for use in ("text", "text as t", "crate::{text as t}", "crate::{widget::Ui, text}", "text::*"):
+        for use in (
+            "text",
+            "text as t",
+            "crate::{text as t}",
+            "crate::{widget::Ui, text}",
+            "text::*",
+        ):
             self.lib(f"pub mod driver;\nmod text;\nmod widget;\npub use {use};\n")
             self.assertTrue(self.problems(), use)
 
     def test_a_pub_use_of_nested_items_passes(self):
-        self.lib("pub mod driver;\nmod text;\nmod widget;\nmod render;\npub use crate::Align;\n"
-                 "pub use crate::{widget::{Ui, Kind}, render::Error};\npub use crate::*;\n")
+        self.lib(
+            "pub mod driver;\nmod text;\nmod widget;\nmod render;\npub use crate::Align;\n"
+            "pub use crate::{widget::{Ui, Kind}, render::Error};\npub use crate::*;\n"
+        )
         self.assertEqual(self.problems(), [])
 
     def test_a_multi_line_commented_pub_mod_passes(self):
@@ -97,10 +109,17 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertEqual(verify.toolkit_boundary_problems(), [])
 
     def test_an_athanor_dev_dependency_passes(self):
-        self.assertEqual(self.problems('[dev-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n'), [])
+        self.assertEqual(
+            self.problems(
+                '[dev-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n'
+            ),
+            [],
+        )
 
     def test_an_athanor_dependency_fails(self):
-        out = self.problems('[dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n')
+        out = self.problems(
+            '[dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n'
+        )
         self.assertEqual(len(out), 2)
         self.assertIn("Athanor crate", out[0])
 
@@ -110,20 +129,31 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertIn("inherited from the workspace", out[0])
 
     def test_an_athanor_build_dependency_fails(self):
-        out = self.problems('[build-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n')
+        out = self.problems(
+            '[build-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n'
+        )
         self.assertTrue(out)
 
     def test_an_athanor_build_dependency_spelt_with_an_underscore_fails(self):
-        for table in ("[build_dependencies]", "[target.'cfg(unix)'.build_dependencies]"):
-            out = self.problems(f'{table}\nathanor-i18n = {{ path = "../athanor-i18n" }}\n')
+        for table in (
+            "[build_dependencies]",
+            "[target.'cfg(unix)'.build_dependencies]",
+        ):
+            out = self.problems(
+                f'{table}\nathanor-i18n = {{ path = "../athanor-i18n" }}\n'
+            )
             self.assertEqual(len(out), 2, table)
 
     def test_a_target_dependency_fails(self):
-        out = self.problems('[target.\'cfg(unix)\'.dependencies]\nathanor-i18n = "0.1"\n')
+        out = self.problems(
+            "[target.'cfg(unix)'.dependencies]\nathanor-i18n = \"0.1\"\n"
+        )
         self.assertTrue(out)
 
     def test_a_renamed_athanor_dependency_fails(self):
-        out = self.problems('[dependencies]\ni18n = { package = "athanor-i18n", version = "0.1" }\n')
+        out = self.problems(
+            '[dependencies]\ni18n = { package = "athanor-i18n", version = "0.1" }\n'
+        )
         self.assertTrue(out)
 
     def test_an_unreadable_manifest_fails(self):
@@ -131,53 +161,82 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertTrue(verify.toolkit_boundary_problems(self.root))
 
     def test_a_licence_file_the_license_does_not_name_fails(self):
-        (self.dir / "Cargo.toml").write_text('[package]\nname = "athanor-sal"\nlicense = "MIT"\n')
+        (self.dir / "Cargo.toml").write_text(
+            '[package]\nname = "athanor-sal"\nlicense = "MIT"\n'
+        )
         out = verify.toolkit_boundary_problems(self.root)
-        self.assertEqual(out, [f"{verify.TOOLKIT}/LICENSE-APACHE: present, but license = 'MIT' does not name it"])
+        self.assertEqual(
+            out,
+            [
+                f"{verify.TOOLKIT}/LICENSE-APACHE: present, but license = 'MIT' does not name it"
+            ],
+        )
 
     def test_a_missing_licence_file_fails(self):
         (self.dir / "LICENSE-APACHE").unlink()
-        self.assertEqual(self.problems(), [f"{verify.TOOLKIT}/LICENSE-APACHE: missing, license = 'MIT OR Apache-2.0'"])
+        self.assertEqual(
+            self.problems(),
+            [
+                f"{verify.TOOLKIT}/LICENSE-APACHE: missing, license = 'MIT OR Apache-2.0'"
+            ],
+        )
 
     def gallery(self, body):
         (self.dir / "gallery").mkdir(exist_ok=True)
         (self.dir / "gallery" / "Cargo.toml").write_text(
-            '[package]\nname = "athanor-sal-gallery"\n' + body)
+            '[package]\nname = "athanor-sal-gallery"\n' + body
+        )
         return self.problems()
 
     def test_the_gallery_may_depend_on_the_toolkit_by_its_path(self):
-        self.assertEqual(self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'), [])
+        self.assertEqual(
+            self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'), []
+        )
 
     def test_a_gallery_that_adds_the_i18n_crate_fails(self):
-        out = self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'
-                           'athanor-i18n = { path = "../../athanor-i18n" }\n')
+        out = self.gallery(
+            '[dependencies]\nathanor-sal = { path = ".." }\n'
+            'athanor-i18n = { path = "../../athanor-i18n" }\n'
+        )
         self.assertEqual(len(out), 1)
         self.assertIn("athanor-i18n", out[0])
 
     def test_a_gallery_with_dev_dependencies_patch_or_replace_fails(self):
         base = '[dependencies]\nathanor-sal = { path = ".." }\n'
-        for extra in ('[dev-dependencies]\nserde = "1"\n',
-                      '[target.\'cfg(unix)\'.dev-dependencies]\nserde = "1"\n',
-                      '[dev_dependencies]\nserde = "1"\n',
-                      '[build_dependencies]\nathanor-i18n = { path = "../../athanor-i18n" }\n',
-                      '[target.\'cfg(unix)\'.build_dependencies]\nserde = "1"\n',
-                      '[workspace]\nmembers = ["../../athanor-i18n"]\n',
-                      '[patch.crates-io]\nserde = { path = "x" }\n',
-                      '[replace]\n"serde:1.0.0" = { path = "x" }\n'):
+        for extra in (
+            '[dev-dependencies]\nserde = "1"\n',
+            "[target.'cfg(unix)'.dev-dependencies]\nserde = \"1\"\n",
+            '[dev_dependencies]\nserde = "1"\n',
+            '[build_dependencies]\nathanor-i18n = { path = "../../athanor-i18n" }\n',
+            "[target.'cfg(unix)'.build_dependencies]\nserde = \"1\"\n",
+            '[workspace]\nmembers = ["../../athanor-i18n"]\n',
+            '[patch.crates-io]\nserde = { path = "x" }\n',
+            '[replace]\n"serde:1.0.0" = { path = "x" }\n',
+        ):
             self.assertTrue(self.gallery(base + extra), extra)
 
     def test_the_gallery_may_carry_the_toolkits_accesskit_patch_and_no_other(self):
         base = '[dependencies]\nathanor-sal = { path = ".." }\n[patch.crates-io]\n'
-        ours = 'accesskit_atspi_common = { path = "../vendor/accesskit_atspi_common" }\n'
+        ours = (
+            'accesskit_atspi_common = { path = "../vendor/accesskit_atspi_common" }\n'
+        )
         self.assertEqual(self.gallery(base + ours), [])
         self.assertTrue(self.gallery(base + ours + 'serde = { path = "x" }\n'))
-        self.assertTrue(self.gallery(base + 'accesskit_atspi_common = { path = "x" }\n'))
-        self.assertTrue(self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'
-                                     '[replace]\n"accesskit_atspi_common:0.21.0" = '
-                                     '{ path = "../vendor/accesskit_atspi_common" }\n'))
+        self.assertTrue(
+            self.gallery(base + 'accesskit_atspi_common = { path = "x" }\n')
+        )
+        self.assertTrue(
+            self.gallery(
+                '[dependencies]\nathanor-sal = { path = ".." }\n'
+                '[replace]\n"accesskit_atspi_common:0.21.0" = '
+                '{ path = "../vendor/accesskit_atspi_common" }\n'
+            )
+        )
 
     def test_a_gallery_that_points_the_toolkit_elsewhere_fails(self):
-        self.assertTrue(self.gallery('[dependencies]\nathanor-sal = { path = "../other" }\n'))
+        self.assertTrue(
+            self.gallery('[dependencies]\nathanor-sal = { path = "../other" }\n')
+        )
 
 
 if __name__ == "__main__":

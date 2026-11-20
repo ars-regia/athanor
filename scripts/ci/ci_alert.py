@@ -108,10 +108,15 @@ def main() -> int:
 
     def gh(*args: str) -> str:
         return subprocess.run(
-            ["gh", *args, "-R", repository], check=True, stdout=subprocess.PIPE, text=True
+            ["gh", *args, "-R", repository],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
         ).stdout
 
-    unraised = alert(json.loads(os.environ["NEEDS"]), os.environ["GITHUB_WORKFLOW"], run_url, gh)
+    unraised = alert(
+        json.loads(os.environ["NEEDS"]), os.environ["GITHUB_WORKFLOW"], run_url, gh
+    )
     return 1 if unraised else 0
 
 

@@ -25,7 +25,10 @@ BRANCH_PROTECTION = {"iso-v0": PROTECTED, "main": PROTECTED, "old": {}}
 SIGNING_BRANCHES = {
     "custom_branch_policies": True,
     "protected_branches": False,
-    "policies": [{"name": "iso-v0", "type": "branch"}, {"name": "main", "type": "branch"}],
+    "policies": [
+        {"name": "iso-v0", "type": "branch"},
+        {"name": "main", "type": "branch"},
+    ],
 }
 
 
@@ -124,7 +127,14 @@ ATTEST_JOB = f"""\
 
 
 class SigningTest(unittest.TestCase):
-    def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS, keys=(), files=None):
+    def problems(
+        self,
+        workflows,
+        environments=ENVIRONMENTS,
+        repository=REPOSITORY_SECRETS,
+        keys=(),
+        files=None,
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "system/keys").mkdir(parents=True)
@@ -158,12 +168,18 @@ class SigningTest(unittest.TestCase):
 
     def test_the_release_ref_check_may_run_in_a_signing_job(self):
         step = "      - run: " + json.dumps(verify.RELEASE_REF_CHECK) + "\n"
-        job = SIGN_JOB.replace("      - uses: " + DOWNLOAD, step + "      - uses: " + DOWNLOAD, 1)
+        job = SIGN_JOB.replace(
+            "      - uses: " + DOWNLOAD, step + "      - uses: " + DOWNLOAD, 1
+        )
         self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
 
     def test_a_ref_check_with_anything_appended_fails_in_a_signing_job(self):
-        step = "      - run: " + json.dumps(verify.RELEASE_REF_CHECK + "; curl x") + "\n"
-        job = SIGN_JOB.replace("      - uses: " + DOWNLOAD, step + "      - uses: " + DOWNLOAD, 1)
+        step = (
+            "      - run: " + json.dumps(verify.RELEASE_REF_CHECK + "; curl x") + "\n"
+        )
+        job = SIGN_JOB.replace(
+            "      - uses: " + DOWNLOAD, step + "      - uses: " + DOWNLOAD, 1
+        )
         self.assert_one({"k.yml": workflow(job)}, "outside the allow-list of D43")
 
     def test_rule_1_a_signing_secret_outside_the_signing_environment_fails(self):
@@ -177,7 +193,8 @@ class SigningTest(unittest.TestCase):
 
     def test_rule_1_the_environment_written_as_a_mapping_counts(self):
         job = SIGN_JOB.replace(
-            "    environment: signing-kernel\n", "    environment:\n      name: signing-kernel\n"
+            "    environment: signing-kernel\n",
+            "    environment:\n      name: signing-kernel\n",
         )
         self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
 
@@ -239,9 +256,15 @@ class SigningTest(unittest.TestCase):
             with self.subTest(action=action, key=key):
                 # The download step already has a with: block; checkout gets one.
                 job = (
-                    SIGN_JOB.replace("          path: out\n", f"          path: out\n          {key}\n")
+                    SIGN_JOB.replace(
+                        "          path: out\n",
+                        f"          path: out\n          {key}\n",
+                    )
                     if action == DOWNLOAD
-                    else SIGN_JOB.replace(f"      - uses: {CHECKOUT}\n", f"      - uses: {CHECKOUT}\n        with:\n          {key}\n")
+                    else SIGN_JOB.replace(
+                        f"      - uses: {CHECKOUT}\n",
+                        f"      - uses: {CHECKOUT}\n        with:\n          {key}\n",
+                    )
                 )
                 self.assert_one(
                     {"k.yml": workflow(job)},
@@ -289,7 +312,10 @@ class SigningTest(unittest.TestCase):
                 )
                 # The command allow-list fails the step as well.
                 self.assertEqual(
-                    [p.split(" step 3 ")[1].split(" ")[0] for p in self.problems({"k.yml": workflow(job)})],
+                    [
+                        p.split(" step 3 ")[1].split(" ")[0]
+                        for p in self.problems({"k.yml": workflow(job)})
+                    ],
                     ["hands", "runs"],
                 )
 
@@ -349,21 +375,37 @@ class SigningTest(unittest.TestCase):
     def test_rule_3_c_layouts_a_line_parser_missed_are_read(self):
         """A comment after jobs:, four-space indentation and a quoted job key: before the YAML
         parser each gave zero jobs and a silent pass."""
-        unprotected = workflow(SIGN_JOB.replace("    environment: signing-kernel\n", ""))
+        unprotected = workflow(
+            SIGN_JOB.replace("    environment: signing-kernel\n", "")
+        )
         # The jobs at four spaces instead of two, everything under them shifted with them.
-        four_spaces = "\n".join(("  " + line if line.startswith("  ") else line) for line in unprotected.split("\n"))
+        four_spaces = "\n".join(
+            ("  " + line if line.startswith("  ") else line)
+            for line in unprotected.split("\n")
+        )
         for text in (
             unprotected.replace("jobs:\n", "jobs: # the jobs\n"),
             four_spaces,
             unprotected.replace("  sign:\n", '  "sign":\n'),
         ):
             with self.subTest(text=text):
-                self.assert_one({"k.yml": text}, r"^k\.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment")
+                self.assert_one(
+                    {"k.yml": text},
+                    r"^k\.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment",
+                )
 
     def test_rule_3_c_a_workflow_the_lint_cannot_read_fails_closed(self):
-        for text in ("jobs: [\n", "name: x\non: push\n", "jobs:\n  - sign\n", "jobs: {}\n"):
+        for text in (
+            "jobs: [\n",
+            "name: x\non: push\n",
+            "jobs:\n  - sign\n",
+            "jobs: {}\n",
+        ):
             with self.subTest(text=text):
-                self.assert_one({"k.yml": text}, r"^k\.yml: (not YAML|no mapping of jobs) the D43 lint can read")
+                self.assert_one(
+                    {"k.yml": text},
+                    r"^k\.yml: (not YAML|no mapping of jobs) the D43 lint can read",
+                )
 
     def test_rule_3_e_inheriting_secrets_into_a_workflow_with_a_signing_job_fails(self):
         caller = workflow(
@@ -385,7 +427,9 @@ class SigningTest(unittest.TestCase):
         )
 
     def test_rule_4_a_signing_secret_in_a_job_of_another_environment_fails(self):
-        job = SIGN_JOB.replace("environment: signing-kernel", "environment: github-pages")
+        job = SIGN_JOB.replace(
+            "environment: signing-kernel", "environment: github-pages"
+        )
         self.assertEqual(
             self.problems({"k.yml": workflow(job)}),
             [
@@ -415,13 +459,17 @@ class SigningTest(unittest.TestCase):
     def test_rule_4_a_signing_secret_in_the_other_signing_environment_fails(self):
         """The map secret -> environment is environments.json: the image key is not the
         kernel's, so a job of signing-images cannot read the Secure Boot key."""
-        job = SIGN_JOB.replace("environment: signing-kernel", "environment: signing-images")
+        job = SIGN_JOB.replace(
+            "environment: signing-kernel", "environment: signing-images"
+        )
         self.assertIn(
             "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing-kernel, which holds it (D43)",
             self.problems({"k.yml": workflow(job)}),
         )
 
-    def test_the_old_signing_environment_signs_images_only_during_the_key_rotation(self):
+    def test_the_old_signing_environment_signs_images_only_during_the_key_rotation(
+        self,
+    ):
         """docs/operations/secrets.md section 4.1: with both image keys committed, the old
         `signing` environment counts as signing-images; once key 1 leaves, it no longer does."""
         job = SIGN_JOB.replace("SECUREBOOT_SIGNING_KEY", "COSIGN_PRIVATE_KEY").replace(
@@ -431,19 +479,28 @@ class SigningTest(unittest.TestCase):
         self.assertEqual(self.problems({"k.yml": workflow(job)}, keys=both), [])
         self.assertEqual(
             self.problems({"k.yml": workflow(job)}, keys=both[1:]),
-            ["k.yml: job sign reads COSIGN_PRIVATE_KEY without environment: signing-images, which holds it (D43)"],
+            [
+                "k.yml: job sign reads COSIGN_PRIVATE_KEY without environment: signing-images, which holds it (D43)"
+            ],
         )
         third_party = job.replace(f"uses: {CHECKOUT}", "uses: someone/action@v1")
-        self.assertNotEqual(self.problems({"k.yml": workflow(third_party)}, keys=both), [])
+        self.assertNotEqual(
+            self.problems({"k.yml": workflow(third_party)}, keys=both), []
+        )
 
     def test_the_old_signing_environment_is_declared_only_during_the_key_rotation(self):
         """environments.json declares `signing` as it is live, keys included, until key 1
         leaves: during the rotation it holds no key of its own; after it, it fails rule 5."""
         environments = json.loads(json.dumps(ENVIRONMENTS))
         environments["signing"] = json.loads(json.dumps(environments["signing-images"]))
-        environments["signing"]["secrets"] = ["COSIGN_PRIVATE_KEY", "SECUREBOOT_SIGNING_KEY"]
+        environments["signing"]["secrets"] = [
+            "COSIGN_PRIVATE_KEY",
+            "SECUREBOOT_SIGNING_KEY",
+        ]
         both = ("athanor-image-1.pub", "athanor-image-2.pub")
-        self.assertEqual(self.problems({"k.yml": workflow(SIGN_JOB)}, environments, keys=both), [])
+        self.assertEqual(
+            self.problems({"k.yml": workflow(SIGN_JOB)}, environments, keys=both), []
+        )
         self.assertIn(
             ".github/settings/environments.json: COSIGN_PRIVATE_KEY is in signing and in "
             "signing-images: each key has one environment (D43)",
@@ -479,11 +536,30 @@ class SigningTest(unittest.TestCase):
     def test_rule_5_a_signing_environment_deploys_only_from_protected_branches(self):
         for policy, where in (
             (None, "any branch"),
-            ({"custom_branch_policies": False, "protected_branches": True, "policies": []}, "any protected branch"),
+            (
+                {
+                    "custom_branch_policies": False,
+                    "protected_branches": True,
+                    "policies": [],
+                },
+                "any protected branch",
+            ),
             ({**SIGNING_BRANCHES, "policies": []}, "no branch"),
-            ({**SIGNING_BRANCHES, "policies": [{"name": "old", "type": "branch"}]}, "old"),
-            ({**SIGNING_BRANCHES, "policies": [{"name": "feature", "type": "branch"}]}, "feature"),
-            ({**SIGNING_BRANCHES, "policies": [{"name": "main", "type": "tag"}]}, "tag main"),
+            (
+                {**SIGNING_BRANCHES, "policies": [{"name": "old", "type": "branch"}]},
+                "old",
+            ),
+            (
+                {
+                    **SIGNING_BRANCHES,
+                    "policies": [{"name": "feature", "type": "branch"}],
+                },
+                "feature",
+            ),
+            (
+                {**SIGNING_BRANCHES, "policies": [{"name": "main", "type": "tag"}]},
+                "tag main",
+            ),
             ({**SIGNING_BRANCHES, "policies": [{"name": "*", "type": "branch"}]}, "*"),
         ):
             with self.subTest(where=where):
@@ -491,7 +567,9 @@ class SigningTest(unittest.TestCase):
                 environments["signing-kernel"]["deployment_branch_policy"] = policy
                 problems = self.problems({"k.yml": workflow(SIGN_JOB)}, environments)
                 self.assertEqual(len(problems), 1, problems)
-                self.assertIn(f"the signing-kernel environment deploys from {where}", problems[0])
+                self.assertIn(
+                    f"the signing-kernel environment deploys from {where}", problems[0]
+                )
 
     def test_rule_6_a_secret_no_settings_file_declares_fails(self):
         """Every secret a workflow reads is in environments.json (an environment holds it) or in
@@ -533,7 +611,8 @@ class SigningTest(unittest.TestCase):
         ):
             with self.subTest(run=run):
                 job = SIGN_JOB.replace(
-                    "      - name: Sign\n", f"      - run: {json.dumps(run)}\n      - name: Sign\n"
+                    "      - name: Sign\n",
+                    f"      - run: {json.dumps(run)}\n      - name: Sign\n",
                 )
                 self.assert_one(
                     {"k.yml": workflow(job)},
@@ -566,7 +645,9 @@ class SigningTest(unittest.TestCase):
                     rf"^k\.yml: signing job sign sets \w+ in {where}: only the secrets of its environment",
                 )
         text = workflow(SIGN_JOB).replace("jobs:\n", "env:\n  ENV: /tmp/x\njobs:\n")
-        self.assert_one({"k.yml": text}, r"^k\.yml: sets ENV in env, beside a signing job")
+        self.assert_one(
+            {"k.yml": text}, r"^k\.yml: sets ENV in env, beside a signing job"
+        )
 
     def test_rule_7_a_signing_step_sets_no_shell_or_working_directory(self):
         for key in ("shell: sh", "working-directory: /tmp/evil"):
@@ -579,18 +660,38 @@ class SigningTest(unittest.TestCase):
                     {"k.yml": workflow(job)},
                     rf"^k\.yml: signing job sign step 3 sets {key.split(':')[0]}",
                 )
-        for defaults in ("      run:\n        shell: sh\n", "      run:\n        shell: bash\n        working-directory: x\n"):
+        for defaults in (
+            "      run:\n        shell: sh\n",
+            "      run:\n        shell: bash\n        working-directory: x\n",
+        ):
             with self.subTest(defaults=defaults):
-                job = SIGN_JOB.replace("    steps:\n", f"    defaults:\n{defaults}    steps:\n")
-                self.assert_one({"k.yml": workflow(job)}, r"^k\.yml: signing job sign sets defaults other than")
+                job = SIGN_JOB.replace(
+                    "    steps:\n", f"    defaults:\n{defaults}    steps:\n"
+                )
+                self.assert_one(
+                    {"k.yml": workflow(job)},
+                    r"^k\.yml: signing job sign sets defaults other than",
+                )
         # GitHub's bash shell only adds -o pipefail: a failing sign script piped into tee fails.
-        job = SIGN_JOB.replace("    steps:\n", "    defaults:\n      run:\n        shell: bash\n    steps:\n")
+        job = SIGN_JOB.replace(
+            "    steps:\n",
+            "    defaults:\n      run:\n        shell: bash\n    steps:\n",
+        )
         self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
-        text = workflow(SIGN_JOB).replace("jobs:\n", "defaults:\n  run:\n    shell: sh\njobs:\n")
-        self.assert_one({"k.yml": text}, r"^k\.yml: sets defaults, beside a signing job")
+        text = workflow(SIGN_JOB).replace(
+            "jobs:\n", "defaults:\n  run:\n    shell: sh\njobs:\n"
+        )
+        self.assert_one(
+            {"k.yml": text}, r"^k\.yml: sets defaults, beside a signing job"
+        )
 
     def test_rule_7_a_signing_job_runs_on_a_github_hosted_runner(self):
-        for runs_on in ("self-hosted", "[self-hosted, linux]", "{group: mine}", "${{ inputs.runner }}"):
+        for runs_on in (
+            "self-hosted",
+            "[self-hosted, linux]",
+            "{group: mine}",
+            "${{ inputs.runner }}",
+        ):
             with self.subTest(runs_on=runs_on):
                 job = SIGN_JOB.replace("runs-on: ubuntu-24.04", f"runs-on: {runs_on}")
                 self.assert_one(
@@ -609,42 +710,69 @@ class SigningTest(unittest.TestCase):
                 )
         tracked = subprocess.run(
             ["git", "-C", str(verify.ROOT), "ls-files", "--cached"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.splitlines()
         tops = {path.split("/")[0] for path in tracked}
-        self.assertFalse(verify.SIGN_JOB_DOWNLOADS & tops, "a download directory is in the checkout")
+        self.assertFalse(
+            verify.SIGN_JOB_DOWNLOADS & tops, "a download directory is in the checkout"
+        )
 
     def test_rule_7_a_composite_action_in_a_signing_job_fails(self):
-        job = SIGN_JOB.replace(f"      - uses: {UPLOAD}\n", "      - uses: ./.github/actions/kvm\n")
+        job = SIGN_JOB.replace(
+            f"      - uses: {UPLOAD}\n", "      - uses: ./.github/actions/kvm\n"
+        )
         self.assertIn(
             "k.yml: signing job sign uses ./.github/actions/kvm" + THIRD_PARTY,
             self.problems({"k.yml": workflow(job)}),
         )
 
-    def test_rule_7_the_environment_name_is_case_insensitive_and_not_an_expression(self):
-        job = SIGN_JOB.replace("environment: signing-kernel", "environment: Signing-Kernel")
+    def test_rule_7_the_environment_name_is_case_insensitive_and_not_an_expression(
+        self,
+    ):
+        job = SIGN_JOB.replace(
+            "environment: signing-kernel", "environment: Signing-Kernel"
+        )
         self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
         third_party = job.replace(CHECKOUT, "actions/checkout@v4")
-        self.assert_one({"k.yml": workflow(third_party)}, r"^k\.yml: signing job sign uses actions/checkout@v4")
-        expression = SIGN_JOB.replace("environment: signing-kernel", "environment: ${{ inputs.environment }}")
+        self.assert_one(
+            {"k.yml": workflow(third_party)},
+            r"^k\.yml: signing job sign uses actions/checkout@v4",
+        )
+        expression = SIGN_JOB.replace(
+            "environment: signing-kernel", "environment: ${{ inputs.environment }}"
+        )
         self.assertIn(
             "k.yml: job sign names its environment with an expression the D43 lint cannot resolve",
             self.problems({"k.yml": workflow(expression)}),
         )
 
     def test_rule_7_pull_request_target_fails_anywhere(self):
-        for on in ("pull_request_target", "[push, pull_request_target]", "{pull_request_target: {}}"):
+        for on in (
+            "pull_request_target",
+            "[push, pull_request_target]",
+            "{pull_request_target: {}}",
+        ):
             with self.subTest(on=on):
                 text = workflow(BUILD_JOB).replace("on: push\n", f"on: {on}\n")
-                self.assert_one({"b.yml": text}, r"^b\.yml: runs on pull_request_target")
+                self.assert_one(
+                    {"b.yml": text}, r"^b\.yml: runs on pull_request_target"
+                )
 
     def test_rule_8_a_signing_job_in_a_called_workflow_fails(self):
         # A job of a called workflow reads the secrets of its environment only when the caller
         # passes secrets: inherit (actions/runner#4453), which rule 3 e forbids: its keys are
         # empty. A signing job belongs to the workflow the event starts.
-        for on in ("workflow_call", "[workflow_call, workflow_dispatch]", "{workflow_call: {inputs: {}}, push: {}}"):
+        for on in (
+            "workflow_call",
+            "[workflow_call, workflow_dispatch]",
+            "{workflow_call: {inputs: {}}, push: {}}",
+        ):
             with self.subTest(on=on):
-                text = workflow(BUILD_JOB, SIGN_JOB).replace("on: push\n", f"on: {on}\n")
+                text = workflow(BUILD_JOB, SIGN_JOB).replace(
+                    "on: push\n", f"on: {on}\n"
+                )
                 self.assert_one(
                     {"k.yml": text},
                     r"^k\.yml: signing job sign is in a workflow that runs on workflow_call",
@@ -656,12 +784,27 @@ class SigningTest(unittest.TestCase):
         """The verification runs in a job without the key: a container started by the image
         sign script would run beside it. Comments and docker:// references are not commands."""
         quiet = '# podman run would be a container: this comment is not one.\nskopeo copy "docker://r@d" "docker://r@d"\n'
-        self.assertEqual(self.problems({"k.yml": workflow(SIGN_JOB)}, files={"system/sign-images.sh": quiet}), [])
-        for line in ("podman run --rm img skopeo", "verifier=(docker run img)", "x && buildah from img"):
+        self.assertEqual(
+            self.problems(
+                {"k.yml": workflow(SIGN_JOB)}, files={"system/sign-images.sh": quiet}
+            ),
+            [],
+        )
+        for line in (
+            "podman run --rm img skopeo",
+            "verifier=(docker run img)",
+            "x && buildah from img",
+        ):
             with self.subTest(line=line):
-                problems = self.problems({"k.yml": workflow(SIGN_JOB)}, files={"system/sign-images.sh": quiet + line + "\n"})
+                problems = self.problems(
+                    {"k.yml": workflow(SIGN_JOB)},
+                    files={"system/sign-images.sh": quiet + line + "\n"},
+                )
                 self.assertEqual(len(problems), 1, problems)
-                self.assertRegex(problems[0], r"^system/sign-images\.sh:3 starts a container beside the key")
+                self.assertRegex(
+                    problems[0],
+                    r"^system/sign-images\.sh:3 starts a container beside the key",
+                )
 
     def test_rule_7_the_image_sign_step_also_signs_the_kernel_list(self):
         """ADR-0096: the image signing step signs the kernel artefacts too, from the allow-listed
@@ -689,23 +832,41 @@ class SigningTest(unittest.TestCase):
         login = f"step 5 runs a command outside the allow-list of D43: {COSIGN_LOGIN}"
         self.assertCountEqual(
             self.problems({"k.yml": workflow(ATTEST_JOB)}),
-            [f"k.yml: signing job sign-images {third_party}", f"k.yml: signing job sign-images {login}"],
+            [
+                f"k.yml: signing job sign-images {third_party}",
+                f"k.yml: signing job sign-images {login}",
+            ],
         )
         other = ATTEST_JOB.replace("  sign-images:\n", "  sign:\n")
         self.assertCountEqual(
             self.problems({"release.yml": workflow(other)}),
-            [f"release.yml: signing job sign {third_party}", f"release.yml: signing job sign {login}"],
+            [
+                f"release.yml: signing job sign {third_party}",
+                f"release.yml: signing job sign {login}",
+            ],
         )
         by_tag = ATTEST_JOB.replace(INSTALLER, "sigstore/cosign-installer@v3")
-        self.assert_one({"release.yml": workflow(by_tag)}, r"uses sigstore/cosign-installer@v3: only checkout")
-        inputs = ATTEST_JOB.replace(f"      - uses: {INSTALLER}\n", f"      - uses: {INSTALLER}\n        with:\n          cosign-release: v9\n")
-        self.assert_one({"release.yml": workflow(inputs)}, r"sets cosign-release on sigstore/cosign-installer")
+        self.assert_one(
+            {"release.yml": workflow(by_tag)},
+            r"uses sigstore/cosign-installer@v3: only checkout",
+        )
+        inputs = ATTEST_JOB.replace(
+            f"      - uses: {INSTALLER}\n",
+            f"      - uses: {INSTALLER}\n        with:\n          cosign-release: v9\n",
+        )
+        self.assert_one(
+            {"release.yml": workflow(inputs)},
+            r"sets cosign-release on sigstore/cosign-installer",
+        )
         # The installer step never receives the key.
         keyed = ATTEST_JOB.replace(
             f"      - uses: {INSTALLER}\n",
             f"      - uses: {INSTALLER}\n        env:\n          COSIGN_PRIVATE_KEY: ${{{{ secrets.COSIGN_PRIVATE_KEY }}}}\n",
         )
-        self.assert_one({"release.yml": workflow(keyed)}, r"hands COSIGN_PRIVATE_KEY to a step that does not run only a sign script")
+        self.assert_one(
+            {"release.yml": workflow(keyed)},
+            r"hands COSIGN_PRIVATE_KEY to a step that does not run only a sign script",
+        )
 
     def test_the_cosign_login_is_admitted_only_in_sign_images_of_release_yml(self):
         """cosign reads the docker config, not the auth file of skopeo login: sign-images logs
@@ -716,23 +877,44 @@ class SigningTest(unittest.TestCase):
             f"    steps:\n      - env:\n          GITHUB_TOKEN: x\n        run: {json.dumps(COSIGN_LOGIN)}\n",
             1,
         )
-        self.assert_one({"k.yml": workflow(elsewhere)}, r"step 1 runs a command outside the allow-list of D43: echo .* cosign login")
-        for bad in (COSIGN_LOGIN.replace("ghcr.io", "quay.io"), COSIGN_LOGIN + " && cosign sign x"):
+        self.assert_one(
+            {"k.yml": workflow(elsewhere)},
+            r"step 1 runs a command outside the allow-list of D43: echo .* cosign login",
+        )
+        for bad in (
+            COSIGN_LOGIN.replace("ghcr.io", "quay.io"),
+            COSIGN_LOGIN + " && cosign sign x",
+        ):
             with self.subTest(bad=bad):
                 job = ATTEST_JOB.replace(json.dumps(COSIGN_LOGIN), json.dumps(bad))
-                self.assert_one({"release.yml": workflow(job)}, r"step 5 runs a command outside the allow-list of D43")
+                self.assert_one(
+                    {"release.yml": workflow(job)},
+                    r"step 5 runs a command outside the allow-list of D43",
+                )
 
     def test_sign_job_rejects_another_cosign_subcommand(self):
         """Only cosign attest runs beside the key: cosign sign in a step of the job, or any cosign
         subcommand but attest in the image sign script, fails the lint."""
         step = 'cosign sign --key k "ghcr.io/o/athanor-system@sha256:x"'
-        job = ATTEST_JOB.replace("      - name: Login\n", f"      - run: {json.dumps(step)}\n      - name: Login\n")
-        self.assert_one({"release.yml": workflow(job)}, r"step 4 runs a command outside the allow-list of D43: cosign sign")
+        job = ATTEST_JOB.replace(
+            "      - name: Login\n",
+            f"      - run: {json.dumps(step)}\n      - name: Login\n",
+        )
+        self.assert_one(
+            {"release.yml": workflow(job)},
+            r"step 4 runs a command outside the allow-list of D43: cosign sign",
+        )
         script = 'cosign attest --key "$work/key" --type "$type" "$ref" < "$work/passphrase"\n'
-        self.assertEqual(self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script}), [])
+        self.assertEqual(
+            self.problems(
+                {"release.yml": workflow(ATTEST_JOB)},
+                files={"system/sign-images.sh": script},
+            ),
+            [],
+        )
         for line in (
             'cosign sign --key "$work/key" "$ref"',
-            "bash \"$retry\" cosign copy a b",
+            'bash "$retry" cosign copy a b',
             "x && cosign upload blob",
             '"$(command -v cosign)" sign "$ref"',
             'exec "cosign" sign "$ref"',
@@ -741,9 +923,15 @@ class SigningTest(unittest.TestCase):
             'eval "$attest"',
         ):
             with self.subTest(line=line):
-                problems = self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script + line + "\n"})
+                problems = self.problems(
+                    {"release.yml": workflow(ATTEST_JOB)},
+                    files={"system/sign-images.sh": script + line + "\n"},
+                )
                 self.assertEqual(len(problems), 1, problems)
-                self.assertRegex(problems[0], r"^system/sign-images\.sh:2 (runs cosign other than cosign attest|runs eval)")
+                self.assertRegex(
+                    problems[0],
+                    r"^system/sign-images\.sh:2 (runs cosign other than cosign attest|runs eval)",
+                )
 
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None

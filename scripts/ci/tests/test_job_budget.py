@@ -33,8 +33,11 @@ class JobBudget(unittest.TestCase):
 
     def test_the_command_line_exits_non_zero_past_the_budget(self):
         script = str(CI / "job_budget.py")
+
         def run(*a):
-            return subprocess.run([sys.executable, "-B", script, *a], capture_output=True, text=True)
+            return subprocess.run(
+                [sys.executable, "-B", script, *a], capture_output=True, text=True
+            )
 
         self.assertEqual(run("start", str(self.stamp)).returncode, 0)
         self.assertEqual(run("check", str(self.stamp), "10").returncode, 0)
@@ -42,9 +45,15 @@ class JobBudget(unittest.TestCase):
 
     def test_a_missing_stamp_or_a_wrong_usage_fails(self):
         script = str(CI / "job_budget.py")
-        missing = subprocess.run([sys.executable, "-B", script, "check", str(self.stamp) + ".none", "10"], capture_output=True, text=True)
+        missing = subprocess.run(
+            [sys.executable, "-B", script, "check", str(self.stamp) + ".none", "10"],
+            capture_output=True,
+            text=True,
+        )
         self.assertNotEqual(missing.returncode, 0)
-        usage = subprocess.run([sys.executable, "-B", script], capture_output=True, text=True)
+        usage = subprocess.run(
+            [sys.executable, "-B", script], capture_output=True, text=True
+        )
         self.assertEqual(usage.returncode, 2)
 
 

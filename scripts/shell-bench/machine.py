@@ -21,7 +21,15 @@ class Machine:
 
     def run(self, command, *, stdin=None, check=True, timeout=600):
         result = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", self.host, command],
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                self.host,
+                command,
+            ],
             input=stdin,
             capture_output=True,
             timeout=timeout,
@@ -44,8 +52,10 @@ class Machine:
         return self.run(prefix + command, **kwargs)
 
     def helper(self, path, *args, root=False, session=False, **kwargs):
-        command = ("sudo -n " if root else "") + "python3 - " + " ".join(
-            shlex.quote(str(arg)) for arg in args
+        command = (
+            ("sudo -n " if root else "")
+            + "python3 - "
+            + " ".join(shlex.quote(str(arg)) for arg in args)
         )
         runner = self.session if session else self.run
         return runner(command, stdin=pathlib.Path(path).read_bytes(), **kwargs)
@@ -56,15 +66,21 @@ class Machine:
     def journal(self, since, units=UNITS, this_boot=False):
         """Entries since a wall-clock time; this_boot leaves out earlier boots, whose
         CLOCK_MONOTONIC times would mix with this boot's."""
-        flags = " ".join(f"-u {unit}" for unit in units) + (" -b 0" if this_boot else "")
-        out = self.session(f"journalctl --user {flags} --since @{since} -o json --no-pager")
+        flags = " ".join(f"-u {unit}" for unit in units) + (
+            " -b 0" if this_boot else ""
+        )
+        out = self.session(
+            f"journalctl --user {flags} --since @{since} -o json --no-pager"
+        )
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def screenshot(self):
         return self.session("grim -t ppm -")
 
     def systemctl(self, *args):
-        return self.session("systemctl --user " + " ".join(shlex.quote(a) for a in args))
+        return self.session(
+            "systemctl --user " + " ".join(shlex.quote(a) for a in args)
+        )
 
     def main_pid(self, unit):
         return int(self.systemctl("show", "-p", "MainPID", "--value", unit))
