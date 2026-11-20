@@ -22,10 +22,10 @@ ALERT = """
 HEAD = "on:\n  schedule:\n    - cron: '0 0 * * *'\njobs:\n  a:\n    runs-on: x\n  b:\n    runs-on: x\n"
 
 
-def problems(text):
+def problems(text, name="w.yml"):
     root = pathlib.Path(tempfile.mkdtemp())
     (root / ".github/workflows").mkdir(parents=True)
-    (root / ".github/workflows/w.yml").write_text(text)
+    (root / ".github/workflows" / name).write_text(text)
     return verify.scheduled_alert_problems(root)
 
 
@@ -43,6 +43,17 @@ class ScheduledAlertTest(unittest.TestCase):
 
     def test_an_alert_on_a_self_hosted_runner_fails(self):
         self.assertEqual(1, len(problems(HEAD + ALERT.format(needs="a, b", runner="self-hosted"))))
+
+    def test_an_exempt_workflow_needs_no_alert_until_it_has_one(self):
+        name = "exempt.yml"
+        saved = dict(verify.ALERT_EXEMPT)
+        verify.ALERT_EXEMPT[name] = "its alert job lands elsewhere"
+        self.addCleanup(lambda: (verify.ALERT_EXEMPT.clear(), verify.ALERT_EXEMPT.update(saved)))
+        self.assertEqual([], problems(HEAD, name))
+        found = problems(HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04"), name)
+        self.assertEqual(1, len(found))
+        self.assertIn("no longer exempt", found[0])
+        self.assertEqual(1, len(problems(HEAD)))
 
     def test_a_workflow_without_a_schedule_needs_no_alert(self):
         self.assertEqual([], problems("on:\n  push:\njobs:\n  a:\n    runs-on: x\n"))

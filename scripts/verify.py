@@ -452,6 +452,11 @@ def merge_queue_problems(root):
 
 
 ALERT_ACTION = "./.github/actions/alert"
+# Scheduled workflows that have no alert job yet, each with the reason. An entry whose workflow
+# gains the job is itself reported, so the list only shrinks.
+ALERT_EXEMPT = {
+    "athanor-forge-orchestrator.yml": "its alert job lands in a separate pull request (#1353 follow-up)",
+}
 
 
 def scheduled_alert_problems(root):
@@ -466,6 +471,11 @@ def scheduled_alert_problems(root):
         jobs = doc.get("jobs") or {}
         alerts = {name: job for name, job in jobs.items()
                   if any(step.get("uses") == ALERT_ACTION for step in (job or {}).get("steps") or [])}
+        if wf.name in ALERT_EXEMPT:
+            if alerts:
+                problems.append(f"{wf.name}: has an alert job, so it is no longer exempt: "
+                                "remove it from ALERT_EXEMPT (PL51)")
+            continue
         if not alerts:
             problems.append(f"{wf.name}: runs on a schedule but no job uses {ALERT_ACTION} (PL51)")
             continue
@@ -563,9 +573,7 @@ def release_problems(root):
     condition = request.get("if", "")
     if "!cancelled()" not in condition:
         problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
-    # A job that needs request-release (the PL51 alert) ends the run and cannot be needed by it.
-    after = {job_id for job_id, job in jobs.items() if "request-release" in (job.get("needs") or [])}
-    for job_id in sorted(set(jobs) - {"request-release"} - after):
+    for job_id in sorted(set(jobs) - {"request-release"}):
         if job_id not in request.get("needs", []):
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
         elif job_id == "system-image":

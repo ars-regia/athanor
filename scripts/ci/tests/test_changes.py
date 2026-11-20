@@ -267,6 +267,7 @@ class MainTest(unittest.TestCase):
         written = json.loads(out.read_text())
         for area in changes.BUILDS:
             self.assertEqual(written[area], area not in changes.QUEUE_SKIPS, area)
+        self.assertEqual((written["specs"], written["kernel"], written["shell"]), (True, False, False))
         self.assertTrue(written["rust_audit"])
         self.assertFalse(written["docs_only"])
 

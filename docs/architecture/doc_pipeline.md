@@ -54,9 +54,10 @@
   `merge_group` run and the `changes.json` row of section 3.3 say that change detection selects
   no build on `merge_group`, as PL44 and M3 already require.
   Also amended 2026-11-21 (#1353), approved by the maintainer with the pull request that makes
-  the change: PL51's alert job ends all eleven scheduled workflows now, not only
-  `kernel-weekly.yml` and `maintenance.yml`, without waiting for PB2; `verify.py workflows`
-  checks it.
+  the change: PL51's alert job ends ten of the eleven scheduled workflows now, not only
+  `kernel-weekly.yml` and `maintenance.yml`, without waiting for PB2; the Orchestrator's follows
+  in a separate pull request and is a named exception in `verify.py workflows`, which checks
+  the rest.
   Also amended 2026-11-21 (#1353, [ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)),
   approved by the maintainer with the pull request that makes the change: the `merge_group` run
   builds the specs a change selects, and not the kernel or the shell (a shell entry costs about 45-50 minutes of wall clock and about 240 runner minutes; the push run of `shell-surfaces.yml` covers it after the merge); PL44, M3, the `pr.yml`
@@ -1201,7 +1202,9 @@ whatever their result (every other job; the hours-long `mutants` job of `mainten
 `alert-mutants` job of its own), so that a job whose runner was lost or that timed out is seen as well.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
 it on the next success. No scheduled failure stays silent. Every scheduled workflow ends with
-that job, and `verify.py workflows` fails when one does not: a workflow with an `on.schedule`
+that job but `athanor-forge-orchestrator.yml`, whose alert job lands in a separate pull request
+(`ALERT_EXEMPT` in `verify.py`, which names the exception and fails once it is stale), and
+`verify.py workflows` fails when another does not: a workflow with an `on.schedule`
 trigger needs an `always()` job on a hosted runner that uses the action and, with the other
 such jobs, needs every other job (#1353).
 
