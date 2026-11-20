@@ -132,7 +132,7 @@ pub fn spawn(
             {
                 Ok(runtime) => runtime,
                 Err(error) => {
-                    return eprintln!("athanor-lock: cannot start logind's runtime: {error}")
+                    return eprintln!("<3>athanor-lock: cannot start logind's runtime: {error}")
                 }
             };
             match runtime.block_on(run(&address, &main, called)) {
@@ -140,7 +140,7 @@ pub fn spawn(
                     main.send(Report::Event(Event::Fatal(fatal)));
                 }
                 Ok(None) => {}
-                Err(error) => eprintln!("athanor-lock: logind: {error}"),
+                Err(error) => eprintln!("<3>athanor-lock: logind: {error}"),
             }
         })?;
     Ok(calls)
@@ -258,7 +258,7 @@ async fn connect(builder: zbus::connection::Builder<'static>) -> Option<Connecti
     match builder.build().await {
         Ok(connection) => Some(connection),
         Err(error) => {
-            eprintln!("athanor-lock: cannot connect to the system bus: {error}");
+            eprintln!("<3>athanor-lock: cannot connect to the system bus: {error}");
             None
         }
     }
@@ -272,7 +272,7 @@ async fn our_session(query: &Connection) -> zbus::Result<Option<OwnedObjectPath>
         .await?;
     let (id, path) = user.display().await?;
     if id.is_empty() {
-        eprintln!("athanor-lock: the user has no display session");
+        eprintln!("<3>athanor-lock: the user has no display session");
         return Ok(None);
     }
     let session = SessionProxy::builder(query)
@@ -293,7 +293,7 @@ async fn our_session(query: &Connection) -> zbus::Result<Option<OwnedObjectPath>
         .await?;
     if kind != "wayland" || owner != uid {
         eprintln!(
-            "athanor-lock: session {id} is of type {kind:?} and uid {owner}, not a Wayland session of uid {uid}"
+            "<3>athanor-lock: session {id} is of type {kind:?} and uid {owner}, not a Wayland session of uid {uid}"
         );
         return Ok(None);
     }
@@ -306,7 +306,7 @@ fn event(message: &Message) -> zbus::Result<Event> {
     match header.member().map(|member| member.as_str()) {
         Some("Lock") => Ok(Event::Lock),
         Some("Unlock") => {
-            eprintln!("athanor-lock: logind's Unlock for the session");
+            eprintln!("<5>athanor-lock: logind's Unlock for the session");
             Ok(Event::Unlock)
         }
         Some("PrepareForSleep") => Ok(Event::PrepareForSleep(message.body().deserialize()?)),

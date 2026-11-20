@@ -8,20 +8,28 @@ use athanor_lock::logind::{Call, Report};
 use athanor_lock::state::Event;
 use common::{Bus, Emit, Fake, Lock, Record, Setup};
 
-/// This process's threads, by name.
+/// This process's threads, by name. A thread that ends while it is read is left out.
 fn threads() -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir("/proc/self/task")
         .expect("tasks")
-        .map(|task| {
-            let comm = task.expect("task").path().join("comm");
-            std::fs::read_to_string(comm)
-                .expect("comm")
-                .trim()
-                .to_owned()
-        })
+        .filter_map(|task| std::fs::read_to_string(task.ok()?.path().join("comm")).ok())
+        .map(|comm| comm.trim().to_owned())
         .collect();
     names.sort();
     names
+}
+
+/// This process's threads once they equal `expected`, or after 5 s. A joined thread can stay
+/// listed in `/proc/self/task` for a moment after `join` returns.
+fn threads_settled(expected: &[String]) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let now = threads();
+        if now == expected || std::time::Instant::now() >= deadline {
+            return now;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -69,5 +77,9 @@ fn the_logind_thread_is_the_only_thread_it_adds() {
         answer.is_err(),
         "a connection off Tokio answered under Tokio: {answer:?}"
     );
-    assert_eq!(threads(), expected, "nor did it start a thread");
+    assert_eq!(
+        threads_settled(&expected),
+        expected,
+        "nor did it start a thread"
+    );
 }
