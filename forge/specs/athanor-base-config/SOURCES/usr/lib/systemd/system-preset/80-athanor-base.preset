@@ -27,3 +27,7 @@ disable rpm-ostree-countme.timer
 # Refreshes the DNSSEC root anchor for unbound, which is not installed; systemd-resolved validates
 # with its own anchors.
 disable unbound-anchor.timer
+# The QEMU guest agent answers the hypervisor as root (ADR-0144). Off until the person turns it on
+# with `systemctl enable --now qemu-guest-agent.service`; 99-zz-athanor-qemu-guest-agent.rules
+# makes that enablement, not the device alone, start it.
+disable qemu-guest-agent.service
