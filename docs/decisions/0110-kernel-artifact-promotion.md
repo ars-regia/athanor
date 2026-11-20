@@ -2,7 +2,7 @@
 id: ADR-0110
 title: "Promote the pull request's kernel build to the release"
 date: 2026-10-09
-status: accepted
+status: amended by ADR-0143
 issues: [368, 369, 373]
 areas: [kernel, build, signing, process]
 ---

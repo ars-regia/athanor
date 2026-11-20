@@ -2,7 +2,7 @@
 id: ADR-0075
 title: "Engineering gates"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0143
 issues: [223]
 areas: [build, security]
 ---
