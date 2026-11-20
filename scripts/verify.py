@@ -6908,32 +6908,52 @@ def check_own():
     return r
 
 
-def reaches_outside(table, crate_dir):
-    """True if a manifest table names a `path` (a dependency or a [patch]) outside the crate's
-    directory, at any depth."""
-    if not isinstance(table, dict):
-        return False
-    path = table.get("path")
-    if isinstance(path, str) and not (crate_dir / path).resolve().is_relative_to(crate_dir.resolve()):
-        return True
-    return any(reaches_outside(v, crate_dir) for v in table.values())
+DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def load_toml(name, text):
+    """The parsed TOML `text`, or a ValueError that names the file `name`."""
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"{name}: not valid TOML ({e})") from e
+
+
+def dependency_paths(manifest):
+    """The `path` of every dependency, target dependency, workspace dependency and [patch] entry
+    of a parsed manifest."""
+    tables = [manifest.get(k) for k in DEPENDENCY_TABLES]
+    tables += [target.get(k) for target in manifest.get("target", {}).values()
+               if isinstance(target, dict) for k in DEPENDENCY_TABLES]
+    tables += list(manifest.get("patch", {}).values())
+    tables.append(manifest.get("workspace", {}).get("dependencies"))
+    return [dep["path"] for table in tables if isinstance(table, dict)
+            for dep in table.values() if isinstance(dep, dict) and isinstance(dep.get("path"), str)]
 
 
 def sub_locks(locks, manifests):
-    """The locks of workspaces of their own, other than the root, that build crates outside their
-    directory by path: they resolve the root's crates with a lock that Dependabot never moves,
-    since it updates only the dependencies a directory's own manifest declares (#1313). `locks`
-    and `manifests` are as for stale_lock_problems."""
+    """The locks of workspaces of their own, other than the root, any of whose manifests builds a
+    crate outside the workspace's directory by path: they resolve the root's crates with a lock
+    that Dependabot never moves, since it updates only the dependencies a directory's own
+    manifest declares (#1313). `locks` are paths relative to the root; `manifests` maps every
+    tracked Cargo.toml to its text."""
     out = []
     for lock in sorted(locks):
-        if lock == "Cargo.lock" or "/vendor/" in f"/{lock}":
+        top = Path(lock).parent
+        root_manifest = str(top / "Cargo.toml")
+        if lock == "Cargo.lock" or "/vendor/" in f"/{lock}" or root_manifest not in manifests:
             continue
-        text = manifests.get(str(Path(lock).with_name("Cargo.toml")))
-        if text is None:
+        if "workspace" not in load_toml(root_manifest, manifests[root_manifest]):
             continue
-        manifest = tomllib.loads(text)
-        if "workspace" in manifest and reaches_outside(manifest, ROOT / Path(lock).parent):
-            out.append(lock)
+        inside = (ROOT / top).resolve()
+        for name, text in sorted(manifests.items()):
+            crate = Path(name).parent
+            if not crate.is_relative_to(top):
+                continue
+            if any(not (ROOT / crate / path).resolve().is_relative_to(inside)
+                   for path in dependency_paths(load_toml(name, text))):
+                out.append(lock)
+                break
     return out
 
 
@@ -6956,22 +6976,22 @@ def lock_version_problems(root, sub, path):
     take the patch, at its version. A crate the root does not use is the sub-workspace's own, and
     a path crate is built from the same tree."""
     held = {}
-    for package in tomllib.loads(root).get("package", []):
+    for package in load_toml("Cargo.lock", root).get("package", []):
         source = package.get("source", "")
         held.setdefault(package["name"], set()).add(
             (package["version"], source if source.startswith("git+") else "registry"))
     manifest = str(Path(path).with_name("Cargo.toml"))
     out = []
-    for package in tomllib.loads(sub).get("package", []):
+    for package in load_toml(path, sub).get("package", []):
         name, old, source = package["name"], package["version"], package.get("source")
         if source is None or name not in held:
             continue
         git = source.startswith("git+")
         if (old, source if git else "registry") in held[name]:
             continue
-        versions = sorted({v for v, _ in held[name]})
+        versions = sorted({v for v, s in held[name] if s == "registry"})
         new = [v for v in versions if semver_compatible(old, v)]
-        if git:
+        if git or not versions:
             fix = f"take the root's source of {name} in {manifest}"
         elif new:
             fix = f"cargo update --manifest-path {manifest} -p {name}@{old} --precise {new[0]}"
@@ -6984,17 +7004,16 @@ def lock_version_problems(root, sub, path):
 @check("lock-versions", "A workspace of its own that builds the root's crates by path holds the root Cargo.lock's version of every crate they share")
 def check_lock_versions():
     r = Result()
-    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock"], cwd=ROOT,
-                            capture_output=True, text=True)
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock", "*Cargo.toml"],
+                            cwd=ROOT, capture_output=True, text=True)
     if listed.returncode != 0:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
-    locks = [p for p in listed.stdout.split("\0") if p]
+    files = [p for p in listed.stdout.split("\0") if p]
+    locks = [p for p in files if p.endswith("Cargo.lock")]
     try:
-        manifests = {}
-        for lock in locks:
-            manifest = Path(lock).with_name("Cargo.toml")
-            manifests[str(manifest)] = read(ROOT / manifest) if (ROOT / manifest).is_file() else None
+        manifests = {p: read(ROOT / p) for p in files
+                     if p.endswith("Cargo.toml") and (ROOT / p).is_file()}
         subs = sub_locks(locks, manifests)
         if not subs:
             r.fail("no workspace of its own builds the root's crates by path: fuzz/ and the Sal "
@@ -7003,7 +7022,7 @@ def check_lock_versions():
         for path in subs:
             for problem in lock_version_problems(root, read(ROOT / path), path):
                 r.fail(problem)
-    except (OSError, tomllib.TOMLDecodeError) as e:
+    except (OSError, ValueError) as e:
         r.fail(f"a Cargo.lock or Cargo.toml could not be read: {e}")
     return r
 

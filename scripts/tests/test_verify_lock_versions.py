@@ -86,6 +86,14 @@ class LockVersionProblemsTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertNotIn("--precise", found[0])
 
+    def test_a_registry_crate_the_root_takes_from_git_names_the_source(self):
+        found = problems(
+            [("smithay", "0.7.0", SMITHAY.format("aaa"))],
+            [("smithay", "0.7.0", REGISTRY)],
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("take the root's source of smithay", found[0])
+
 
 class SemverCompatibleTest(unittest.TestCase):
     def test_the_first_non_zero_component_decides(self):
@@ -123,6 +131,39 @@ class SubLocksTest(unittest.TestCase):
 
     def test_a_workspace_of_crates_inside_its_directory_is_its_own(self):
         self.assertEqual(self.subs('b = { path = "b" }\n'), [])
+
+    def test_a_path_back_into_its_directory_stays_inside(self):
+        self.assertEqual(self.subs('b = { path = "../a/b" }\n'), [])
+
+    def test_a_path_that_is_not_a_dependency_does_not_count(self):
+        self.assertEqual(self.subs('\n[package.metadata.x]\npath = "../zzz"\n'), [])
+
+    def test_a_member_that_builds_a_crate_outside_counts(self):
+        member = '[package]\nname = "m"\n\n[dependencies]\nb = { path = "../../b" }\n'
+        self.assertEqual(
+            verify.sub_locks(
+                ["a/Cargo.lock"],
+                {"a/Cargo.toml": self.WORKSPACE, "a/m/Cargo.toml": member},
+            ),
+            ["a/Cargo.lock"],
+        )
+
+    def test_a_member_path_resolves_from_the_member(self):
+        member = '[package]\nname = "m"\n\n[dependencies]\nx = { path = "../x" }\n'
+        self.assertEqual(
+            verify.sub_locks(
+                ["a/Cargo.lock"],
+                {"a/Cargo.toml": self.WORKSPACE, "a/m/Cargo.toml": member},
+            ),
+            [],
+        )
+
+    def test_invalid_toml_names_its_file(self):
+        with self.assertRaisesRegex(ValueError, "^a/m/Cargo.toml: not valid TOML"):
+            verify.sub_locks(
+                ["a/Cargo.lock"],
+                {"a/Cargo.toml": self.WORKSPACE, "a/m/Cargo.toml": "[x"},
+            )
 
     def test_a_crate_without_a_workspace_table_is_not_a_root(self):
         member = '[package]\nname = "x"\n\n[dependencies]\nb = { path = "../b" }\n'
