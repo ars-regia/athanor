@@ -1,6 +1,10 @@
 //! A panic that leaves more than one line. Under `panic = "abort"` a panic ends the process
 //! where it happens, and core dumps are off (doc_session.md SN8), so the hook writes what is
 //! left to know first: the message, the place, the thread and a backtrace (#1352).
+//!
+//! A shipped binary is stripped, so its frames have no names: the backtrace is printed in
+//! full, with each frame's address, and with the address `install` runs at, which places the
+//! position-independent binary's load address for a symbolizer that has its debuginfo.
 
 use std::backtrace::Backtrace;
 use std::panic::{self, PanicHookInfo};
@@ -31,7 +35,11 @@ fn report(info: &PanicHookInfo<'_>, backtrace: &Backtrace) -> String {
         .map_or_else(|| "an unknown place".to_owned(), ToString::to_string);
     let current = thread::current();
     let name = current.name().unwrap_or("(unnamed)");
-    format!("panic in thread {name} at {place}: {message}\n{backtrace}")
+    let anchor = install as fn() as usize;
+    format!(
+        "panic in thread {name} at {place}: {message}\n\
+         backtrace, with athanor_unit::panic::install at {anchor:#x}:\n{backtrace:#}"
+    )
 }
 
 #[cfg(test)]
@@ -59,5 +67,7 @@ mod tests {
         assert!(report.starts_with("panic in thread worker at "), "{report}");
         assert!(report.contains("panic.rs:"), "{report}");
         assert!(report.contains(": index 7 out of range\n"), "{report}");
+        let anchor = format!("install at {:#x}:", install as fn() as usize);
+        assert!(report.contains(&anchor), "{report}");
     }
 }
