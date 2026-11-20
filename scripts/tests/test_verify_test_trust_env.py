@@ -419,6 +419,7 @@ class TestTrustEnv(unittest.TestCase):
                 problems = self.problems(BLOCK + use + "\n" + USES)
                 self.assertEqual(len(problems), 1)
                 self.assertIn("os.environ at import time", problems[0])
+                self.assertIn("inside the test", problems[0])
 
     def test_reading_a_trust_variable_at_import_time_is_named(self):
         for use in (
@@ -441,6 +442,15 @@ class TestTrustEnv(unittest.TestCase):
             "helper function",
             "without naming it",
             "script at import time",
+            "from os import *",
+            "os.environb",
+            "sys.modules",
+            "__import__",
+            "through an alias",
+            "statements after the first two",
+            "REGISTRY_HOST",
+            "GH_HOST",
+            "REGISTRY_AUTH_FILE",
         ):
             self.assertIn(text, doc)
 

@@ -7328,7 +7328,9 @@ def environ_gaps(tree, aliases, exempt):
     """The lines, at import time (module level, class bodies, function defaults and decorators), of a reference
     to os.environ that is not a read of one variable that TRUST_ENV_NAMES does not hold: os.environ.get(<constant>
     [, default]), os.getenv(<constant>[, default]) or os.environ[<constant>] in a load. `exempt` holds the ids of
-    the nodes allowed (the argument of the module's patch statement)."""
+    the nodes allowed (the argument of the module's patch statement). Anything else is refused, which fails
+    closed: write `with mock.patch.dict(os.environ, ...)` inside the test in place of the decorator form, and
+    os.environ.get("<name outside the trust list>") in place of a membership test or a module-level write."""
     scope = list(scope_nodes(tree.body))
     const = lambda a: isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value not in TRUST_ENV_NAMES  # noqa: E731
     allowed = set(exempt)
@@ -7424,7 +7426,9 @@ def isolation_gaps(tree, shared):
     reads = environ_gaps(tree, aliases, {id(patches[0].value.args[0])})
     if reads:
         gaps.append("no use of os.environ at import time but the read of one named variable that is not a "
-                    f"trust variable (line {', '.join(map(str, reads))})")
+                    f"trust variable (line {', '.join(map(str, reads))}); write the patch as "
+                    "`with mock.patch.dict(os.environ, ...)` inside the test, or read "
+                    "os.environ.get(\"<name outside the trust list>\")")
     return gaps
 
 
@@ -7493,7 +7497,12 @@ def check_test_trust_env():
     """Static, so with known limits: a rebinding through globals() or setattr, and a helper function called at
     import time that copies the environment, are not seen (nor a Python intermediary between a test and a
     reaching script, nor a test that reaches the script through a name built at run time). The adversarial
-    class is out too: reaching os.environ without naming it, or running a script at import time."""
+    class is out too: reaching os.environ without naming it, or running a script at import time; one line each:
+    `from os import *`; os.environb or posix.environ; sys.modules; getattr or __import__; a mutation of the
+    names list through an alias; statements after the first two of setUpModule. Ambient names outside
+    TRUST_ENV_NAMES are not dropped either: REGISTRY_HOST (read by tier-digests.sh in resolve), GH_HOST,
+    GH_REPO, COSIGN_* and REGISTRY_AUTH_FILE. REGISTRY_HOST stays out because the block comparison needs the
+    names literal of every carrying module (46 files) and signed_registry.TRUST_ENV to change with it."""
     r = Result()
     for problem in trust_env_problems():
         r.fail(problem)
