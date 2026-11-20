@@ -1565,7 +1565,8 @@ _environ = _mock.patch.dict(_os.environ)
 
 def setUpModule():
     _environ.start()
-    [_os.environ.pop(name, None) for name in TRUST_ENV]
+    for name in TRUST_ENV:
+        _os.environ.pop(name, None)
 
 
 def tearDownModule():
