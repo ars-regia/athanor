@@ -5,9 +5,11 @@
 //! password service. The field's text answers the helper's first secret prompt: the caller
 //! copies it into a [`Secret`], which is written and zeroised. The socket is non-blocking and
 //! read on the main thread, so a slow PAM stack never holds the screen. Any other prompt, a
-//! malformed or over-long line, a write that would block and an end of stream before a verdict
-//! end the attempt as [`Outcome::EndOfStream`], which the lock answers with "try again" (LP10):
-//! only an exact `SUCCESS` unlocks.
+//! malformed or over-long line, more than [`MAX_LINES`] lines, a write that would block, a
+//! `SUCCESS` before the answer and an end of stream before a verdict end the attempt as
+//! [`Outcome::EndOfStream`], which the lock answers with "try again" (LP10): only an exact
+//! `SUCCESS` after the answer unlocks. The caller owns the attempt's deadline: a helper that
+//! goes silent without closing leaves `step` returning `None`.
 //!
 //! The event source wakes the main loop for two things: the `calloop::ping` that the logind
 //! thread fires after each report, and the current attempt's socket, a `Generic` in level mode.
@@ -85,7 +87,8 @@ impl Attempt {
         self.attempt
     }
 
-    /// Reads every line the socket holds. At the first secret prompt, `answer` fills the
+    /// Reads the lines the socket holds, at most [`MAX_LINES`] in the whole attempt. At the
+    /// first secret prompt, `answer` fills the
     /// `Secret` it is given with the field's text; nothing else calls it. `Some` is the end of
     /// the attempt, after which the caller drops it; `None` is a read that would block.
     pub fn step(&mut self, mut answer: impl FnMut(&mut Secret)) -> Option<Ended> {
@@ -433,13 +436,27 @@ mod tests {
     #[test]
     fn a_helper_that_never_stops_talking_ends_the_attempt() {
         let (mut attempt, mut helper) = attempt();
-        for _ in 0..MAX_LINES {
+        helper.write_all(PROMPT).expect("prompt");
+        // No verdict: without the bound the attempt would wait for more.
+        for _ in 0..MAX_LINES + 10 {
+            helper.write_all(b"PAM_TEXT_INFO x\n").expect("text");
+        }
+        let (ended, asked) = run(&mut attempt);
+        assert_eq!((ended.outcome, asked), (Outcome::EndOfStream, 1));
+        // The prompt is the first of the lines.
+        assert_eq!(ended.info.len(), MAX_LINES as usize - 1);
+    }
+
+    #[test]
+    fn a_verdict_on_the_last_line_allowed_is_read() {
+        let (mut attempt, mut helper) = attempt();
+        helper.write_all(PROMPT).expect("prompt");
+        for _ in 0..MAX_LINES - 2 {
             helper.write_all(b"PAM_TEXT_INFO x\n").expect("text");
         }
         helper.write_all(b"SUCCESS\n").expect("verdict");
         let (ended, asked) = run(&mut attempt);
-        assert_eq!((ended.outcome, asked), (Outcome::EndOfStream, 0));
-        assert_eq!(ended.info.len(), MAX_LINES as usize);
+        assert_eq!((ended.outcome, asked), (Outcome::Success, 1));
     }
 
     #[test]
