@@ -22,7 +22,7 @@ SYSTEM = "5" * 64  # the image ID the stub's --iidfile reports for the system st
 # What decides which signatures a run trusts, and the tokens that reach the network: kernel-artifacts.sh
 # reaches tier-digests.sh, and a test must not inherit the CI run's (#1257).
 TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS",
-             "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
+             "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY_OWNER")
 TIERS = {f"tier{n}": "sha256:" + "89ab"[n] * 64 for n in range(4)}  # the forge tier repositories
 
 

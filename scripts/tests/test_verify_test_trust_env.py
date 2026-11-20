@@ -163,6 +163,75 @@ class TestTrustEnv(unittest.TestCase):
         self.assertTrue(all("unreadable" in p for p in problems))
 
 
+    def test_a_renamed_tier_digests_script_is_a_problem_not_a_pass(self):
+        subprocess.run(["git", "-C", str(self.root), "mv", verify.TIER_DIGESTS, "system/digests.sh"], check=True)
+        problems = self.problems(USES)
+        self.assertEqual(len(problems), 1)
+        self.assertIn(f"{verify.TIER_DIGESTS}: not tracked", problems[0])
+
+    def test_a_return_before_the_start_is_named(self):
+        body = BLOCK.replace("    _p.start()\n", "    return\n    _p.start()\n") + USES
+        self.assertIn("setUpModule that starts", self.problems(body)[0])
+
+    def test_a_return_before_the_pops_is_named(self):
+        body = BLOCK.replace("    [o.environ", "    return\n    [o.environ") + USES
+        self.assertIn("pops GITHUB_BASE_REF", self.problems(body)[0])
+
+    def test_a_return_before_the_stop_is_named(self):
+        body = BLOCK.replace("    _p.stop()\n", "    return\n    _p.stop()\n") + USES
+        self.assertIn("tearDownModule that stops", self.problems(body)[0])
+
+    def test_a_pop_under_a_condition_is_named(self):
+        body = BLOCK.replace("    [o.environ.pop(n, None) for n in TRUST_ENV]\n",
+                             "    if False:\n        [o.environ.pop(n, None) for n in TRUST_ENV]\n") + USES
+        self.assertIn("pops GITHUB_BASE_REF", self.problems(body)[0])
+
+    def test_a_start_under_a_condition_is_named(self):
+        body = BLOCK.replace("    _p.start()\n", "    if False:\n        _p.start()\n") + USES
+        self.assertIn("setUpModule that starts", self.problems(body)[0])
+
+    def test_a_pop_outside_its_loop_is_named(self):
+        body = BLOCK.replace("    [o.environ.pop(n, None) for n in TRUST_ENV]\n",
+                             "    for n in TRUST_ENV:\n        pass\n    o.environ.pop(n, None)\n") + USES
+        self.assertIn("pops GITHUB_BASE_REF", self.problems(body)[0])
+
+    def test_a_pop_inside_a_for_loop_counts(self):
+        body = BLOCK.replace("    [o.environ.pop(n, None) for n in TRUST_ENV]\n",
+                             "    for n in TRUST_ENV:\n        o.environ.pop(n, None)\n") + USES
+        self.assertEqual(self.problems(body), [])
+
+    def test_a_pop_after_a_break_is_named(self):
+        body = BLOCK.replace("    [o.environ.pop(n, None) for n in TRUST_ENV]\n",
+                             "    for n in TRUST_ENV:\n        break\n        o.environ.pop(n, None)\n") + USES
+        self.assertIn("pops GITHUB_BASE_REF", self.problems(body)[0])
+
+    def test_a_later_rebinding_of_a_hook_is_named(self):
+        for rebinding in ("\n\nsetUpModule = lambda: None\n",
+                          "\n\ndef setUpModule():\n    pass\n",
+                          "\n\ntearDownModule = None\n",
+                          "\n\n_p = None\n"):
+            with self.subTest(rebinding=rebinding):
+                problems = self.problems(BLOCK + rebinding + USES)
+                self.assertEqual(len(problems), 1)
+                self.assertRegex(problems[0], "single undecorated|bound once")
+
+    def test_a_decorated_hook_is_named(self):
+        body = BLOCK.replace("def setUpModule", "@unittest.skip('x')\ndef setUpModule") + USES
+        self.assertIn("single undecorated setUpModule", self.problems(body)[0])
+
+    def test_an_environment_copied_at_import_is_named(self):
+        for copy in ("ENV = o.environ.copy()", "ENV = dict(o.environ)", "ENV = {**o.environ, 'A': '1'}",
+                     "class C:\n    ENV = dict(o.environ)", "def f(env=dict(o.environ)):\n    pass"):
+            with self.subTest(copy=copy):
+                problems = self.problems(BLOCK + copy + "\n" + USES)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("copy of os.environ when the module is imported", problems[0])
+
+    def test_an_environment_copied_in_a_function_is_not_an_import_copy(self):
+        body = BLOCK + "def f():\n    return dict(o.environ)\n" + USES
+        self.assertEqual(self.problems(body), [])
+
+
 # The CI run's trust environment must not reach the scripts under test (#1257).
 import os as _os  # noqa: E402
 from unittest import mock as _mock  # noqa: E402
@@ -176,6 +245,8 @@ TRUST_ENV = (
     "GITHUB_ACTIONS",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "GITHUB_HEAD_REF",
+    "GITHUB_REPOSITORY_OWNER",
 )
 _environ = _mock.patch.dict(_os.environ)
 

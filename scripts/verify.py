@@ -7179,8 +7179,13 @@ def judge_known_red(entries, base, results, today):
 # A test that runs a script reaching system/tier-digests.sh and hands it a copy of
 # os.environ inherits the CI run's trust environment: on a pull request into rebase/*,
 # GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
-TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
-                   "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
+# The names are the ones tier-digests.sh reads: a rebase/* head switches the base and calls
+# `gh api` (GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REF, GITHUB_REPOSITORY, GITHUB_SERVER_URL,
+# TIER_TRUSTED_REFS, the tokens), and the registry owner comes from GITHUB_REPOSITORY_OWNER.
+TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REF", "GITHUB_REPOSITORY",
+                   "GITHUB_REPOSITORY_OWNER", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS", "GITHUB_ACTIONS",
+                   "GH_TOKEN", "GITHUB_TOKEN")
+TIER_DIGESTS = "system/tier-digests.sh"
 SHARED_TRUST_ENV = "forge/scripts/tests/signed_registry.py"
 COMMENT_LINE = re.compile(r"(?m)^\s*#.*$")
 
@@ -7205,9 +7210,51 @@ def string_literals(tree):
             and isinstance(n.targets[0], ast.Name) and isinstance(n.value, (ast.Tuple, ast.List, ast.Set))}
 
 
+def scope_nodes(body):
+    """Every node that runs when a module is imported: the statements of `body` and what they hold, a class
+    body included; of a function or lambda only its decorators and default values, never its body."""
+    stack = list(body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            stack.extend(getattr(node, "decorator_list", []))
+            stack.extend(node.args.defaults + [d for d in node.args.kw_defaults if d is not None])
+        else:
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def bindings(tree, name):
+    """How many times the module scope binds `name`: a def, a class, an assignment, an import, a `for` or
+    `with` target, a deletion."""
+    count = 0
+    for n in scope_nodes(tree.body):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count += n.name == name
+        elif isinstance(n, ast.Name):
+            count += n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+        elif isinstance(n, ast.alias):
+            count += (n.asname or n.name.split(".")[0]) == name
+        elif isinstance(n, ast.ExceptHandler):
+            count += n.name == name
+    return count
+
+
+def run_through(statements, stops=(ast.Return, ast.Raise)):
+    """The statements that run on every pass: the direct ones, up to the first that holds a return or a raise
+    (for a loop body also a break or continue)."""
+    out = []
+    for s in statements:
+        if any(isinstance(x, stops) for x in ast.walk(s)):
+            break
+        out.append(s)
+    return out
+
+
 def isolation_gaps(tree, shared):
     """What a test module lacks of the isolation block: a module-level mock.patch.dict(os.environ), a
-    setUpModule that starts it and pops every TRUST_ENV_NAMES entry, a tearDownModule that stops it.
+    setUpModule that starts it and pops every TRUST_ENV_NAMES entry, a tearDownModule that stops it, each
+    as a direct statement that runs on every call, and no copy of os.environ made when the module is imported.
     The names popped come from a literal of the module or from `from signed_registry import TRUST_ENV`."""
     aliases = {}
     for n in ast.walk(tree):
@@ -7226,39 +7273,77 @@ def isolation_gaps(tree, shared):
                   and dotted(n.value.args[0], aliases) == "os.environ"), None)
     if patch is None:
         return ["a module-level mock.patch.dict(os.environ)"]
-    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    gaps = []
+    if bindings(tree, patch) != 1:
+        gaps.append(f"a patch variable {patch} bound once")
+    funcs, broken = {}, set()
+    for name in ("setUpModule", "tearDownModule"):
+        defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name and not n.decorator_list]
+        if len(defs) == 1 and bindings(tree, name) == 1:
+            funcs[name] = defs[0]
+        elif bindings(tree, name):
+            broken.add(name)
+            gaps.append(f"a single undecorated {name}")
 
     def calls(fn, method):
         return fn is not None and any(
-            isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == method
-            and isinstance(c.func.value, ast.Name) and c.func.value.id == patch for c in ast.walk(fn))
+            isinstance(s, ast.Expr) and isinstance(s.value, ast.Call) and isinstance(s.value.func, ast.Attribute)
+            and s.value.func.attr == method and isinstance(s.value.func.value, ast.Name)
+            and s.value.func.value.id == patch for s in run_through(fn.body))
 
-    gaps = []
+    def values(it):
+        if isinstance(it, ast.Name):
+            return lists.get(it.id, set())
+        if isinstance(it, (ast.Tuple, ast.List)):
+            return {e.value for e in it.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        return set()
+
+    def pop_of(call, loop):
+        if isinstance(call, ast.Call) and dotted(call.func, aliases) == "os.environ.pop" and call.args:
+            arg = call.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                return {arg.value}
+            if isinstance(arg, ast.Name):
+                return loop.get(arg.id, set())
+        return set()
+
+    def popped_by(s):
+        if isinstance(s, ast.Expr) and isinstance(s.value, ast.ListComp):
+            g = s.value.generators[0]
+            if len(s.value.generators) == 1 and not g.ifs and isinstance(g.target, ast.Name):
+                return pop_of(s.value.elt, {g.target.id: values(g.iter)})
+        elif isinstance(s, ast.Expr):
+            return pop_of(s.value, {})
+        elif isinstance(s, ast.For) and not s.orelse and isinstance(s.target, ast.Name):
+            loop = {s.target.id: values(s.iter)}
+            return set().union(*[pop_of(b.value, loop) for b in run_through(
+                s.body, (ast.Return, ast.Raise, ast.Break, ast.Continue)) if isinstance(b, ast.Expr)])
+        return set()
+
     setup = funcs.get("setUpModule")
-    if not calls(setup, "start"):
+    if "setUpModule" not in broken and not calls(setup, "start"):
         gaps.append("a setUpModule that starts the patch")
-    if not calls(funcs.get("tearDownModule"), "stop"):
+    if "tearDownModule" not in broken and not calls(funcs.get("tearDownModule"), "stop"):
         gaps.append("a tearDownModule that stops the patch")
-    popped = set()
-    if setup is not None:
-        loops = {}  # loop variable -> the literal it iterates
-        for n in ast.walk(setup):
-            pairs = [(n.target, n.iter)] if isinstance(n, ast.For) else [
-                (g.target, g.iter) for g in getattr(n, "generators", [])]
-            for target, it in pairs:
-                if isinstance(target, ast.Name) and isinstance(it, ast.Name) and it.id in lists:
-                    loops[target.id] = lists[it.id]
-        for c in ast.walk(setup):
-            if isinstance(c, ast.Call) and dotted(c.func, aliases) == "os.environ.pop" and c.args:
-                arg = c.args[0]
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    popped.add(arg.value)
-                elif isinstance(arg, ast.Name):
-                    popped |= loops.get(arg.id, set())
-    missing = [n for n in TRUST_ENV_NAMES if n not in popped]
-    if missing:
-        gaps.append(f"a setUpModule that pops {', '.join(missing)}")
+    if "setUpModule" not in broken:
+        popped = set().union(*[popped_by(s) for s in run_through(setup.body if setup else [])])
+        missing = [n for n in TRUST_ENV_NAMES if n not in popped]
+        if missing:
+            gaps.append(f"a setUpModule that pops {', '.join(missing)}")
+    copies = sorted({n.lineno for n in scope_nodes(tree.body) if copies_environ(n, aliases)})
+    if copies:
+        gaps.append(f"no copy of os.environ when the module is imported (line {', '.join(map(str, copies))})")
     return gaps
+
+
+def copies_environ(node, aliases):
+    """Whether `node` copies os.environ: os.environ.copy(), dict(os.environ), copy.copy(os.environ) or {**os.environ}."""
+    if isinstance(node, ast.Call):
+        f = dotted(node.func, aliases)
+        return f == "os.environ.copy" or (f in ("dict", "copy.copy", "copy.deepcopy") and bool(node.args)
+                                          and dotted(node.args[0], aliases) == "os.environ")
+    return isinstance(node, ast.Dict) and any(k is None and dotted(v, aliases) == "os.environ"
+                                              for k, v in zip(node.keys, node.values))
 
 
 def trust_env_problems(root=None, reached=None):
@@ -7280,11 +7365,16 @@ def trust_env_problems(root=None, reached=None):
                 problems.append(f"{f}: tracked but unreadable ({e.strerror})")
 
     def naming(names, candidates):
+        if not names:
+            return set()
         found = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names))) + r")(?![\w.-])")
         return {f for f in candidates if found.search(texts[f])}
 
     base = lambda f: f.rsplit("/", 1)[-1]  # noqa: E731
-    reaching = {f for f in texts if base(f) == "tier-digests.sh"}
+    if TIER_DIGESTS not in texts:
+        return problems + [f"{TIER_DIGESTS}: not tracked, so no test can be found that reaches it "
+                           "(renamed or removed? update TIER_DIGESTS in scripts/verify.py)"]
+    reaching = {TIER_DIGESTS}
     pending, rest = {base(f) for f in reaching}, {f for f in texts if not is_test.search(f)} - reaching
     while pending and rest:
         more = naming(pending, rest)

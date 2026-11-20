@@ -44,6 +44,7 @@ RUNNER_ENV = (
     "GITHUB_ACTIONS",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "GITHUB_REPOSITORY_OWNER",
 )
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
@@ -563,8 +564,8 @@ class CosmicCompVersion(unittest.TestCase):
 import os as _os  # noqa: E402
 from unittest import mock as _mock  # noqa: E402
 
-TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
-             "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
+TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS",
+             "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY_OWNER")
 _environ = _mock.patch.dict(_os.environ)
 
 

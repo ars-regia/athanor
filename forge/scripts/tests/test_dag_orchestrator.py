@@ -117,7 +117,6 @@ class RegistryStateTest(unittest.TestCase):
         env = {
             "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
             "ANSWER_DIR": str(root),
-            "GITHUB_REPOSITORY_OWNER": "Acme",
             "RETRY_ATTEMPTS": "1",
         }
         patcher = mock.patch.dict(os.environ, env)
@@ -125,6 +124,7 @@ class RegistryStateTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         for name in TRUST_ENV:
             os.environ.pop(name, None)  # restored by the patcher
+        os.environ["GITHUB_REPOSITORY_OWNER"] = "Acme"
         patcher = mock.patch.object(dag, "FORGE_DIR", str(root / "forge"))
         patcher.start()
         self.addCleanup(patcher.stop)
