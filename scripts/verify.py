@@ -7024,7 +7024,7 @@ def fuzz_patch_problems(manifests):
     if FUZZ_MANIFEST not in manifests:
         return [f"{FUZZ_MANIFEST} is not tracked"]
 
-    def patches(name):
+    def patches(name, written=None):
         data = load_toml(name, manifests[name])
         table = data.get("patch") if isinstance(data.get("patch"), dict) else {}
         out = {}
@@ -7032,11 +7032,15 @@ def fuzz_patch_problems(manifests):
             for crate, spec in entries.items() if isinstance(entries, dict) else ():
                 path = spec.get("path") if isinstance(spec, dict) else None
                 out[(registry, crate)] = ((ROOT / name).parent / path).resolve() if isinstance(path, str) else spec
+                if written is not None and isinstance(path, str):
+                    written[(registry, crate)] = path
         return out
     fuzz = patches(FUZZ_MANIFEST)
+    shown = {}
+    root_patches = patches("Cargo.toml", shown)
     return [f"{FUZZ_MANIFEST}: [patch.{registry}] {crate} is not the root Cargo.toml's entry, "
-            f"{spec.relative_to(ROOT) if isinstance(spec, Path) else spec}"
-            for (registry, crate), spec in sorted(patches("Cargo.toml").items())
+            f"{shown.get((registry, crate), spec)}"
+            for (registry, crate), spec in sorted(root_patches.items())
             if fuzz.get((registry, crate)) != spec]
 
 
