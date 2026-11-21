@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use athanor_sal::driver::Role;
-use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId};
+use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, Wrap};
 use athanor_settings_core::registry::{Group, Page, Registry};
 use athanor_settings_core::target::{self, Target};
 use athanor_settings_core::window_state;
@@ -172,8 +172,15 @@ impl Settings {
             .iter()
             .find(|(_, to)| to.page() == page && page.is_some())
             .map(|(row, _)| *row);
-        if let Some(row) = row {
-            let _changed = ui.select_row(row);
+        match row {
+            Some(row) => {
+                let _changed = ui.select_row(row);
+            }
+            // Sal clears no selection on its own; a list filled anew has none.
+            None => {
+                let query = ui.field_text(self.search).unwrap_or_default();
+                self.fill_nav(ui, &query);
+            }
         }
     }
 
@@ -288,7 +295,8 @@ impl Settings {
                 let row = ui.add(group, Kind::Row);
                 let label = ui.add(row, Kind::Label(label));
                 self.look.note(ui, label);
-                ui.add(row, Kind::Label(value));
+                let value = ui.add(row, Kind::Label(value));
+                ui.set_wrap(value, Some(Wrap::default()));
             }
         }
     }
@@ -466,6 +474,30 @@ mod tests {
             Some(Target::Landing)
         );
         std::fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[test]
+    fn the_landing_page_selects_no_sidebar_row() {
+        let mut settings = settings(Target::Page("about"));
+        let mut ui = settings.ui.take().expect("not started");
+        assert!(ui.selected(settings.nav).is_some(), "About is selected");
+        settings.navigate(&mut ui, Target::Landing);
+        assert_eq!(ui.selected(settings.nav), None);
+    }
+
+    #[test]
+    fn a_long_hardware_name_wraps_inside_the_window() {
+        let mut settings = settings(Target::Landing);
+        settings.hardware = Some(info::Hardware {
+            processor: None,
+            memory: None,
+            graphics: vec!["NVIDIA Corporation AD103 [GeForce RTX 4080 SUPER] ".repeat(4)],
+            disk: None,
+        });
+        let mut ui = settings.ui.take().expect("not started");
+        let (width, _) = ui.layout();
+        settings.navigate(&mut ui, Target::Page("about"));
+        assert_eq!(ui.layout().0, width, "the window keeps its width");
     }
 
     #[test]
