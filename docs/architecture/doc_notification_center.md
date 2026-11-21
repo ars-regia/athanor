@@ -33,7 +33,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was
 
 **NC3. The history.**
 
-- **Where.** `$XDG_STATE_HOME/athanor/shelld/notifications.json`, mode 0600, beneath the one state directory the daemon's Landlock policy lets it write, written to a temporary file and renamed. Writes are coalesced to at most one every 2 seconds, plus one when the daemon stops. "Clear all" and the clearing of a group write at once.
+- **Where.** `$XDG_STATE_HOME/athanor/shelld/notifications.json`, mode 0600, beneath the one state directory the daemon's Landlock policy lets it write, written to a temporary file and renamed. Writes are coalesced to at most one every 2 seconds, plus one when the daemon stops. "Clear all" and the clearing of a group write at once. *Amended 2026-11-22: a write grant whose path passes through a link in a directory that root alone does not write, such as a `~/.local` or `~/.local/state` that links into a dotfiles tree, is refused, and the daemon logs the link and its target and exits; following the link would let the grant be redirected to any directory the user can write. The same rule holds for every confined session service, `athanor-update-notify` (`doc_update_trust.md`, UT11) included (#1061; maintainer decision, 2026-11-22).*
 - **What is kept.** Every notification except those with the `transient` hint. Each entry has:
   - its id;
   - its application identity (NC4);
