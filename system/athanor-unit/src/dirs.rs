@@ -97,10 +97,11 @@ pub fn owned_dir(path: &Path) -> io::Result<Checked> {
     checked_dir(path, true)
 }
 
-/// `owned_dir` for a directory only the process's own user may own, root included: what a
-/// grant needs when the path was resolved from a link the user's files hold (a dotfiles tree,
-/// canonicalised by the caller, since the walk refuses such a link), so that a root-owned
-/// directory is never granted. The owner is read from the same descriptor the grant names.
+/// `owned_dir` for a directory only the process's own user may own, root included, so that a
+/// root-owned directory is never granted. The path is walked as `owned_dir` walks it: a link
+/// in a directory that root alone does not write (a dotfiles tree) is refused, and a caller
+/// whose path may hold one resolves it first (the layout chooser canonicalises its document's
+/// directory). The owner is read from the same descriptor the grant names.
 pub fn own_dir(path: &Path) -> io::Result<Checked> {
     checked_dir(path, false)
 }
@@ -194,21 +195,32 @@ const MAX_LINKS: usize = 40;
 /// directory the user writes. `shown` is the path the refusal names.
 fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
     let mut dir = start(path.has_root())?;
+    // The path of `dir` as reached, for the refusal to name the link: every link on the way is
+    // resolved here, so `..` takes off the last name.
+    let mut reached = PathBuf::from(if path.has_root() { "/" } else { "" });
     let mut rest = components(path);
     let mut links = 0;
     while let Some(name) = rest.pop() {
         let next = open_last(&dir, &name, OFlag::empty())?;
         if !next.metadata()?.file_type().is_symlink() {
             dir = next;
+            if name == ".." {
+                reached.pop();
+            } else {
+                reached.push(&name);
+            }
             continue;
         }
+        let target = PathBuf::from(nix::fcntl::readlinkat(&dir, name.as_os_str())?);
         let holder = dir.metadata()?;
         if holder.uid() != 0 || holder.mode() & 0o022 != 0 {
             return Err(refused(
                 shown,
                 &format!(
-                    "passes through a link, {}, in a directory that root alone does not write",
-                    Path::new(&name).display()
+                    "passes through {} -> {}, a link in a directory that root alone does not \
+                     write; replace the link with a real directory",
+                    reached.join(&name).display(),
+                    target.display()
                 ),
             ));
         }
@@ -216,9 +228,9 @@ fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
         if links > MAX_LINKS {
             return Err(Errno::ELOOP.into());
         }
-        let target = PathBuf::from(nix::fcntl::readlinkat(&dir, name.as_os_str())?);
         if target.has_root() {
             dir = start(true)?;
+            reached = PathBuf::from("/");
         }
         rest.extend(components(&target));
     }
@@ -317,6 +329,22 @@ mod tests {
             .create(&runtime)
             .expect("runtime");
         runtime
+    }
+
+    /// Removes a link, or a directory and what it holds, when dropped: after a failed
+    /// assertion too, so that a red run leaves nothing behind in /tmp.
+    struct Removed(PathBuf);
+
+    impl Drop for Removed {
+        fn drop(&mut self) {
+            let removed = match fs::symlink_metadata(&self.0) {
+                Ok(found) if found.is_dir() => fs::remove_dir_all(&self.0),
+                _ => fs::remove_file(&self.0),
+            };
+            if let Err(error) = removed {
+                eprintln!("cleanup of {}: {error}", self.0.display());
+            }
+        }
     }
 
     #[test]
@@ -440,6 +468,7 @@ mod tests {
     #[test]
     fn a_link_in_an_intermediate_component_is_refused() {
         let runtime = runtime("intermediate");
+        let _removed = Removed(runtime.clone());
         let (real, link) = (runtime.join("real"), runtime.join("link"));
         fs::DirBuilder::new()
             .mode(0o700)
@@ -471,7 +500,17 @@ mod tests {
             !real.join("new").exists(),
             "nothing is made through the link"
         );
-        fs::remove_dir_all(&runtime).expect("cleanup");
+        let error = owned_dir(&link.join("d")).expect_err("owned_dir");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "{} passes through {} -> {}, a link in a directory that root alone does not \
+                 write; replace the link with a real directory",
+                link.join("d").display(),
+                link.display(),
+                real.display()
+            )
+        );
     }
 
     #[test]
@@ -486,12 +525,21 @@ mod tests {
         let runtime = runtime("writable-holder");
         let link = PathBuf::from(format!("/tmp/athanor-unit-link-{}", std::process::id()));
         fs::remove_file(&link).ok();
+        let (_runtime_removed, _link_removed) = (Removed(runtime.clone()), Removed(link.clone()));
         std::os::unix::fs::symlink(&runtime, &link).expect("symlink");
         fs::create_dir(runtime.join("d")).expect("mkdir");
         let error = owned_dir(&link.join("d")).expect_err("a link in /tmp");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
-        fs::remove_file(&link).expect("cleanup");
-        fs::remove_dir_all(&runtime).expect("cleanup");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "{} passes through {} -> {}, a link in a directory that root alone does not \
+                 write; replace the link with a real directory",
+                link.join("d").display(),
+                link.display(),
+                runtime.display()
+            )
+        );
     }
 
     #[test]
