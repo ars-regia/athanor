@@ -297,7 +297,9 @@ def network(ctx):
     # The rig's theme draws the excellent and the good icon alike, so the strengths below are 82,
     # 40 and 50: the excellent icon, then the ok icon twice.
     shown = lab_row()
-    picture = capture("bar-modules-network-0")
+    # Settled, as the captures after it are: it is the reference the return to 82 is held to.
+    picture = capture_after("bar-modules-network-0", None)
+    check("the open popover settles on a picture", picture is not None)
     set_strength("lab", 40)
     redrawn = capture_after("bar-modules-network-1", picture)
     check("a new signal icon is drawn on the row", redrawn is not None)
@@ -316,8 +318,9 @@ def network(ctx):
         and capture_after("bar-modules-network-3", redrawn) is not None
         and lab_row() == shown,
     )
-    # The icon on the way back is the first one, not merely another: the clock is frozen under
-    # FAKETIME, so the same icon draws the same picture.
+    # The icon on the way back is the first one, not merely another. The bar's clock starts at
+    # 10:00:00 under FAKETIME and these captures run seconds after it starts, so the clock shows
+    # the same minute and the same icon draws the same picture.
     check("and it is the icon the row began with", capture("bar-modules-network-4") == picture)
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
