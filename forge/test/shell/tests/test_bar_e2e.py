@@ -59,7 +59,7 @@ class AfreshTest(unittest.TestCase):
                 raise gerror("atspi_error", "Unknown object '/org/a11y/atspi/accessible/9/1'")
             return ["button"]
 
-        self.assertEqual(bar_e2e.afresh(read), ["button"])
+        self.assertEqual(atspi_check.afresh(read), ["button"])
         self.assertEqual(len(calls), 2)
 
     def test_a_tree_that_never_settles_raises_the_last_error(self, _sleep):
@@ -70,7 +70,7 @@ class AfreshTest(unittest.TestCase):
             raise gerror("atspi_error", f"Unknown object '/{len(calls)}'")
 
         with self.assertRaises(GLib.Error) as raised:
-            bar_e2e.afresh(read)
+            atspi_check.afresh(read)
         self.assertEqual(len(calls), atspi_check.WALK_TRIES)
         self.assertEqual(raised.exception.message, f"Unknown object '/{atspi_check.WALK_TRIES}'")
 
@@ -82,7 +82,7 @@ class AfreshTest(unittest.TestCase):
             raise gerror("atspi_error", "The application no longer exists")
 
         with self.assertRaises(GLib.Error):
-            bar_e2e.afresh(read)
+            atspi_check.afresh(read)
         self.assertEqual(len(calls), 1)
 
     def test_a_press_that_fails_is_raised_not_pressed_again(self, _sleep):

@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import children, find_application, walk  # noqa: E402
+from atspi_check import collect, find_application, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
     buttons,
     buttons_matching,
@@ -125,19 +125,12 @@ def labels(app, Atspi):
 
 def switch_node(app, Atspi):
     """The showing switch called "Automatic security updates", found afresh, or None."""
-    found = []
-
-    def visit(accessible):
-        if (
-            accessible.get_role_name() in ("switch", "toggle button", "check box")
-            and accessible.get_name() == "Automatic security updates"
-            and showing(accessible, Atspi)
-        ):
-            found.append(accessible)
-        for child in children(accessible):
-            visit(child)
-
-    visit(app)
+    found = collect(
+        app,
+        lambda node: node.get_role_name() in ("switch", "toggle button", "check box")
+        and node.get_name() == "Automatic security updates"
+        and showing(node, Atspi),
+    )
     return found[0] if found else None
 
 
