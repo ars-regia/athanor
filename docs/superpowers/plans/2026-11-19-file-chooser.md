@@ -550,10 +550,10 @@ always have their anchor; a stick mounted later lies beneath it. Whether a mount
 unit started is writable inside its namespace is unverified; Task 6's VM test decides. The
 alternative is no New Folder on removable drives.
 *Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision
-19). The line ships in the backend's package, `/usr/lib/tmpfiles.d/xdg-desktop-portal-athanor.conf`;
-udisks2's identical line makes systemd-tmpfiles log a duplicate, a known and harmless cost.
-Proposed with the amendment: when `/run/media` is absent at start, the backend logs at err
-priority with the path and confines without that root.*
+19). Proposed with the amendment: the line is
+`/usr/lib/tmpfiles.d/xdg-desktop-portal-athanor.conf`, in the backend's package; udisks2's
+identical line is applied again without a message. Also proposed: when `/run/media` is absent
+at start, the backend logs at err priority with the path and confines without that root.*
 
 D7. **Tabs and drops in the chooser.** Recommended: neither in this plan; tabs (SR5, FM19) and
 drag and drop (SR13, decision 40) belong to the file manager's window, as decision 39 orders
