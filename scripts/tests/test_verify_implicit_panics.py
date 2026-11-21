@@ -89,10 +89,10 @@ class BudgetTest(unittest.TestCase):
         with (
             mock.patch.dict(os.environ, {verify.IMPLICIT_PANIC_CARGO: ""}),
             mock.patch.object(verify, "BASE_REF", None),
-            mock.patch.object(verify.subprocess, "run") as run,
+            mock.patch.object(verify.subprocess, "run", side_effect=verify.subprocess.run) as run,
         ):
             res = verify.check_implicit_panics()
-        run.assert_not_called()
+        self.assertEqual([c for c in run.call_args_list if "clippy" in c.args[0]], [])
         self.assertEqual(res.problems, [])
         self.assertEqual(len(res.notes), 1)
 
@@ -116,6 +116,56 @@ class AllowTest(unittest.TestCase):
             with mock.patch.object(verify, "ROOT", root):
                 found = verify.implicit_panic_allows([root / "lib.rs"])
         self.assertEqual(found, ["lib.rs:2", "lib.rs:4", "lib.rs:9"])
+
+    def test_an_allow_of_warnings_or_of_a_spaced_path_is_found(self):
+        source = (
+            "#![allow(warnings)]\n"
+            "#[allow(clippy :: indexing_slicing)]\n"
+            "#[expect(clippy::\n    string_slice)]\n"
+            "#[allow(clippy::all)]\n"
+            "#[allow(clippy::indexing_slicing_more)]\n"
+            "#[allow(dead_code, reason = \"x\")]\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "lib.rs").write_text(source)
+            with mock.patch.object(verify, "ROOT", root):
+                found = verify.implicit_panic_allows([root / "lib.rs"])
+        self.assertEqual(found, ["lib.rs:1", "lib.rs:2", "lib.rs:3"])
+
+    def test_a_cargo_or_clippy_configuration_that_hides_a_lint_is_found(self):
+        files = {
+            ".cargo/config.toml": '[build]\nrustflags = ["-W", "x", "-A", "clippy::indexing_slicing", "--cap-lints=warn"]\n'
+            '[target.x]\nrustflags = "-Aclippy::string_slice"\n[env]\nCLIPPY_CONF_DIR = "/x"\nOTHER = "y"\n',
+            "sub/.cargo/config": '[build]\nrustflags = ["--allow", "warnings"]\n',
+            "ok/.cargo/config.toml": '[build]\nrustflags = ["-D", "unsafe_code", "-C", "link-arg=-Wl,-z,now"]\n',
+            "clippy.toml": 'arithmetic-side-effects-allowed = ["X"]\nmsrv = "1.80"\n',
+            "x/.clippy.toml": "suppress-restriction-lint-in-const = true\n",
+            "bad/clippy.toml": "not toml [",
+            "config.toml": '[build]\nrustflags = ["-A", "x"]\n',
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for path, text in files.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text)
+            found = verify.implicit_panic_configs(root, list(files))
+        self.assertEqual([f.split(":")[0] for f in found], [
+            ".cargo/config.toml", ".cargo/config.toml", ".cargo/config.toml", ".cargo/config.toml",
+            "bad/clippy.toml", "clippy.toml", "sub/.cargo/config", "x/.clippy.toml",
+        ])
+
+    def test_a_pruned_name_under_src_is_walked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for path in ("c/src/target/a.rs", "c/src/x/.cache/b.rs", "c/src/node_modules/c.rs",
+                         "c/src/repo-cache/d.rs", "c/target/e.rs", "c/.cache/f.rs", "node_modules/g.rs"):
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text("")
+            with mock.patch.object(verify, "ROOT", root):
+                found = sorted(p.relative_to(root).as_posix() for p in verify.walk(root, ".rs"))
+        self.assertEqual(found, ["c/src/node_modules/c.rs", "c/src/repo-cache/d.rs",
+                                 "c/src/target/a.rs", "c/src/x/.cache/b.rs"])
 
 
 class BaseTest(unittest.TestCase):

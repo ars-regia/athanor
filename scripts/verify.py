@@ -97,6 +97,13 @@ PRUNE = {"target", ".git", "repo-cache", ".cache", "node_modules",
 AUTO_TPM_UNITS = ("athanor-tpm-luks-seal", "athanor-tpm-rollback-check", "athanor-tpm-rollback-update")
 
 
+def entered(here, dirnames, base):
+    """The directories of `dirnames`, under `here`, that a walk of `base` enters: not a PRUNE name
+    nor ROOT/experimental. Under a crate's src/ a `target` or `.cache` is a module, and is entered."""
+    inside = here.relative_to(ROOT if here.is_relative_to(ROOT) else base).parts
+    return [d for d in dirnames if ("src" in inside or d not in PRUNE) and here / d != ROOT / "experimental"]
+
+
 def walk(base, suffix):
     """os.walk with pruning: rglob enters target/ (tens of thousands of files) and takes
     minutes on a mounted filesystem. An `experimental/` below the root is code, and is walked."""
@@ -104,7 +111,7 @@ def walk(base, suffix):
     if not base.is_dir():
         return
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE and Path(dirpath, d) != ROOT / "experimental"]
+        dirnames[:] = entered(Path(dirpath), dirnames, base)
         for f in filenames:
             if f.endswith(suffix):
                 yield Path(dirpath) / f
@@ -2963,7 +2970,7 @@ def hidden_failures(text):
 def links(base):
     """The links under `base`, to a file or a directory: `walk` follows neither."""
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE and Path(dirpath, d) != ROOT / "experimental"]
+        dirnames[:] = entered(Path(dirpath), dirnames, base)
         for name in dirnames + filenames:
             if (Path(dirpath) / name).is_symlink():
                 yield Path(dirpath) / name
@@ -7288,10 +7295,20 @@ IMPLICIT_PANIC_RUNS = (
 # Without it the check still fails closed on the budget file: a line raised or dropped against the
 # base, a member without a line, an `allow` of a budget lint.
 IMPLICIT_PANIC_CARGO = "ATHANOR_IMPLICIT_PANICS_CARGO"
-# An `allow` or `expect` of a budget lint, or of clippy's restriction group they belong to, hides
-# a hit from the count: refused outside tests.
-IMPLICIT_PANIC_ALLOW = re.compile(
-    r"\b(?:allow|expect)\s*\([^)]*\bclippy::(?:arithmetic_side_effects|indexing_slicing|string_slice|restriction)\b")
+# An `allow` or `expect` of a budget lint, or of a group it belongs to (`warnings` holds every lint
+# the command line raises to a warning), hides a hit from the count: refused outside tests, with any
+# spacing inside a lint's path. `clippy::all` holds no restriction lint, so it hides none of them:
+# the generated protocol modules allow it.
+IMPLICIT_PANIC_ALLOW = re.compile(r"\b(?:allow|expect)\s*\(")
+IMPLICIT_PANIC_HIDES = {"warnings", "clippy::restriction", *IMPLICIT_PANIC_LINTS}
+# What a tracked Cargo configuration may not hold: a rustflags flag that allows a lint or caps
+# them all, and an [env] variable that points clippy at another configuration or other arguments.
+IMPLICIT_PANIC_FLAGS = re.compile(r"-A.*|--allow(?:=.*)?|--cap-lints(?:=.*)?")
+IMPLICIT_PANIC_ENV = {"CLIPPY_CONF_DIR", "CLIPPY_ARGS"}
+# A clippy.toml key that relaxes a budget lint: the operations arithmetic_side_effects lets
+# through, or no restriction lint in a `const` context.
+IMPLICIT_PANIC_CLIPPY_KEY = re.compile(
+    r".*(?:arithmetic-side-effects|indexing-slicing|string-slice).*|suppress-restriction-lint-in-const")
 
 
 def implicit_panic_budget(text):
@@ -7393,7 +7410,47 @@ def implicit_panic_allows(files):
         if is_test_file(p) or p in test_modules or vendored(rel(p)):
             continue
         txt = without_literals(without_test_items(read(p)))
-        found += [f"{rel(p)}:{txt.count(chr(10), 0, m.start()) + 1}" for m in IMPLICIT_PANIC_ALLOW.finditer(txt)]
+        for m in IMPLICIT_PANIC_ALLOW.finditer(txt):
+            depth, end = 1, m.end()
+            while depth and end < len(txt):
+                depth += {"(": 1, ")": -1}.get(txt[end], 0)
+                end += 1
+            if IMPLICIT_PANIC_HIDES & set(re.sub(r"\s+", "", txt[m.end():end - 1]).split(",")):
+                found.append(f"{rel(p)}:{txt.count(chr(10), 0, m.start()) + 1}")
+    return found
+
+
+def implicit_panic_configs(root, tracked):
+    """What hides a budget lint in the tracked Cargo configurations and clippy.toml files among
+    `tracked` (paths relative to `root`): IMPLICIT_PANIC_FLAGS in a rustflags, IMPLICIT_PANIC_ENV
+    in [env], an IMPLICIT_PANIC_CLIPPY_KEY. A file that is no TOML is a finding too."""
+    found = []
+    for path in sorted(tracked):
+        parts = Path(path).parts
+        cargo = len(parts) > 1 and parts[-2] == ".cargo" and parts[-1] in ("config", "config.toml")
+        if not cargo and parts[-1] not in ("clippy.toml", ".clippy.toml"):
+            continue
+        try:
+            doc = tomllib.loads(read(root / path))
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            found.append(f"{path}: cannot be read: {e}")
+            continue
+        if not cargo:
+            found += [f"{path}: `{key}` relaxes a lint of {IMPLICIT_PANIC_BUDGET}"
+                      for key in doc if IMPLICIT_PANIC_CLIPPY_KEY.fullmatch(key)]
+            continue
+        found += [f"{path}: [env] {key} changes what clippy is run with"
+                  for key in doc.get("env", {}) if key in IMPLICIT_PANIC_ENV]
+        tables = [doc]
+        while tables:
+            table = tables.pop()
+            for key, value in table.items():
+                if isinstance(value, dict):
+                    tables.append(value)
+                elif key == "rustflags":
+                    flags = value.split() if isinstance(value, str) else value
+                    found += [f"{path}: rustflags `{flag}` allows or caps the lints of {IMPLICIT_PANIC_BUDGET}"
+                              for flag in flags if isinstance(flag, str) and IMPLICIT_PANIC_FLAGS.fullmatch(flag)]
     return found
 
 
@@ -7422,6 +7479,12 @@ def check_implicit_panics():
         return r
     for at in implicit_panic_allows(list(rust_files())):
         r.fail(f"{at}: an `allow` of a lint of {IMPLICIT_PANIC_BUDGET} outside tests hides an implicit panic")
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    for problem in implicit_panic_configs(ROOT, [f for f in listed.stdout.split("\0") if f]):
+        r.fail(problem)
     for problem in implicit_panic_unlisted(budget, members):
         r.fail(problem)
     if BASE_REF is not None:
