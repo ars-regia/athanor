@@ -19,6 +19,7 @@ const SETTERS: &[&str] = &[
     "SettingsExt",
     ".set_int64(",
     ".set_uint64(",
+    ".set_value(",
 ];
 
 /// Whether `word` stands in `text` as a whole identifier, as a regex's `\bword\b`.
@@ -53,6 +54,19 @@ fn offences(text: &str) -> Vec<String> {
             found.push(statement.trim().to_owned());
         }
     }
+    // gio under another name (`use gio as g`, `extern crate gio as g`) hides `g::Settings`
+    // from every other test here, so the rename is an offence in itself.
+    let words: Vec<&str> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    for pair in words.windows(2) {
+        if let [first, second] = pair {
+            if *first == "gio" && *second == "as" {
+                found.push("gio as".to_owned());
+            }
+        }
+    }
     found
 }
 
@@ -65,6 +79,11 @@ fn the_scan_finds_settings_however_it_is_imported() {
         "use gio::*;",
         "let s = gio::Settings::new(\"org.gnome.desktop.interface\");",
         "s.set_string(\"font-name\", \"Inter\");",
+        "use gio as g;\nlet s = g::Settings::new(\"org.gnome.desktop.interface\");",
+        "use gio as g;",
+        "extern crate gio as g;",
+        "use {gio as g};",
+        "s.set_value(\"font-name\", &\"Inter\".to_variant());",
     ] {
         assert!(!offences(text).is_empty(), "missed: {text}");
     }
