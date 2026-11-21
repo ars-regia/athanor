@@ -59,6 +59,7 @@ fn outcome(end: &Result<End, Box<dyn Error>>) -> (Option<&'static [u8]>, u8) {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     athanor_unit::journal::init();
     let end = run();
     if let Err(error) = &end {

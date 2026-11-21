@@ -15,6 +15,7 @@ use gtk4::{glib, Application};
 const APP_ID: &str = "os.athanor.Dock";
 
 fn main() -> glib::ExitCode {
+    athanor_unit::panic::install();
     let (source, favorites_file) = match start::prepare() {
         Prepared::Run {
             source,

@@ -95,7 +95,10 @@ def wait_for(predicate, seconds):
 
 def start(state):
     log = open(LOG, "a")
-    env = dict(os.environ, XDG_STATE_HOME=state)
+    # Under systemd stderr is the journal stream named by JOURNAL_STREAM, and only there does
+    # athanor_unit::journal prefix each line with its priority: name the log file the same way.
+    stat = os.fstat(log.fileno())
+    env = dict(os.environ, XDG_STATE_HOME=state, JOURNAL_STREAM=f"{stat.st_dev}:{stat.st_ino}")
     return subprocess.Popen([DAEMON], env=env, stderr=log)
 
 
