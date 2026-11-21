@@ -56,10 +56,11 @@ pub fn announce(socket: &OsStr, x11: Option<u32>) -> Result<(), Error> {
 /// nothing is sent. The loop turns while the session is paused, on another VT, so the pings go on
 /// there; across a suspend the manager's clock and the timer's, both monotonic, stop together.
 pub fn watchdog(handle: &LoopHandle<'static, State>) -> Result<(), Error> {
-    let Some(timeout) = athanor_unit::notify::watchdog_timeout() else {
+    let Some(every) =
+        athanor_unit::notify::watchdog_timeout().and_then(|timeout| timeout.checked_div(2))
+    else {
         return Ok(());
     };
-    let every = timeout / 2;
     handle
         .insert_source(Timer::from_duration(every), move |_, _, _| {
             if let Err(error) = athanor_unit::notify::notify_watchdog() {
@@ -68,6 +69,6 @@ pub fn watchdog(handle: &LoopHandle<'static, State>) -> Result<(), Error> {
             TimeoutAction::ToDuration(every)
         })
         .map_err(|e| e.error)?;
-    tracing::info!(?timeout, "the manager's watchdog is pinged");
+    tracing::info!(?every, "the manager's watchdog is pinged");
     Ok(())
 }
