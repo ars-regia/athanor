@@ -13773,3 +13773,7 @@ mod decision36;
 // Nulls the wire signature forbids (vendor/wayland-backend/PATCHES.md).
 #[cfg(test)]
 mod null_arguments;
+
+// A client that floods the compositor with requests (vendor/wayland-backend/PATCHES.md).
+#[cfg(test)]
+mod flood;
