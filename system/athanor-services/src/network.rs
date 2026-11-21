@@ -1032,6 +1032,10 @@ type Info = (u64, String, Option<ConnectionInfo>);
 /// reading tasks wait their turn, none is dropped, and the loop empties the queue at every turn.
 const INFO_QUEUE: usize = 64;
 
+fn info_queue() -> (mpsc::Sender<Info>, mpsc::Receiver<Info>) {
+    mpsc::channel(INFO_QUEUE)
+}
+
 async fn run(
     handle: &Handle,
     connection: Connection,
@@ -1061,7 +1065,7 @@ async fn run(
         shared: shared.clone(),
         owner: None,
     };
-    let (info_tx, mut infos) = mpsc::channel::<Info>(INFO_QUEUE);
+    let (info_tx, mut infos) = info_queue();
     // The settings of each saved profile, read once: they tell a saved network from a new one,
     // and name the VPNs. `asked` keeps the profiles whose read was started in this generation,
     // answered or not, so that a profile of another user, which answers PermissionDenied each
@@ -3144,7 +3148,8 @@ mod tests {
     /// holds more than its capacity.
     #[tokio::test(flavor = "current_thread")]
     async fn a_flood_of_profile_reads_waits_and_loses_none() {
-        let (tx, mut rx) = mpsc::channel::<Info>(INFO_QUEUE);
+        let (tx, mut rx) = info_queue();
+        assert_eq!(tx.max_capacity(), INFO_QUEUE);
         let total = INFO_QUEUE * 4;
         for n in 0..total {
             let tx = tx.clone();
