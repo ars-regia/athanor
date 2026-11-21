@@ -6947,14 +6947,17 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     the limit: every citation on an edited line is skipped, also one the edit did not touch.
 
     A citation by name is `path#symbol`, or `#symbol` for the file named last (a colour, `#e62d42`, is
-    none); its spec in a finding starts with `#`. The symbol must spell exactly one of the
+    none unless the last file defines the symbol, `#add`; an `x#y` whose `x` is no file, a flake
+    reference or a URL, is none and leaves the file named last as it was); its spec in a finding starts with `#`. The symbol must spell exactly one of the
     definitions that symbol_definitions reads in the file: none means it was renamed or removed,
     several that it must be qualified (`Lock::new`), and a file of a kind with no symbols cannot be
     cited so. The definition's lines are then read as cited lines, for the token and the sections
     of the sentence; a symbol does not move, so the hunks are not read for it, and its lines may
     span LINE_RANGE_LIMIT or more: a long definition holds more words, and proves less. A `#symbol`
     on a line that names no file before it is a finding; after a name that resolves to no file (code
-    outside the repository), it is not checked.
+    outside the repository), it is not checked. A `path#symbol` whose path is the end of several tracked
+    files is a finding ("ambiguous"); a `path:N` of one is not. Trade-off: an upstream crate's
+    `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`.
 
     With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
     is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
