@@ -1181,6 +1181,7 @@ compositor and that the own compositor did not yet offer:
       (`cursor.rs`) and stays unmarked, a risk this decision accepts: it has room for a small
       imitation, which moves with the pointer. Drag and drop is cancelled today, and a drag icon,
       when it comes, needs a rule here first (decision 40, approved on 2026-11-21).
+      *Amended 2026-11-21: the drag icon follows decision 40's rule.*
     - Each mark is stacked with its window, under whatever stands above that window, and
       neither is drawn while the lock holds the session. One function builds that stack for
       `draw_view` and for the DRM path of `udev.rs`, so that what the fixture reads is what a
@@ -2072,8 +2073,11 @@ compositor and that the own compositor did not yet offer:
 40. **Drag and drop between clients, and the drag icon** (OS4, OS17; decisions 30, 31 and 37;
     `doc_files.md` revision 3, decision 12; proposed on 2026-11-18, approved by the maintainer on 2026-11-21
     with the pull request that records it). The compositor cancels every drag and drop today, through the
-    default of Smithay's handler (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:91-147`),
-    and decision 37's toplevel drag runs on that same grab. The compositor runs Smithay's drag
+    default of Smithay's handler (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:104-169`),
+    and decision 37's toplevel drag runs on that same grab.
+    *Amended 2026-11-21: the compositor now runs Smithay's drag and drop grab
+    (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:104-169`); the cancelling default is gone, and
+    decision 37's toplevel drag is not built yet.* The compositor runs Smithay's drag
     and drop grab:
     - **What starts a drag.** A client starts one only with the serial of a press of a button or a
       touch point it holds on its own surface (decision 30's touch serial included); any other
