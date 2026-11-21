@@ -1643,7 +1643,7 @@ fn fill(
 }
 
 /// The largest logical size along an axis whose physical size at `scale` the renderer accepts:
-/// [`physical`] counts in 16 bits.
+/// `render::physical` counts in 16 bits.
 fn largest_logical(scale: f32) -> u32 {
     // `physical` at the largest 16-bit size: 65535 * 120 + 59, in 120ths of a pixel.
     const LARGEST: u64 = 7_864_259;
