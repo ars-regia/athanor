@@ -144,7 +144,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
 | ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | amended by ADR-0145 | docs |
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | amended by ADR-0143 | build, security |
-| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
+| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | amended by ADR-0148 | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
@@ -165,7 +165,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0094 | 0094 | [Update control: the settled points of the postpone and the opt-out](0094-update-control-settled-points.md) | accepted | update, security |
 | ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | amended by ADR-0103 | kernel, session, security, storage, desktop |
 | ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | amended by ADR-0098 | security, pipeline |
-| ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | accepted | security, kernel, shell, apps, governance |
+| ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | amended by ADR-0148 | security, kernel, shell, apps, governance |
 | ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | amended by ADR-0103, ADR-0104, ADR-0107, ADR-0114, ADR-0125 | update, build, signing, process |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | amended by ADR-0124 | shell, session, security, desktop |
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
@@ -183,7 +183,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115, ADR-0135 | process, docs, shell |
 | ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
 | ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | amended by ADR-0136 | update, build, release, security |
-| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131, ADR-0138 | process, docs, platform, security, shell |
+| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131, ADR-0138, ADR-0147 | process, docs, platform, security, shell |
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
@@ -206,7 +206,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | amended by ADR-0138, ADR-0139, ADR-0141 | process, docs, shell, security |
 | ADR-0136 | 0136 | [A promotion asks for one release approval: the ISO step joins the promote job](0136-one-release-approval-per-promotion.md) | accepted | release, build, security |
 | ADR-0137 | 0137 | [Pull requests land on iso-v0 through a merge queue with grouping](0137-merge-queue-on-iso-v0.md) | amended by ADR-0146 | process, build |
-| ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | amended by ADR-0141, ADR-0143 | shell, security, process, docs |
+| ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | amended by ADR-0141, ADR-0143, ADR-0147 | shell, security, process, docs |
 | ADR-0139 | 0139 | [Pull requests that change only files under docs/ do not count against the open pull request limit](0139-docs-pull-requests-outside-the-limit.md) | accepted | process, docs |
 | ADR-0140 | 0140 | [Cache the Rust builds of the shell jobs in CI through the rig's compiler cache](0140-cache-the-shell-jobs-rust-builds.md) | accepted | build, process, security |
 | ADR-0141 | 0141 | [Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets](0141-everything-own-in-1-0.md) | amended by ADR-0143 | shell, security, apps, process, docs |
@@ -215,3 +215,5 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0144 | 0144 | [The QEMU guest agent is off until a person turns it on, and then answers an allow-list](0144-qemu-guest-agent-off-by-default.md) | accepted | security |
 | ADR-0145 | 0145 | [A small amendment to an approved specification is approved in the pull request of its code](0145-small-spec-amendment-in-the-code-pull-request.md) | accepted | process, docs |
 | ADR-0146 | 0146 | [The merge queue builds the specs, not the kernel or the shell, and the shell is covered by a push alert](0146-merge-queue-builds-the-specs-only.md) | accepted | process, build |
+| ADR-0147 | 0147 | [The keyring prompter is in 1.0, and colour management and HDR come after it](0147-keyring-prompter-in-1-0-colour-after.md) | accepted | security, shell, process, docs |
+| ADR-0148 | 0148 | [Release 1.0 ships no noexec mount, and fs-verity only if btrfs takes it without a migration](0148-no-noexec-mounts-in-1-0.md) | accepted | security, kernel, platform |

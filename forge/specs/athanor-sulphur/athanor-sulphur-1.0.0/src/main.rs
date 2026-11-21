@@ -4,7 +4,10 @@
 
 use std::process::ExitCode;
 
+use tracing_subscriber::util::SubscriberInitExt;
+
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     // RUST_LOG adds to the log, as `smithay::backend::drm::compositor=trace` for where each
     // element of a frame goes; what it does not name stays at info. Its directives follow
     // `info`, and a later directive replaces an earlier one of the same target, so a bare level
@@ -21,7 +24,7 @@ fn main() -> ExitCode {
         Ok(filter) => (filter, None),
         Err(error) => (tracing_subscriber::EnvFilter::new("info"), Some(error)),
     };
-    if let Err(error) = tracing_subscriber::fmt().with_env_filter(filter).try_init() {
+    if let Err(error) = athanor_unit::journal::with_filter(filter, athanor_unit::journal::Stream::Stdout).try_init() {
         eprintln!("athanor-sulphur: no log: {error}");
     }
     if let Some(error) = malformed {
