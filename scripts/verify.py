@@ -459,35 +459,17 @@ def merge_queue_problems(root):
 
 
 ALERT_ACTION = "./.github/actions/alert"
-# Scheduled workflows that have no alert job yet, each with the reason. An entry whose workflow
-# gains the job is itself reported, so the list only shrinks.
-ALERT_EXEMPT = {
-    "athanor-forge-orchestrator.yml": "its alert job lands in a separate pull request (#1353 follow-up)",
-}
-
-
 def scheduled_alert_problems(root):
     """PL51: a workflow with an `on.schedule` trigger ends with alert jobs that use the alert
     action on a GitHub-hosted runner, run with `always()`, and between them need every other job,
     so a scheduled failure, a lost runner or a timeout opens a ci-alert issue."""
     problems = []
     workflows = Path(root) / ".github/workflows"
-    for name in sorted(ALERT_EXEMPT):
-        path = workflows / name
-        doc = yaml.safe_load(read(path)) if path.is_file() else None
-        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
-            problems.append(f"ALERT_EXEMPT names {name}, which does not exist or has no schedule: "
-                            "remove the entry (PL51)")
     for wf in sorted(workflows.glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
         if not isinstance(doc, dict) or "schedule" not in triggers(doc):
             continue
         jobs = doc.get("jobs") or {}
-        if wf.name in ALERT_EXEMPT:
-            if alert_jobs(jobs):
-                problems.append(f"{wf.name}: has an alert job, so it is no longer exempt: "
-                                "remove it from ALERT_EXEMPT (PL51)")
-            continue
         problems += alert_job_problems(wf.name, jobs, "schedule")
     return problems
 
@@ -652,7 +634,9 @@ def release_problems(root):
     condition = request.get("if", "")
     if "!cancelled()" not in condition:
         problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
-    for job_id in sorted(set(jobs) - {"request-release"}):
+    # A job that needs request-release (the PL51 alert) ends the run and cannot be needed by it.
+    after = {job_id for job_id, job in jobs.items() if "request-release" in (job.get("needs") or [])}
+    for job_id in sorted(set(jobs) - {"request-release"} - after):
         if job_id not in request.get("needs", []):
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
         elif job_id == "system-image":
