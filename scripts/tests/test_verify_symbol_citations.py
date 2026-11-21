@@ -185,6 +185,13 @@ class Forms(unittest.TestCase):
         self.assertEqual(messages("A `#ffffff` text and `#[derive(Debug)]`."), [])
         self.assertEqual(len(messages("A `#grant` text.")), 1)
 
+    def test_a_name_that_is_no_file_leaves_the_last_file_as_it_was(self):
+        for other in ("nixpkgs#cosign", ".#builderImage"):
+            out = messages(f"`src/x.rs` is built by `{other}`; the `other` is at `:2`.", lines_kept={})
+            self.assertEqual(len(out), 1, out)
+            self.assertIn("`src/x.rs:2` cites lines", out[0])
+            self.assertEqual(messages(f"`src/x.rs` is built by `{other}`, then `grant` at `#grant`."), [])
+
     def test_a_file_with_no_symbols_cannot_be_cited_by_name(self):
         out = messages("The `ExecStart` is in `unit.service#Service`.")
         self.assertEqual(len(out), 1, out)

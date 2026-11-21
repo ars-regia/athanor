@@ -6971,6 +6971,16 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         found = suffixes.get(name, [])
         return found[0] if len(found) == 1 else None
 
+    def names_a_file(name, crate):
+        """NAME is a tracked file or the end of some tracked files' paths."""
+        return name in suffixes or bool(crate and f"{crate}/{name}" in known)
+
+    def names_a_gone_file(name):
+        """NAME is under a top-level directory of the repository, or is a bare `*.md` name that no
+        tracked file ends with: if it resolves to nothing, the file was removed."""
+        return name.startswith(prefixes) or (
+            name.endswith(".md") and "/" not in name and not any(t.endswith("/" + name) for t in known))
+
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
@@ -6980,6 +6990,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m and not COLOUR.fullmatch(span.group(1)):
                 m = SYMBOL_CITATION.fullmatch(span.group(1))
+                if m and m[1] and not (names_a_file(m[1], crate) or names_a_gone_file(m[1])):
+                    m = None  # `nixpkgs#cosign`, `.#image`: a flake reference, not a file
             if not m:
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
                 named_any = named_any or bool(FILE_LIKE.search(span.group(1)))
@@ -6988,9 +7000,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             symbol = spec.strip() if m.re is SYMBOL_CITATION else None
             spec, sep = (f"#{symbol}", "") if symbol else (spec, ":")
             path = last if named is None else resolve(named, crate)
-            if path is None and named and (named.startswith(prefixes) or (
-                    named.endswith(".md") and "/" not in named
-                    and not any(t.endswith("/" + named) for t in known))):
+            if path is None and named and names_a_gone_file(named):
                 out.append((number, named, spec, None,
                             f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
