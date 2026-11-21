@@ -69,6 +69,18 @@ class Cmdline(unittest.TestCase):
                 self.assertTrue(any(f"{parameter} -> " in p for p in self.problems()), self.problems())
                 self.edit("forge/specs/azoth/cmdline", f"page_alloc.shuffle=1 {parameter}", "page_alloc.shuffle=1")
 
+    def test_a_kargs_element_holding_several_parameters_is_read_word_by_word(self):
+        self.edit(KARGS, '"page_alloc.shuffle=1",', '"page_alloc.shuffle=1 quiet selinux=0",')
+        self.assertTrue(any("selinux=0 ->" in p for p in self.problems()), self.problems())
+
+    def test_a_kargs_element_that_is_no_string_is_reported(self):
+        self.edit(KARGS, '"page_alloc.shuffle=1",', "42,")
+        self.assertTrue(any(KARGS in p and "cannot read" in p for p in self.problems()), self.problems())
+
+    def test_a_double_quoted_parameter_is_read_as_the_kernel_reads_it(self):
+        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", 'page_alloc.shuffle=1 "selinux=0"')
+        self.assertTrue(any('"selinux=0" ->' in p for p in self.problems()), self.problems())
+
     def test_a_name_that_only_starts_with_a_rejected_bare_one_passes(self):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 rd.breakpoint xselinux=0 rd.break.x")
         self.assertEqual(self.problems(), [])

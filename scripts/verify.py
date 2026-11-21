@@ -3861,11 +3861,11 @@ REJECTED_PARAMETERS = {
     "amd_iommu=on": "not a parameter of the amd_iommu driver, which logs it as unknown",
     "lam=on": "not an x86 parameter",
     "arm64.mte=on": "not an x86 parameter",
-    "selinux=": "switches SELinux off at boot, against D20 and TM7 (section 8 of doc_kernel_profile.md)",
-    "enforcing=": "puts SELinux in permissive mode at boot, against D20 and TM7 (section 8 of doc_kernel_profile.md)",
-    "lsm=": "replaces the compiled-in security module order and can omit SELinux, IPE and Yama (section 8 of doc_kernel_profile.md)",
-    "init=": "replaces PID 1 with another program, outside the image's trust chain (section 8 of doc_kernel_profile.md)",
-    "rd.break": "stops the initramfs at a root shell, against rd.shell=0 (section 8 of doc_kernel_profile.md)",
+    "selinux=": "switches SELinux off at boot, against D20 and TM7",
+    "enforcing=": "puts SELinux in permissive mode at boot, against D20 and TM7",
+    "lsm=": "replaces the compiled-in security module order and can omit SELinux, IPE and Yama (doc_kernel_profile.md section 5)",
+    "init=": "replaces PID 1 with another program, outside the image's trust chain (doc_kernel_profile.md section 7)",
+    "rd.break": "stops the initramfs at a root shell, against rd.shell=0 (doc_kernel_profile.md section 6)",
     "cfi=": "weakens or disables kCFI at boot; cfi=warn is for one diagnostic boot only (forge/specs/azoth/AGENTS.md)",
 }
 
@@ -3890,17 +3890,25 @@ def cmdline_problems(root=None):
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as err:
             problems.append(f"{relative}: cannot read the command line ({err})")
 
+    def kargs(text):
+        elements = tomllib.loads(text)["kargs"]
+        if not all(isinstance(element, str) for element in elements):
+            raise ValueError("a kargs element is not a string")
+        return [parameter for element in elements for parameter in element.split()]
+
     read_site(CMDLINE_FILE, str.split)
     for relative in KARGS_FILES:
-        read_site(relative, lambda text: tomllib.loads(text)["kargs"])
+        read_site(relative, kargs)
 
     for site, parameters in found.items():
         for parameter in parameters:
+            # The kernel strips one pair of double quotes from a parameter (`"selinux=0"` is effective).
+            bare = parameter[1:-1] if len(parameter) > 1 and parameter[0] == parameter[-1] == '"' else parameter
             for rejected, why in REJECTED_PARAMETERS.items():
                 if rejected.endswith((".", "=")):
-                    matched = parameter.startswith(rejected)
+                    matched = bare.startswith(rejected)
                 else:
-                    matched = parameter == rejected or parameter.startswith(rejected + "=")
+                    matched = bare == rejected or bare.startswith(rejected + "=")
                 if matched:
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
