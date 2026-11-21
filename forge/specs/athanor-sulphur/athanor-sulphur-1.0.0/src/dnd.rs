@@ -219,7 +219,7 @@ impl State {
                     Some(slot) => self.touch_at(slot)?,
                     None => self.seat.get_pointer()?.current_location(),
                 };
-                Some((icon.surface.clone(), at.to_i32_round() + icon.offset))
+                Some((icon.surface.clone(), moved(at.to_i32_round(), icon.offset)))
             })
             .collect()
     }
@@ -241,7 +241,12 @@ impl State {
                     .buffer_delta
                     .take()
             });
-            icon.offset += delta.unwrap_or_default();
+            icon.offset = moved(icon.offset, delta.unwrap_or_default());
         }
     }
+}
+
+/// `at` moved by `by`: a client's offsets add up without bound, so the sum saturates.
+fn moved(at: Point<i32, Logical>, by: Point<i32, Logical>) -> Point<i32, Logical> {
+    Point::from((at.x.saturating_add(by.x), at.y.saturating_add(by.y)))
 }
