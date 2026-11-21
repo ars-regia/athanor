@@ -13,7 +13,7 @@ msgid "Connections"
 msgstr "Connessioni"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:34
-#: src/window.rs:283
+#: src/window.rs:284
 msgid "Device"
 msgstr "Dispositivo"
 
@@ -22,7 +22,7 @@ msgid "Personalisation"
 msgstr "Personalizzazione"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:37
-#: src/window.rs:291 src/window.rs:293
+#: src/window.rs:292 src/window.rs:294
 msgid "System"
 msgstr "Sistema"
 
@@ -179,7 +179,7 @@ msgid "firmware;bios;uefi;fwupd;device updates;"
 msgstr "firmware;bios;uefi;fwupd;aggiornamenti dei dispositivi;"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:149
-#: src/window.rs:280
+#: src/window.rs:281
 msgid "About"
 msgstr "Informazioni"
 
@@ -235,109 +235,117 @@ msgstr "Spegnimento e sospensione"
 msgid "blank screen;screen off;suspend;sleep;idle;"
 msgstr "spegnimento schermo;schermo spento;sospensione;riposo;inattività;"
 
-#: src/window.rs:103 src/window.rs:231
+#: src/window.rs:104 src/window.rs:232
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/window.rs:110
+#: src/window.rs:111
 msgid "Search settings"
 msgstr "Cerca nelle impostazioni"
 
-#: src/window.rs:111
+#: src/window.rs:112
 msgid "Pages"
 msgstr "Pagine"
 
-#: src/window.rs:234 src/window.rs:235
+#: src/window.rs:235 src/window.rs:236
 msgid "Your account"
 msgstr "Il tuo account"
 
-#: src/window.rs:241 src/window.rs:242 src/window.rs:246
+#: src/window.rs:242 src/window.rs:243 src/window.rs:247
 msgid "This device"
 msgstr "Questo dispositivo"
 
-#: src/window.rs:259
+#: src/window.rs:260
 msgid "Groups"
 msgstr "Gruppi"
 
-#: src/window.rs:285
+#: src/window.rs:286
 msgid "Device name"
 msgstr "Nome del dispositivo"
 
-#: src/window.rs:286
+#: src/window.rs:287
 msgid "Manufacturer"
 msgstr "Produttore"
 
-#: src/window.rs:287
+#: src/window.rs:288
 msgid "Model"
 msgstr "Modello"
 
-#: src/window.rs:294
+#: src/window.rs:295
 msgid "System integrity"
 msgstr "Integrità del sistema"
 
-#: src/window.rs:299
+#: src/window.rs:300
 msgid "Processor"
 msgstr "Processore"
 
-#: src/window.rs:300
+#: src/window.rs:301
 msgid "Memory"
 msgstr "Memoria"
 
-#: src/window.rs:306
+#: src/window.rs:307
 msgid "Graphics"
 msgstr "Grafica"
 
-#: src/window.rs:308
+#: src/window.rs:309
 msgid "Disk capacity"
 msgstr "Capacità del disco"
 
-#: src/window.rs:309
+#: src/window.rs:310
 msgid "Hardware"
 msgstr "Hardware"
 
-#: src/window.rs:380 src/window.rs:394 src/window.rs:678
+#: src/window.rs:381 src/window.rs:388 src/window.rs:405 src/window.rs:700
+#: src/window.rs:733
 msgid "Not verified"
 msgstr "Non verificato"
 
-#: src/window.rs:383 src/window.rs:680
+#: src/window.rs:385 src/window.rs:728
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr "Firmato, ma fermo su una sola build: non riceve aggiornamenti"
+
+#: src/window.rs:387 src/window.rs:702
 msgid "Verified"
 msgstr "Verificato"
 
-#: src/window.rs:386 src/window.rs:700
+#: src/window.rs:389 src/window.rs:722 src/window.rs:725
+msgid "Not verified yet"
+msgstr "Non ancora verificato"
+
+#: src/window.rs:391 src/window.rs:739
 msgid "Not verified: installed from media"
 msgstr "Non verificato: installato da supporto"
 
-#: src/window.rs:387
+#: src/window.rs:392
 msgid "Not verified: no signature"
 msgstr "Non verificato: nessuna firma"
 
-#: src/window.rs:388
+#: src/window.rs:393
 msgid "Not verified: its key is not in the policy"
 msgstr "Non verificato: la sua chiave non è nella policy"
 
-#: src/window.rs:389
+#: src/window.rs:394
 msgid "Not verified: fetched under a permissive policy"
 msgstr "Non verificato: scaricato con una policy permissiva"
 
-#: src/window.rs:390
+#: src/window.rs:396
 msgid "Not verified: the image is outside the policy's scope"
 msgstr "Non verificato: l'immagine è fuori dall'ambito della policy"
 
-#: src/window.rs:391
+#: src/window.rs:398
 msgid "Not verified: the system was changed on this machine"
 msgstr "Non verificato: il sistema è stato modificato su questa macchina"
 
-#: src/window.rs:392
+#: src/window.rs:400
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr "Non verificato: in attesa della pubblicazione del canale stabile"
 
-#: src/window.rs:393
+#: src/window.rs:403
 msgid "Not verified: this machine does not verify its updates"
 msgstr "Non verificato: questa macchina non verifica i suoi aggiornamenti"
 
-#: src/window.rs:682
-msgid "The last update was refused by the policy"
-msgstr "L'ultimo aggiornamento è stato rifiutato dalla politica"
+#~ msgid "The last update was refused by the policy"
+#~ msgstr "L'ultimo aggiornamento è stato rifiutato dalla politica"
 
 #~ msgid "Updates"
 #~ msgstr "Aggiornamenti"

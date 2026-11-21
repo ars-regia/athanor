@@ -6,13 +6,14 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use athanor_sal::driver::Role;
 use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, Wrap};
 use athanor_settings_core::registry::{Group, Page, Registry};
 use athanor_settings_core::target::{self, Target};
 use athanor_settings_core::window_state;
-use athanor_trust_state::{ReadError, Reason, State};
+use athanor_trust_state::{Badge, ReadError, Reason, State};
 
 use crate::i18n::tr;
 use crate::info::{self, Hardware, Info};
@@ -291,7 +292,7 @@ impl Settings {
                 tr("System"),
                 vec![
                     (tr("System"), self.system.clone()),
-                    (tr("System integrity"), Some(trust_text(info.trust.as_ref()))),
+                    (tr("System integrity"), Some(trust_text(info.trust.as_ref(), now()))),
                 ],
             ),
         ];
@@ -371,28 +372,46 @@ impl Settings {
     }
 }
 
-/// The trust state as About words it (SE22): "Verified" only for a state that the update
-/// service answered, root sent, and says is verified; every other read is "Not verified", with
-/// the reason the bar's sheet gives when the state names one. The image's update state is
-/// never shown here (SW16).
-fn trust_text(read: Option<&Result<State, ReadError>>) -> String {
+/// The trust state as About words it (SE22): the shield's own classification
+/// (`athanor_trust_state::badge`, at `now`), so "Verified" only where the shield shows the
+/// system as verified. A refused update is the shield's to say, not About's, so that badge
+/// reads plain "Not verified", as every state that was not read or not trusted does.
+fn trust_text(read: Option<&Result<State, ReadError>>, now: i64) -> String {
     let Some(Ok(state)) = read else {
         return tr("Not verified");
     };
-    if state.verified.value {
-        return tr("Verified");
+    match athanor_trust_state::badge(state, now) {
+        Badge::Check if state.verified.reason == Reason::PinnedBuild => {
+            tr("Signed, but pinned to one build: it receives no updates")
+        }
+        Badge::Check => tr("Verified"),
+        Badge::Cross => tr("Not verified"),
+        Badge::Attention if state.verified.value => tr("Not verified yet"),
+        Badge::Attention => match state.verified.reason {
+            Reason::Media => tr("Not verified: installed from media"),
+            Reason::NoSignature => tr("Not verified: no signature"),
+            Reason::KeyNotInPolicy => tr("Not verified: its key is not in the policy"),
+            Reason::PolicyNotInForce => tr("Not verified: fetched under a permissive policy"),
+            Reason::ReferenceOutOfScope => {
+                tr("Not verified: the image is outside the policy's scope")
+            }
+            Reason::LocalChanges => tr("Not verified: the system was changed on this machine"),
+            Reason::ChannelAbsent => {
+                tr("Not verified: waiting for the stable channel to be published")
+            }
+            Reason::OriginNotEnforcing => {
+                tr("Not verified: this machine does not verify its updates")
+            }
+            Reason::Signature | Reason::PinnedBuild => tr("Not verified"),
+        },
     }
-    match state.verified.reason {
-        Reason::Media => tr("Not verified: installed from media"),
-        Reason::NoSignature => tr("Not verified: no signature"),
-        Reason::KeyNotInPolicy => tr("Not verified: its key is not in the policy"),
-        Reason::PolicyNotInForce => tr("Not verified: fetched under a permissive policy"),
-        Reason::ReferenceOutOfScope => tr("Not verified: the image is outside the policy's scope"),
-        Reason::LocalChanges => tr("Not verified: the system was changed on this machine"),
-        Reason::ChannelAbsent => tr("Not verified: waiting for the stable channel to be published"),
-        Reason::OriginNotEnforcing => tr("Not verified: this machine does not verify its updates"),
-        Reason::Signature | Reason::PinnedBuild => tr("Not verified"),
-    }
+}
+
+/// Seconds since the epoch, as the shield counts the age of the last check.
+fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX))
 }
 
 impl Application for Settings {
@@ -638,12 +657,15 @@ mod tests {
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 
+    const NOW: i64 = 1_800_000_000;
+
+    /// A state the shield shows as verified, with the update service at rest.
     fn state(verified: Verified) -> State {
         let booted = Deployment {
             image: "registry.example/athanor-system:stable".into(),
             digest: format!("sha256:{}", "1".repeat(64)),
             version: "43.20260915.2".into(),
-            build_time: 1,
+            build_time: NOW - 86_400,
         };
         State {
             schema: SCHEMA,
@@ -651,7 +673,7 @@ mod tests {
             downloaded: None,
             previous: None,
             verified,
-            update: UpdateState::Refused,
+            update: UpdateState::None,
             policy: Policy {
                 path: "/etc/containers/policy.json".into(),
                 sha256: "ab".repeat(32),
@@ -663,8 +685,8 @@ mod tests {
                 mok_sb_state: None,
                 lockdown: Some("integrity".into()),
             },
-            newest_booted_build_time: 1,
-            last_successful_check: Some(1),
+            newest_booted_build_time: NOW - 86_400,
+            last_successful_check: Some(NOW - 3_600),
             last_error: ErrorCode::None,
             last_error_host: None,
             automatic_security_updates: true,
@@ -677,9 +699,7 @@ mod tests {
         let json = serde_json::to_string(&state(Reason::Signature.into())).expect("serialises");
         let not_verified = tr("Not verified");
         let read = state_reply(Ok(&json), Some(0));
-        assert_eq!(trust_text(Some(&read)), tr("Verified"));
-        // A refused update is the shield's to say, not About's.
-        assert_ne!(trust_text(Some(&read)), tr("The last update was refused by the policy"));
+        assert_eq!(trust_text(Some(&read), NOW), tr("Verified"));
         for read in [
             state_reply(Ok(&json), Some(1000)),
             state_reply(Ok(&json), None),
@@ -689,14 +709,36 @@ mod tests {
             state_reply(Err(Some("os.athanor.Update1.Error.Unreadable")), Some(0)),
             state_reply(Ok("{"), Some(0)),
         ] {
-            assert_eq!(trust_text(Some(&read)), not_verified, "{read:?}");
+            assert_eq!(trust_text(Some(&read), NOW), not_verified, "{read:?}");
         }
-        assert_eq!(trust_text(None), not_verified, "not yet read");
+        assert_eq!(trust_text(None, NOW), not_verified, "not yet read");
+    }
+
+    #[test]
+    fn verified_reads_verified_only_where_the_shield_shows_it() {
+        let words = |state: State| trust_text(Some(&Ok(state)), NOW);
+        let mut stale = state(Reason::Signature.into());
+        stale.last_successful_check = Some(NOW - 15 * 86_400);
+        assert_eq!(words(stale), tr("Not verified yet"));
+        let mut older = state(Reason::Signature.into());
+        older.newest_booted_build_time = NOW;
+        assert_eq!(words(older), tr("Not verified yet"));
+        assert_eq!(
+            words(state(Verified {
+                value: true,
+                reason: Reason::PinnedBuild
+            })),
+            tr("Signed, but pinned to one build: it receives no updates")
+        );
+        // The update verdict is the shield's, not About's.
+        let mut refused = state(Reason::Signature.into());
+        refused.update = UpdateState::Refused;
+        assert_eq!(words(refused), tr("Not verified"));
     }
 
     #[test]
     fn a_state_that_is_not_verified_gives_its_reason() {
         let read = Ok(state(Reason::Media.into()));
-        assert_eq!(trust_text(Some(&read)), tr("Not verified: installed from media"));
+        assert_eq!(trust_text(Some(&read), NOW), tr("Not verified: installed from media"));
     }
 }
