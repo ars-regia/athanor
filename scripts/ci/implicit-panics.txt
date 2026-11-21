@@ -29,7 +29,7 @@ athanor-search 9
 athanor-services 20
 athanor-sessiond 0
 athanor-shelld 29
-athanor-style 2
+athanor-style 10
 athanor-sulphur 315
 athanor-sulphur-client 25
 athanor-trust-state 0
