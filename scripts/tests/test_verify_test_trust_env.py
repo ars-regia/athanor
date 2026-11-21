@@ -463,6 +463,14 @@ class TestTrustEnv(unittest.TestCase):
                 problems = self.problems(body + USES)
                 self.assertTrue(any(f"{name}, which the isolation block uses" in p for p in problems), problems)
 
+    def test_a_from_import_of_the_same_name_is_a_second_binding(self):
+        for name, line in (("os", "from fakemod import os\n"), ("mock", "from fakemod import mock\n")):
+            with self.subTest(name=name):
+                body = line + "import os\nfrom unittest import mock\n" + BLOCK.replace(IMPORTS, "")
+                body = body.replace("o.environ", "os.environ").replace("m.patch", "mock.patch")
+                problems = self.problems(body + USES)
+                self.assertTrue(any(f"{name}, which the isolation block uses" in p for p in problems), problems)
+
     def test_import_a_and_import_a_b_bind_one_name(self):
         body = (
             "import os\nimport unittest\nimport unittest.mock\n"
@@ -499,6 +507,7 @@ class TestTrustEnv(unittest.TestCase):
         for text in (
             "globals()",
             "setattr",
+            "exec",
             "helper function",
             "without naming it",
             "script at import time",

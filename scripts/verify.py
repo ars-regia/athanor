@@ -7310,19 +7310,22 @@ def scope_nodes(body):
 
 def bindings(tree, name):
     """How many times the module scope binds `name`: a def, a class, an assignment, an import, a `for` or
-    `with` target, a match capture, a deletion. `import a` and `import a.b` bind `a` together, once."""
+    `with` target, a match capture, a deletion. `import a` and `import a.b` bind `a` together, once; any `from` import binds on its own."""
     count, plain = 0, set()
     for n in scope_nodes(tree.body):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             count += n.name == name
         elif isinstance(n, ast.Name):
             count += n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
-        elif isinstance(n, ast.alias):
-            if (n.asname or n.name.split(".")[0]) == name:
-                if n.asname:
-                    count += 1
-                else:
-                    plain.add(name)
+        elif isinstance(n, ast.ImportFrom):
+            count += sum((a.asname or a.name) == name for a in n.names)
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if (a.asname or a.name.split(".")[0]) == name:
+                    if a.asname:
+                        count += 1
+                    else:
+                        plain.add(name)
         elif isinstance(n, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
             count += n.name == name
         elif isinstance(n, ast.MatchMapping):
@@ -7540,7 +7543,7 @@ def trust_env_problems(root=None, reached=None):
 
 @check("test-trust-env", "A test that reaches tier-digests.sh isolates the CI run's trust environment (module-level patch, popped in setUpModule)")
 def check_test_trust_env():
-    """Static, so with known limits: a rebinding through globals() or setattr, and a helper function called at
+    """Static, so with known limits: a rebinding through globals(), exec or setattr, and a helper function called at
     import time that copies the environment, are not seen (nor a Python intermediary between a test and a
     reaching script, nor a test that reaches the script through a name built at run time). The adversarial
     class is out too: reaching os.environ without naming it, or running a script at import time; one line each:
