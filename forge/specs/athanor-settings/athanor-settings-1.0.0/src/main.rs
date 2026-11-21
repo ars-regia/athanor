@@ -8,6 +8,7 @@ mod bus;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::process::ExitCode;
 use std::rc::Rc;
@@ -35,8 +36,21 @@ fn in_unit(cgroup: &str) -> bool {
         == Some(UNIT)
 }
 
+/// The target of `--show=<target>`, or the argument that is not one, as text. An argument
+/// that is not UTF-8 is not one: `env::args` would panic on it.
+fn show_target(args: impl IntoIterator<Item = OsString>) -> Result<String, String> {
+    let args = args
+        .into_iter()
+        .map(|arg| {
+            arg.into_string()
+                .map_err(|arg| arg.to_string_lossy().into_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    target::from_args(args)
+}
+
 fn forward() -> ExitCode {
-    let target = match target::from_args(env::args().skip(1)) {
+    let target = match show_target(env::args_os().skip(1)) {
         Ok(target) => target,
         Err(argument) => {
             tracing::error!(%argument, "usage: athanor-settings [--show=<target>]");
@@ -97,8 +111,16 @@ fn main() -> ExitCode {
             tracing::warn!(error = %err, "cannot tell systemd Settings is ready");
         }
     });
+    // The page is written again once it has drawn: a page that aborts while it draws ends
+    // here, and is not reopened at every restart.
+    if reopen.is_some() {
+        if let Err(error) = window_state::clear(&state_dir) {
+            tracing::warn!(%error, "cannot clear the window state before reopening it");
+        }
+    }
     let first = match reopen {
-        Some(target) => target,
+        // A page a later build no longer draws opens the landing page, as a Show of it would.
+        Some(target) => window::resolve(&registry, &target.to_string()),
         None => loop {
             let next = shows.borrow_mut().pop_front();
             if let Some(text) = next {
@@ -156,5 +178,17 @@ mod tests {
         assert!(!in_unit("0::/user.slice/athanor-settings.service/sub\n"));
         assert!(!in_unit("1:name=systemd:/athanor-settings.service\n"));
         assert!(!in_unit(""));
+    }
+
+    #[test]
+    fn an_argument_that_is_not_utf8_is_a_usage_error() {
+        use std::os::unix::ffi::OsStringExt;
+        let bad = OsString::from_vec(b"--show=\xff".to_vec());
+        assert_eq!(show_target([bad]), Err("--show=\u{fffd}".to_owned()));
+        assert_eq!(
+            show_target([OsString::from("--show=about")]),
+            Ok("about".to_owned())
+        );
+        assert_eq!(show_target([]), Ok(String::new()));
     }
 }
