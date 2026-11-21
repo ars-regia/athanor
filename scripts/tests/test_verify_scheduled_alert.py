@@ -20,6 +20,8 @@ ALERT = """
     runs-on: {runner}
     steps:
       - uses: ./.github/actions/alert
+        with:
+          needs: ${{{{ toJSON(needs) }}}}
 """
 HEAD = "on:\n  schedule:\n    - cron: '0 0 * * *'\njobs:\n  a:\n    runs-on: x\n  b:\n    runs-on: x\n"
 
@@ -99,8 +101,25 @@ class ScheduledAlertTest(unittest.TestCase):
             ("    runs-on: ubuntu-24.04\n", "    runs-on: ubuntu-24.04\n    continue-on-error: true\n"),
             ("      - uses: ./.github/actions/alert\n", "      - uses: ./.github/actions/alert\n        continue-on-error: true\n"),
             ("      - uses: ./.github/actions/alert\n", "      - if: false\n        uses: ./.github/actions/alert\n"),
+            ("    runs-on: ubuntu-24.04\n", "    runs-on: ubuntu-24.04\n    continue-on-error: false\n"),
+            ("    runs-on: ubuntu-24.04\n", "    runs-on: ubuntu-24.04\n    continue-on-error: ${{ true }}\n"),
+            ("      - uses: ./.github/actions/alert\n", "      - if: always()\n        uses: ./.github/actions/alert\n"),
+            ("      - uses: ./.github/actions/alert\n", "      - uses: ./.github/actions/alert\n      - if: false\n        uses: ./.github/actions/alert\n"),
         ):
-            self.assertEqual(1, len(problems(good.replace(old, new))), new)
+            self.assertTrue(problems(good.replace(old, new)), new)
+
+    def test_an_alert_step_must_pass_exactly_the_needs_context(self):
+        good = HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule")
+        step = "          needs: ${{ toJSON(needs) }}\n"
+        self.assertIn(step, good)
+        for new in ("          needs: ${{ toJSON(needs.a) }}\n",
+                    step + "          other: x\n",
+                    "          other: x\n",
+                    step.replace("          needs", "          needs  ").replace("toJSON(needs)", "toJSON( needs )"),
+                    ):
+            self.assertEqual(1, len(problems(good.replace(step, new))), new)
+        self.assertEqual(1, len(problems(good.replace(step, step + "        env:\n          NEEDS: x\n"))))
+        self.assertEqual(1, len(problems(good.replace("        with:\n" + step, ""))))
 
     def test_a_workflow_without_a_schedule_needs_no_alert(self):
         self.assertEqual([], problems("on:\n  push:\njobs:\n  a:\n    runs-on: x\n"))

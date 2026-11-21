@@ -511,9 +511,15 @@ def alert_job_problems(name, jobs, event):
         if "continue-on-error" in job:
             problems.append(f"{name}: alert job {job_id} sets continue-on-error, which hides its failure (PL51)")
         for step in job.get("steps") or []:
-            if step.get("uses") == ALERT_ACTION and ("if" in step or "continue-on-error" in step):
+            if step.get("uses") != ALERT_ACTION:
+                continue
+            if "if" in step or "continue-on-error" in step:
                 problems.append(f"{name}: the alert step of {job_id} sets if or continue-on-error, "
                                 "so it can be skipped or fail unseen (PL51)")
+            given = {key: re.sub(r"\s+", " ", str(value)).strip() for key, value in (step.get("with") or {}).items()}
+            if given != {"needs": "${{ toJSON(needs) }}"} or "env" in step:
+                problems.append(f"{name}: the alert step of {job_id} must pass exactly "
+                                "`needs: ${{ toJSON(needs) }}` and no env (PL51)")
         needed = job.get("needs") or []
         covered |= {needed} if isinstance(needed, str) else set(needed)
     return problems + [f"{name}: no alert job needs {job_id} (PL51)" for job_id in jobs if job_id not in covered]
