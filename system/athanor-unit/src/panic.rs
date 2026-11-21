@@ -113,7 +113,8 @@ mod tests {
         let make = move || Sink(Arc::clone(&sink));
         tracing::subscriber::with_default(crate::journal::subscriber(make), || emit(report));
         let logged = String::from_utf8(buffer.lock().expect("lock").clone()).expect("utf-8");
-        assert_eq!(logged, text);
+        let from_tracing: String = report.lines().map(|line| format!("<3>athanor_unit::panic: {line}\n")).collect();
+        assert_eq!(logged, from_tracing);
     }
 
     struct Sink(Arc<Mutex<Vec<u8>>>);

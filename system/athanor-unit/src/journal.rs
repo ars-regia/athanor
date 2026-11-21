@@ -1,7 +1,8 @@
 //! Log lines for the journal. On a stream systemd connected to the journal each line starts
 //! with `<N>`, its syslog priority, which journald reads (SyslogLevelPrefix=, on by default), so
-//! `journalctl --user -u <unit> -p err` finds what went wrong. On any other stream, a terminal, a
-//! pipe or a file, the lines are tracing's own, coloured only on a terminal.
+//! `journalctl --user -u <unit> -p err` finds what went wrong, then the module that wrote it:
+//! `<N>target: message fields`, as tracing writes it after the level. On any other stream, a
+//! terminal, a pipe or a file, the lines are tracing's own, coloured only on a terminal.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -29,7 +30,8 @@ where
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        write!(writer, "<{}>", priority(*event.metadata().level()))?;
+        let metadata = event.metadata();
+        write!(writer, "<{}>{}: ", priority(*metadata.level()), metadata.target())?;
         ctx.field_format().format_fields(writer.by_ref(), event)?;
         writeln!(writer)
     }
@@ -148,7 +150,7 @@ mod tests {
             tracing::info!(preset = "float", "default layout picked");
         });
         let text = String::from_utf8(buffer.lock().expect("lock").clone()).expect("utf-8");
-        assert_eq!(text, "<6>default layout picked preset=\"float\"\n");
+        assert_eq!(text, "<6>athanor_unit::journal::tests: default layout picked preset=\"float\"\n");
     }
 
     #[test]
