@@ -410,7 +410,7 @@ answer holds the canonical URI that was checked; 10,000 filters are refused, not
 ### Task 6: the backend draws with Sal (PT2, PT3)
 
 **Files:** the backend's `Cargo.toml`, `src/main.rs`, `xdg-desktop-portal-athanor.service`,
-the spec's `%files` if anything new ships; `components.toml:402` description. Depends on 0a, 1.
+the spec's `%files` with `/usr/lib/tmpfiles.d/xdg-desktop-portal-athanor.conf` (D6); `components.toml:402` description. Depends on 0a, 1.
 
 **Proposed:** per Decision D1, the main thread runs a resident Sal run with `GlibSource`, the
 zbus thread stays as it is, and the two talk through a channel woken in calloop. `confine()`
@@ -549,10 +549,11 @@ D6. **`/run/media` at start.** Recommended: the image ships a tmpfiles.d line cr
 always have their anchor; a stick mounted later lies beneath it. Whether a mount made after the
 unit started is writable inside its namespace is unverified; Task 6's VM test decides. The
 alternative is no New Folder on removable drives.
-*Decided by the maintainer on 2026-11-21: as recommended in intent (`doc_portal.md` section 6,
-decision 19). udisks2 already ships `d /run/media 0755 root root` in
-`/usr/lib/tmpfiles.d/udisks2.conf`, so the image ships no duplicate, and the backend fails to
-start with a clear error when `/run/media` is absent.*
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision
+19). The line ships in the backend's package, `/usr/lib/tmpfiles.d/xdg-desktop-portal-athanor.conf`;
+udisks2's identical line makes systemd-tmpfiles log a duplicate, a known and harmless cost.
+Proposed with the amendment: when `/run/media` is absent at start, the backend logs at err
+priority with the path and confines without that root.*
 
 D7. **Tabs and drops in the chooser.** Recommended: neither in this plan; tabs (SR5, FM19) and
 drag and drop (SR13, decision 40) belong to the file manager's window, as decision 39 orders

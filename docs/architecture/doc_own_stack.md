@@ -2008,8 +2008,8 @@ compositor and that the own compositor did not yet offer:
       focus select the first item whose name, as the application gives it, starts with the
       typed text, as `doc_files.md` FM18 asks of the current folder. Test: a model of 100,000
       items lays out and draws its first frame within FM20's 200 ms on the reference laptop,
-      with no more widgets than the viewport needs plus its margins, and type-ahead moves the
-      cursor to the first match.
+      with no more widgets than the viewport needs plus its margins; type-ahead moves the
+      cursor to the first match (*proposed for approval, 2026-11-21*).
     - **SR2. Multiple selection.** The item view holds a set of selected indices, an anchor and
       a cursor apart from the selection. A click selects one; Ctrl with a click toggles one;
       Shift with a click or an arrow extends from the anchor; Ctrl with an arrow moves the cursor
