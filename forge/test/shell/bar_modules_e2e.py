@@ -316,6 +316,9 @@ def network(ctx):
         and capture_after("bar-modules-network-3", redrawn) is not None
         and lab_row() == shown,
     )
+    # The icon on the way back is the first one, not merely another: the clock is frozen under
+    # FAKETIME, so the same icon draws the same picture.
+    check("and it is the icon the row began with", capture("bar-modules-network-4") == picture)
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
     check(
