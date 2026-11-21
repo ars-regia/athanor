@@ -67,14 +67,6 @@ class Forms(unittest.TestCase):
         self.assertEqual(messages("The `alpha` is at `data/y:1`."), [])
         self.assertEqual(len(messages(f"{CRATE}then `deep` at `src/lib.rs:2`.")), 1)
 
-    def test_a_path_read_by_its_suffix_names_no_crate(self):
-        extra = {"crate/benches/only.rs": "fn solo() {}\n", "crate/benches/two.rs": "one\ntwo deep\n",
-                 "other/benches/two.rs": "a\n", "crate/Cargo.toml": "deep\n"}
-        text = "The `solo` is at `benches/only.rs:1`, and `deep` at `benches/two.rs:1`."
-        self.assertEqual(messages(text, extra), [])
-        text = "It is in `crate/Cargo.toml:1`, and `deep` at `benches/two.rs:1`."
-        self.assertEqual(len(messages(text, extra)), 1)
-
     def test_a_hyphenated_token_is_a_whole_word(self):
         self.assertEqual(messages("The `cosmic-osd` is at `data/clients:3`."), [])
         self.assertEqual(

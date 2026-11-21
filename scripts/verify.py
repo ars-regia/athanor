@@ -6625,9 +6625,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     last in the same line, with or without a line of its own. A backtick span that is no file name
     (an identifier) leaves that file as it was; a file name that resolves to no file, or a
     citation of one, clears it, and a `:N` after that cites nothing and is not checked. A path resolves as written, then under the crate whose full path the line names
-    before it (a file under its `src/`, `data/`, `tests/` or `benches/`, or its `Cargo.toml`), then
-    by the one tracked file whose path ends with it; a name that several files end with
-    (`Cargo.toml`) is not read, and one read by its suffix names no crate. A path that starts with a top-level directory of the
+    before it, then by the one tracked file whose path ends with it; a name that several files
+    end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
     file is a finding, as is a bare `*.md` name that no tracked file ends with. A range is no line range when it starts at 0, ends before it starts,
     reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
@@ -6701,11 +6700,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
             if path is None:
                 continue
             body = read_file(path)
-            # A path read by its suffix names no crate: it may be another project's file
-            # (`src/wayland.rs` of an upstream daemon), whose crate would then place `src/main.rs`.
-            # A crate's manifest names its crate as a file under it does.
-            if named in (None, path, f"{crate}/{named}") and (
-                    c := CRATE_ROOT.match(path) or re.match(r"^(.+)/Cargo\.toml$", path)):
+            if (c := CRATE_ROOT.match(path)):
                 crate = c.group(1)
             ranges = []
             for part in re.split(r",\s*", spec):
