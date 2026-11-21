@@ -234,7 +234,7 @@ jobs:
     # result: the repro job that lost its self-hosted runner on 2026-11-01 never ran a last
     # step.
     needs: [repro, variant, bench]
-    if: ${{ always() && github.event_name == 'schedule' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

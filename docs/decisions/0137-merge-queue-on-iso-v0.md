@@ -2,7 +2,7 @@
 id: ADR-0137
 title: "Pull requests land on iso-v0 through a merge queue with grouping"
 date: 2026-11-06
-status: accepted
+status: amended by ADR-0146
 issues: []
 areas: [process, build]
 ---
