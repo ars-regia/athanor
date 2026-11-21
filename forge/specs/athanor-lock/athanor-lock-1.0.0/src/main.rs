@@ -120,7 +120,10 @@ mod tests {
             failure: None,
         };
         assert!(nix::sys::prctl::get_dumpable().expect("get_dumpable"));
-        assert!(lock.start().is_empty(), "the lock opens no surface at start");
+        assert!(
+            lock.start().is_empty(),
+            "the lock opens no surface at start"
+        );
         assert_eq!(lock.failure, None);
         assert!(!nix::sys::prctl::get_dumpable().expect("get_dumpable"));
     }
