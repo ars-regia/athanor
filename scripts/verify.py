@@ -6709,8 +6709,9 @@ def diff_hunks(root, base):
     return out
 
 
-# The numbers of a citation (`:120`, `:11301-11307`, `:3, 9`) inside a line.
-CITATION_NUMBERS = re.compile(r"(?<=[\w`]):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*")
+# The numbers of a citation inside a line: a whole backtick span, `path.ext:120`, `path.ext:3, 9-12` or
+# the short `:120`. Any other `:N` (`fedora:43`, `127.0.0.1:8080`) is text.
+CITATION_NUMBERS = re.compile(r"(`[^`\s]*\.[A-Za-z]\w*|`):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*(?=`)")
 
 
 def moved_ranges(ranges, hunks, same=None):
@@ -7068,8 +7069,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
     the limit: every citation on an edited line is skipped, also one the edit did not touch. A cited
-    line that the change edited without adding or removing lines, and whose only difference from the
-    revision is the numbers of its own citations (`base_file(path)` is the file there), is not an edit.
+    line of a Markdown file that the change edited without adding or removing lines, and whose only
+    difference from the revision is the numbers of its own citations (`base_file(path)` is the file
+    there), is not an edit.
 
     A citation by name is `path#symbol`, or `#symbol` for the file named last (a colour, `#e62d42`, is
     none unless the last file defines the symbol, `#add`; an `x#y` whose `x` is no file, a flake
@@ -7203,8 +7205,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 continue
             if not symbol and line in unchanged and path in hunks:
                 before = base_file(path).split("\n") if base_file else []
-                new = moved_ranges(ranges, hunks[path], lambda old, now: old <= len(before) and now <= len(rows)
-                                   and CITATION_NUMBERS.sub(":N", before[old - 1]) == CITATION_NUMBERS.sub(":N", rows[now - 1]))
+                new = moved_ranges(ranges, hunks[path], lambda old, now: path.endswith(".md")
+                                   and old <= len(before) and now <= len(rows)
+                                   and CITATION_NUMBERS.sub(r"\1:N", before[old - 1])
+                                   == CITATION_NUMBERS.sub(r"\1:N", rows[now - 1]))
                 if new is None:
                     out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
                                 "that this change edited or removed: place it again"))

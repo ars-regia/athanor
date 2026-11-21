@@ -395,6 +395,21 @@ class Moved(unittest.TestCase):
         out = self.found(text, hunks, extra=notes, before=reworded)
         self.assertIn("edited or removed: place it again", out[0])
 
+    def test_a_number_after_a_colon_that_is_no_citation_is_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        for name, now, was in (
+            ("notes.md", "a `note` of fedora:44\n", "a `note` of fedora:43\n"),
+            ("notes.md", "a `note` at `x:9090` there\n", "a `note` at `x:8080` there\n"),
+            ("notes.rs", 'const `note`: &str = "127.0.0.1:9090";\n', 'const `note`: &str = "127.0.0.1:8080";\n'),
+            ("notes.rs", "a `note` at `src/x.rs:124` here\n", "a `note` at `src/x.rs:120` here\n"),
+        ):
+            with self.subTest(was=was):
+                out = self.found(
+                    text.replace("notes.md", name), {name: [(1, 1, 1)]}, extra={name: now}, before={name: was}
+                )
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("edited or removed", out[0])
+
     def test_moved_ranges_reads_a_same_line_edit_through_the_predicate(self):
         hunks = [(2, 2, 2)]
         self.assertEqual(verify.moved_ranges([(1, 3)], hunks, lambda old, new: True), [(1, 3)])
