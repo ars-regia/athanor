@@ -76,19 +76,20 @@ pub fn pci_name(pci_ids: &str, vendor: &str, device: &str) -> Option<String> {
 
 /// A size in bytes as the page shows it, in decimal units with one decimal place: `15.5 GB`.
 pub fn size(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
+    const UNITS: [&str; 4] = ["kB", "MB", "GB", "TB"];
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
     let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit + 1 < UNITS.len() {
+    let mut name = "B";
+    for unit in UNITS {
+        if value < 1000.0 {
+            break;
+        }
         value /= 1000.0;
-        unit += 1;
+        name = unit;
     }
-    let name = UNITS.get(unit).copied().unwrap_or("TB");
-    if unit == 0 {
-        format!("{bytes} {name}")
-    } else {
-        format!("{value:.1} {name}")
-    }
+    format!("{value:.1} {name}")
 }
 
 #[cfg(test)]
