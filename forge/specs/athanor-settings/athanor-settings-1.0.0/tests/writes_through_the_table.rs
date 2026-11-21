@@ -1,7 +1,7 @@
 //! doc_settings.md SE7: Settings writes GSettings only through the handles of
 //! athanor-settings-core's table of writable keys. Step 1 writes no key; the first page that
 //! does adds one module, `src/gsettings.rs`, which takes nothing but a handle. Any other source
-//! that names `gio::Settings` or one of its setters fails here.
+//! that brings in gio's `Settings` or calls one of its setters fails here.
 
 use std::fs;
 use std::path::Path;
@@ -20,6 +20,64 @@ const SETTERS: &[&str] = &[
     ".set_int64(",
     ".set_uint64(",
 ];
+
+/// Whether `word` stands in `text` as a whole identifier, as a regex's `\bword\b`.
+fn has_token(text: &str, word: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(at, _)| {
+        let before = text.get(..at).and_then(|t| t.chars().next_back());
+        let after = text.get(at + word.len()..).and_then(|t| t.chars().next());
+        !before.is_some_and(ident) && !after.is_some_and(ident)
+    })
+}
+
+/// What in `text` writes GSettings: a setter, or a `use` that names `gio` and brings in
+/// `Settings` as a token (`use gio::{Settings}`, `use gio::Settings as Store`) or all of gio.
+/// Settings' own window type is also named `Settings`, so the token counts only in a `use` of
+/// gio; a path through gio is `gio::Settings`, which SETTERS names.
+fn offences(text: &str) -> Vec<String> {
+    let mut found: Vec<String> = SETTERS
+        .iter()
+        .filter(|setter| text.contains(*setter))
+        .map(|setter| (*setter).to_owned())
+        .collect();
+    let uses = text.match_indices("use ").filter(|(at, _)| {
+        let before = text.get(..*at).and_then(|t| t.chars().next_back());
+        !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+    });
+    for (at, _) in uses {
+        let statement = text.get(at..).and_then(|t| t.split(';').next()).unwrap_or_default();
+        if has_token(statement, "gio")
+            && (has_token(statement, "Settings") || statement.contains("gio::*"))
+        {
+            found.push(statement.trim().to_owned());
+        }
+    }
+    found
+}
+
+#[test]
+fn the_scan_finds_settings_however_it_is_imported() {
+    for text in [
+        "use gio::{Settings};",
+        "use gio::{prelude::*, Settings as Store};",
+        "use gio::Settings as G;",
+        "use gio::*;",
+        "let s = gio::Settings::new(\"org.gnome.desktop.interface\");",
+        "s.set_string(\"font-name\", \"Inter\");",
+    ] {
+        assert!(!offences(text).is_empty(), "missed: {text}");
+    }
+    for text in [
+        "pub struct Settings {",
+        "use athanor_settings::window::{self, Settings};",
+        "let settings = Settings::new(registry);",
+        "use gio::glib;",
+        "/// Settings' unit\nfn trust(bus: &gio::DBusConnection) {",
+    ] {
+        assert_eq!(offences(text), Vec::<String>::new(), "flagged: {text}");
+    }
+}
 
 fn sources(dir: &Path, found: &mut Vec<std::path::PathBuf>) {
     for entry in fs::read_dir(dir).expect("the source directory").flatten() {
@@ -44,10 +102,8 @@ fn no_source_but_the_gsettings_module_writes_a_key() {
             continue;
         }
         let text = fs::read_to_string(&file).expect("a source file");
-        for setter in SETTERS {
-            if text.contains(setter) {
-                offenders.push(format!("{}: {setter}", file.display()));
-            }
+        for offence in offences(&text) {
+            offenders.push(format!("{}: {offence}", file.display()));
         }
     }
     assert!(offenders.is_empty(), "GSettings written outside src/gsettings.rs: {offenders:?}");
