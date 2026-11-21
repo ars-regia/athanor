@@ -123,7 +123,7 @@ class Identity(Tool):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(
             r.stdout.strip(),
-            r"^https://github\.com/ars-regia/athanor/\.github/workflows/kernel-build\.yml@refs/heads/(iso-v0|main)$",
+            r"^https://github\.com/ars-regia/athanor/\.github/workflows/kernel-build\.yml@refs/heads/(iso-v0)$",
         )
 
     def test_identity_of_an_unknown_kind_fails(self):
@@ -134,7 +134,7 @@ class Signer(Tool):
     def test_the_signer_image_is_signed_only_by_its_workflow_on_a_trusted_branch(self):
         ref = f"{REG}/azoth-signer@{BOOT}"
         for identity, verdict in (
-            (SIGNER + "main", "signed"),
+            (SIGNER + "main", "unsigned"),
             (SIGNER + "iso-v0", "signed"),
             (SIGNER + "feature", "unsigned"),
             (KMOD, "unsigned"),
@@ -1322,11 +1322,11 @@ class TrustedRefs(Tool):
         fx["attestations"][f"{REG}/azoth@{KERNEL}"] = [{"identity": identity, "predicate": INPUTS}]
         return fx
 
-    def test_iso_v0_and_main_are_trusted_by_default(self):
-        for ref in ("refs/heads/iso-v0", "refs/heads/main"):
+    def test_only_iso_v0_is_trusted_by_default(self):
+        for ref, state in (("refs/heads/iso-v0", "ready"), ("refs/heads/main", "kernel-missing")):
             r = self.resolve_with(self.kernel_signed_by(signed_by(ref)))
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(self.state_file()["state"], "ready", ref)
+            self.assertEqual(self.state_file()["state"], state, ref)
 
     def test_a_kernel_published_from_another_branch_is_not_ready(self):
         r = self.resolve_with(self.kernel_signed_by(signed_by("refs/heads/claude/other")))
