@@ -18,7 +18,9 @@ A line has the form `YYYY-MM-DD: what was decided. Where.` Documents cite a deci
 ## Backfill
 
 The lines below are the decisions that `CLAUDE.md`, `.claude/rules/` and the specifications
-cite as "maintainer decision, <date>" on 2026-11-21; every date they cite has at least one line. Each states what was decided and links to
+cite as "maintainer decision, <date>" on 2026-11-21, as far as this first backfill reached; it
+does not yet cover every cited date. The `verify.py` check that #1284 owes lists the dates still
+missing, and their lines land with it. Each states what was decided and links to
 where it is recorded; where one document carries more than about eight decisions of a date, one
 line names the document with a short summary, and the document holds the text of each.
 A line says only what its source records.
