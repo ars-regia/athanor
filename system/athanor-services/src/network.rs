@@ -1027,6 +1027,15 @@ fn register_backoff(attempts: u32) -> Duration {
 /// What the profile of a path says, read once per owner of NetworkManager.
 type Info = (u64, String, Option<ConnectionInfo>);
 
+/// Settings reads that may wait for the model's loop. Each profile is read once per owner and a
+/// profile has one message, so a few dozen cover a normal host; a host with more has the
+/// reading tasks wait their turn, none is dropped, and the loop empties the queue at every turn.
+const INFO_QUEUE: usize = 64;
+
+fn info_queue() -> (mpsc::Sender<Info>, mpsc::Receiver<Info>) {
+    mpsc::channel(INFO_QUEUE)
+}
+
 async fn run(
     handle: &Handle,
     connection: Connection,
@@ -1056,7 +1065,7 @@ async fn run(
         shared: shared.clone(),
         owner: None,
     };
-    let (info_tx, mut infos) = mpsc::unbounded_channel::<Info>();
+    let (info_tx, mut infos) = info_queue();
     // The settings of each saved profile, read once: they tell a saved network from a new one,
     // and name the VPNs. `asked` keeps the profiles whose read was started in this generation,
     // answered or not, so that a profile of another user, which answers PermissionDenied each
@@ -1201,8 +1210,10 @@ async fn run(
                                 "a NetworkManager profile has unreadable settings; it is not listed"
                             );
                         }
-                        // The model has ended when the send fails.
-                        infos.send((generation, path, info)).ok();
+                        // Every answer is a distinct profile the model needs, so the task waits
+                        // for room (it is its own task: nothing else waits with it); the model
+                        // has ended when the send fails.
+                        infos.send((generation, path, info)).await.ok();
                     });
                 }
             }
@@ -3131,5 +3142,28 @@ mod tests {
         .await
         .expect("the agent is no longer served");
         assert!(gone.contains("Unknown"), "{gone}");
+    }
+
+    /// Readings that finish faster than the loop drains are all delivered, and the queue never
+    /// holds more than its capacity.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_flood_of_profile_reads_waits_and_loses_none() {
+        let (tx, mut rx) = info_queue();
+        assert_eq!(tx.max_capacity(), INFO_QUEUE);
+        let total = INFO_QUEUE * 4;
+        for n in 0..total {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                tx.send((0, format!("/profile/{n}"), None)).await.ok();
+            });
+        }
+        drop(tx);
+        let mut paths = BTreeSet::new();
+        while let Some((_, path, _)) = rx.recv().await {
+            assert!(rx.len() <= INFO_QUEUE);
+            paths.insert(path);
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(paths.len(), total);
     }
 }

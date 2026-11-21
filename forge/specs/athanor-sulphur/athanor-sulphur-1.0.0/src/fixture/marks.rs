@@ -25,8 +25,8 @@ const ACCENT: [u8; 4] = [0x91, 0x41, 0xac, 255];
 const OUTLINE: i32 = 3;
 /// Calmo's dark `bg_divider`, which the divider takes before a theme is read.
 const DIVIDER: [u8; 4] = [0x39, 0x3b, 0x4a, 255];
-const BLACK: [u8; 4] = [0, 0, 0, 255];
-const WHITE: [u8; 4] = [255, 255, 255, 255];
+pub(super) const BLACK: [u8; 4] = [0, 0, 0, 255];
+pub(super) const WHITE: [u8; 4] = [255, 255, 255, 255];
 const GREY: [u8; 4] = [0x80, 0x80, 0x80, 255];
 /// What the border's lines add around a window.
 const BORDER: i32 = 3;

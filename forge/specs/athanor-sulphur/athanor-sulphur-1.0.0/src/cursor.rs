@@ -30,7 +30,7 @@ pub(crate) const FALLBACK_RGBA: [u8; 4] = [230, 230, 230, 255];
 /// The largest cursor surface a client may set, in logical pixels a side: a larger one, or
 /// one whose hotspot lies off it, gets the default cursor, so that no client covers the screen
 /// with its cursor or draws it away from the pointer.
-const MAX_CLIENT_CURSOR: i32 = 256;
+pub(crate) const MAX_CLIENT_CURSOR: i32 = 256;
 
 render_elements! {
     pub PointerElement<R> where R: ImportAll + ImportMem;
@@ -293,7 +293,7 @@ where
 /// Whether a client's cursor surface tree, `bbox` around it, is drawn with `hotspot`: it is no
 /// larger than `MAX_CLIENT_CURSOR` a side, and the hotspot lies on it, edges included, so that
 /// an empty surface hides the pointer.
-fn drawable(bbox: Rectangle<i32, Logical>, hotspot: Point<i32, Logical>) -> bool {
+pub(crate) fn drawable(bbox: Rectangle<i32, Logical>, hotspot: Point<i32, Logical>) -> bool {
     let on = |at: i32, from: i32, length: i32| (from..=from.saturating_add(length)).contains(&at);
     bbox.size.w <= MAX_CLIENT_CURSOR
         && bbox.size.h <= MAX_CLIENT_CURSOR

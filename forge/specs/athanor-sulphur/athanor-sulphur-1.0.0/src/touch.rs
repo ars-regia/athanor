@@ -196,6 +196,15 @@ impl State {
         touch.up(self, &UpEvent { slot, serial, time });
     }
 
+    /// Where the touch point the seat knows as `slot` is, while it is held.
+    pub(crate) fn touch_at(&self, slot: TouchSlot) -> Option<Point<f64, Logical>> {
+        self.touches
+            .held
+            .values()
+            .find(|(held, _)| *held == slot)
+            .map(|(_, at)| *at)
+    }
+
     /// The end of a set of touch events; none when the seat was given none of them.
     pub(crate) fn touch_frame(&mut self) {
         let Some(touch) = self.seat.get_touch() else {

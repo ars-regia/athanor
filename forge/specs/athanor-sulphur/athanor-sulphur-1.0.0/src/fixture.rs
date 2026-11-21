@@ -13777,3 +13777,7 @@ mod null_arguments;
 // A client that floods the compositor with requests (vendor/wayland-backend/PATCHES.md).
 #[cfg(test)]
 mod flood;
+
+// Decision 40: drag and drop between clients, and the drag icon.
+#[cfg(test)]
+mod dnd;

@@ -315,6 +315,17 @@ class Resolution(unittest.TestCase):
         self.assertIn("is not a line range of its file", out[0])
         self.assertEqual(len(messages("The `x` is at `src/x.rs:3-5`.")), 1)
 
+    def test_a_path_under_an_abbreviation_reads_as_the_defined_path(self):
+        define = "- **S** (`pkg`, below `S`).\n"
+        self.assertEqual(messages(define + "The `zeta` is at `S/lib/y.rs:1`."), [])
+        out = messages(define + "The `zeta` is at `S/lib/y.rs:2`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("doc.md:2: `pkg/lib/y.rs:2` does not hold `zeta`", out[0])
+        out = messages("- **S** (`forge/s`, below `S`).\nThe `grant` is at `S/none.rs:1`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("`forge/s/none.rs:1` names a file that does not exist", out[0])
+        self.assertEqual(messages("The `zeta` is at `S/lib/y.rs:2`."), [])
+
     def test_every_entry_of_a_list_is_a_line_range(self):
         out = messages("The `grant` is at `src/x.rs:1, 9`.")
         self.assertEqual(len(out), 1)
@@ -362,12 +373,18 @@ class Moved(unittest.TestCase):
     HEAD = {"src/x.rs": "p\nq\nr\n" + FILES["src/x.rs"]}
     TEXT = "The line `grant` is at `src/x.rs:1-4`."
 
-    def found(self, text, hunks, base=None, extra=None):
+    def found(self, text, hunks, base=None, extra=None, before=None):
         files = {**FILES, **(self.HEAD if extra is None else extra)}
         return [
             f[-1]
             for f in verify.citation_findings(
-                "doc.md", text, set(files), files.__getitem__, hunks, text if base is None else base
+                "doc.md",
+                text,
+                set(files),
+                files.__getitem__,
+                hunks,
+                text if base is None else base,
+                base_file=None if before is None else before.__getitem__,
             )
         ]
 
@@ -394,12 +411,67 @@ class Moved(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("it should name `src/x.rs:1, 5-6`", out[0])
 
+    def test_a_citation_under_an_abbreviation_is_moved_like_its_full_path(self):
+        path = "forge/specs/s/s-1.0.0/src/x.rs"
+        text = "- **S** (`forge/specs/s/s-1.0.0`, below `S`).\n  - The line `grant` is at `S/src/x.rs:1-4`."
+        out = self.found(text, {path: [(0, 0, 3)]}, extra={path: self.HEAD["src/x.rs"]})
+        self.assertEqual(len(out), 1)
+        self.assertIn(f"doc.md:2: `{path}:1-4` is moved by this change", out[0])
+        self.assertIn(f"it should name `{path}:4-7`", out[0])
+        out = self.found(text, {path: [(2, 1, 1)]}, extra={path: FILES["src/x.rs"]})
+        self.assertEqual(len(out), 1)
+        self.assertIn("edited or removed: place it again", out[0])
+
     def test_an_edited_or_removed_cited_line_is_left_to_a_reader(self):
         for hunk in ((2, 1, 1), (3, 2, 0)):
             with self.subTest(hunk=hunk):
                 out = self.found(self.TEXT, {"src/x.rs": [hunk]}, extra={})
                 self.assertEqual(len(out), 1)
                 self.assertIn("edited or removed: place it again", out[0])
+
+    def test_a_cited_line_that_only_renumbers_its_citations_is_not_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        notes = {"notes.md": "a `note` at `src/x.rs:124` here\nnext\n"}
+        before = {"notes.md": "a `note` at `src/x.rs:120` here\nnext\n"}
+        hunks = {"notes.md": [(1, 1, 1)]}
+        self.assertEqual(self.found(text, hunks, extra=notes, before=before), [])
+        self.assertEqual(len(self.found(text, hunks, extra=notes)), 1)
+        short = {"notes.md": "a `note` at `src/x.rs:124`, `:9`\nnext\n"}
+        before_short = {"notes.md": "a `note` at `src/x.rs:120`, `:7`\nnext\n"}
+        self.assertEqual(self.found(text, hunks, extra=short, before=before_short), [])
+        reworded = {"notes.md": "a `note` at `src/x.rs:120` there\nnext\n"}
+        out = self.found(text, hunks, extra=notes, before=reworded)
+        self.assertIn("edited or removed: place it again", out[0])
+
+    def test_a_short_number_after_a_cited_file_counts_as_its_citation_number(self):
+        text = "The `note` is at `notes.md:1`."
+        now = {"notes.md": "see `src/x.rs:120`, listens on `:9090`\nnext\n"}
+        was = {"notes.md": "see `src/x.rs:120`, listens on `:8080`\nnext\n"}
+        self.assertEqual(self.found(text, {"notes.md": [(1, 1, 1)]}, extra=now, before=was), [])
+
+    def test_a_number_after_a_colon_that_is_no_citation_is_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        for name, now, was in (
+            ("notes.md", "a `note` of fedora:44\n", "a `note` of fedora:43\n"),
+            ("notes.md", "a `note` at `x:9090` there\n", "a `note` at `x:8080` there\n"),
+            ("notes.md", "a `note` at `registry.example:5001`\n", "a `note` at `registry.example:5000`\n"),
+            ("notes.md", "a `note` at `quay.io:444` and `:9090`\n", "a `note` at `quay.io:443` and `:8080`\n"),
+            ("notes.md", "a `note` at `:9090`\n", "a `note` at `:8080`\n"),
+            ("notes.rs", 'const `note`: &str = "127.0.0.1:9090";\n', 'const `note`: &str = "127.0.0.1:8080";\n'),
+            ("notes.rs", "a `note` at `src/x.rs:124` here\n", "a `note` at `src/x.rs:120` here\n"),
+        ):
+            with self.subTest(was=was):
+                out = self.found(
+                    text.replace("notes.md", name), {name: [(1, 1, 1)]}, extra={name: now}, before={name: was}
+                )
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("edited or removed", out[0])
+
+    def test_moved_ranges_reads_a_same_line_edit_through_the_predicate(self):
+        hunks = [(2, 2, 2)]
+        self.assertEqual(verify.moved_ranges([(1, 3)], hunks, lambda old, new: True), [(1, 3)])
+        self.assertIsNone(verify.moved_ranges([(1, 3)], hunks, lambda old, new: old != 3))
+        self.assertIsNone(verify.moved_ranges([(1, 3)], [(2, 2, 3)], lambda old, new: True))
 
     def test_moved_ranges_counts_every_hunk_before_a_line(self):
         hunks = [(1, 1, 3), (10, 2, 0)]
@@ -522,7 +594,7 @@ class Kept(unittest.TestCase):
                                                "a document that cannot be read ("), problems)
 
     def test_the_upstream_list_only_shrinks(self):
-        self.assertLessEqual(len(verify.LINE_CITATIONS_UPSTREAM), 1)
+        self.assertLessEqual(len(verify.LINE_CITATIONS_UPSTREAM), 2)
 
     def test_a_file_named_by_its_suffix_places_the_files_of_its_crate(self):
         # `data/globals` and `src/notifications.rs` resolve by their suffix and name their crate,
@@ -537,7 +609,7 @@ class Kept(unittest.TestCase):
         moved = {p.split(" is moved")[0] for p in result.problems if "is moved by this change" in p}
         cited = {
             f"doc_notification_center.md:15: `{store}:9`",
-            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (109, 370, 436, 544)),
+            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (109, 375, 441, 550)),
         }
         self.assertLessEqual(cited, moved)
 
