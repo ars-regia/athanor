@@ -5512,6 +5512,10 @@ SESSION_EXEMPT = {
         "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
     ("athanor-settings.service", f"RestartSec=200ms, {SURFACE_WANTS} 0.1"):
         "doc_settings.md SE5 sets RestartSec=200ms",
+    ("athanor-settings.service", f"StartLimitBurst=(unset), {SURFACE_WANTS} 10"):
+        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; systemd's default stops a crash loop",
+    ("athanor-settings.service", f"StartLimitIntervalSec=(unset), {SURFACE_WANTS} 600"):
+        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; systemd's default stops a crash loop",
     (
         "athanor-control-center-shortcut.service",
         f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
