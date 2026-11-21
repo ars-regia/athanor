@@ -675,12 +675,9 @@ fn ax11_a_focus_change_within_a_client_drops_a_press_held_back() {
     let surface = compositor.create_surface(&qh, ());
     let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
     let _toplevel = xdg.get_toplevel(&qh, ());
-    local.client.configure = None;
     surface.commit();
-    local.pump(&mut run, "the second window is configured", |client, _| {
-        client.configure.is_some()
-    });
-    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let serial = local.first_configure(&mut run, &xdg);
+    xdg.ack_configure(serial);
     let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();

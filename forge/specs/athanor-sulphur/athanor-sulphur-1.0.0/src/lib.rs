@@ -209,6 +209,7 @@ pub fn run() -> Result<(), Error> {
     };
     tracing::info!(?socket, ?x11, ?options, "listening");
     ready::announce(&socket, x11)?;
+    ready::watchdog(&event_loop.handle())?;
     let ran = event_loop.run(None, &mut state, State::refresh_idle_inhibit);
     // From here a second SIGTERM or SIGINT takes the default action: see `shutdown::watch`.
     event_loop.handle().remove(signals);
