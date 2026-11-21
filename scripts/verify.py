@@ -6668,6 +6668,7 @@ LINE_CITATIONS_KEPT = {
 # fails, so the list only shrinks.
 LINE_CITATIONS_UPSTREAM = {
     ("doc_osd.md", "src/wayland.rs"): "cosmic-settings-daemon's, not athanor-idle's",
+    ("doc_settings.md", "src/state.rs"): "cosmic-comp 1.8.0's, not athanor-sulphur's",
 }
 
 
