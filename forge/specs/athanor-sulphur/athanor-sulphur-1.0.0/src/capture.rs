@@ -223,9 +223,13 @@ impl State {
                 self.capture_sessions.retain(|kept| *kept != session);
                 continue;
             };
-            let marks = self.marks();
+            let mut marks = self.marks();
+            // The pointer, and the drag icons with it, only when the session asks for cursors,
+            // `paint_cursors`.
+            if !session.draw_cursor() {
+                marks.drag.clear();
+            }
             let status = self.shown_cursor();
-            // The pointer only when the session asks for cursors, `paint_cursors`.
             let pointer = self
                 .seat
                 .get_pointer()
