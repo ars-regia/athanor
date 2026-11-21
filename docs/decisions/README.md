@@ -204,7 +204,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0134 | 0134 | [The pillars of Athanor take alchemical names; every other package keeps a descriptive one](0134-alchemical-names-for-the-pillars.md) | accepted | shell, update, security, process |
 | ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | amended by ADR-0138, ADR-0139, ADR-0141 | process, docs, shell, security |
 | ADR-0136 | 0136 | [A promotion asks for one release approval: the ISO step joins the promote job](0136-one-release-approval-per-promotion.md) | accepted | release, build, security |
-| ADR-0137 | 0137 | [Pull requests land on iso-v0 through a merge queue with grouping](0137-merge-queue-on-iso-v0.md) | accepted | process, build |
+| ADR-0137 | 0137 | [Pull requests land on iso-v0 through a merge queue with grouping](0137-merge-queue-on-iso-v0.md) | amended by ADR-0146 | process, build |
 | ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | amended by ADR-0141, ADR-0143 | shell, security, process, docs |
 | ADR-0139 | 0139 | [Pull requests that change only files under docs/ do not count against the open pull request limit](0139-docs-pull-requests-outside-the-limit.md) | accepted | process, docs |
 | ADR-0140 | 0140 | [Cache the Rust builds of the shell jobs in CI through the rig's compiler cache](0140-cache-the-shell-jobs-rust-builds.md) | accepted | build, process, security |
@@ -212,3 +212,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0142 | 0142 | [The move to Fedora 45 turns sshd off on upgraded machines, as Fedora's desktop preset does](0142-fedora-45-upgrade-turns-sshd-off.md) | accepted | security, network |
 | ADR-0143 | 0143 | [Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console](0143-pre-1-0-audit-decisions.md) | accepted | security, build, process, kernel, shell, docs |
 | ADR-0144 | 0144 | [The QEMU guest agent is off until a person turns it on, and then answers an allow-list](0144-qemu-guest-agent-off-by-default.md) | accepted | security |
+| ADR-0146 | 0146 | [The merge queue builds the specs, not the kernel or the shell, and the shell is covered by a push alert](0146-merge-queue-builds-the-specs-only.md) | accepted | process, build |

@@ -2,16 +2,14 @@
 id: ADR-0137
 title: "Pull requests land on iso-v0 through a merge queue with grouping"
 date: 2026-11-06
-status: accepted
+status: amended by ADR-0146
 issues: []
 areas: [process, build]
 ---
 
 # 0137. Pull requests land on iso-v0 through a merge queue with grouping
 
-**Accepted** on 2026-11-06 by the maintainer. Amended on 2026-11-21, approved by the maintainer
-with the pull request that makes the change (#1353): the queue builds the specs
-(decision 4); its Consequences described builds that did not run.
+**Accepted** on 2026-11-06 by the maintainer.
 
 ## Context
 
@@ -46,21 +44,6 @@ reports it, runs on `merge_group`. On `main` it does not: `main` requires `Kerne
 3. **The fresh-base rule leaves `iso-v0`.** An approved pull request is enqueued once; the
    queue runs `pr.yml` on the base it lands on, so neither the branch update nor the new
    approval is needed. The rule of #1013 stays for bases without a queue (`rebase/*`, `main`).
-4. **The queue builds what the change selects, except the kernel and the shell.** On
-   `merge_group`, `scripts/ci/changes.py` selects the areas a pull request would, so a change
-   to the specs is built again on the base it lands on, which is what the fresh-base rule
-   existed to guarantee. The kernel is built once, at the pull request head, and its RPMs are
-   published from that build ([ADR-0110](0110-kernel-artifact-promotion.md)); building it
-   again would cost an hour on a runner that serves one build at a time. The shell is not
-   built because one shell entry costs about 45 to 50 minutes of wall clock and about 240
-   runner minutes (runs of 2026-11-20), against about 15 minutes for an entry that builds
-   nothing; the push run of `shell-surfaces.yml` on `iso-v0` catches a shell failure of the
-   merged base after the merge, and its `alert` job opens a `ci-alert` issue for it
-   (maintainer decision, 2026-11-21). `verify.py workflows` fails when a build the queue skips
-   has no such covering workflow with that alert, or a stated reason why it has none (the
-   kernel's, ADR-0110).
-
-Not built in the queue: kernel, shell.
 
 ## Alternatives rejected
 
@@ -89,11 +72,6 @@ Not built in the queue: kernel, shell.
   makes this change; `docs/operations/github-settings.md` section 9, `CLAUDE.md` and
   `.claude/rules/workflow.md` follow. On `iso-v0`, `gh pr merge` enqueues instead of merging,
   for the agents and for `forge/scripts/bot_merge.py` alike.
-- Each queue entry runs `pr.yml` of its own; up to five run at once. An entry that changes the
-  specs also runs those jobs on GitHub-hosted runners, 2 to 6 minutes (runs of 2026-11-20),
-  against about 15 minutes for an entry that builds nothing. A kernel change is not built again
-  in the queue (decision 4), so the queue never waits for the self-hosted runner. A shell
-  change is not built either: it lands on the checks of its pull request and is built on the
-  merged base by the push run of `shell-surfaces.yml`, so a failure there is seen after the
-  merge, not before it, and alerts through a `ci-alert` issue (PL51). `scripts/ci/tests/test_pr_workflow.py` pins the line "Not built in the queue" to
-  `QUEUE_SKIPS` in `changes.py`, so this record cannot drift from the script again.
+- Each queue entry runs `pr.yml` of its own; up to five run at once. A kernel change is built
+  again in its entry's run on the self-hosted runner, which serves one build at a time; the wait counts toward the
+  360-minute check timeout, so several kernel entries at once can time out; the queue removes such an entry, and it must be enqueued again.

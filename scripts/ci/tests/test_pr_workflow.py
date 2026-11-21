@@ -18,7 +18,7 @@ changes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(changes)
 
 
-ADR_0137 = ROOT / "docs" / "decisions" / "0137-merge-queue-on-iso-v0.md"
+ADR_0146 = ROOT / "docs" / "decisions" / "0146-merge-queue-builds-the-specs-only.md"
 
 
 def needs(job):
@@ -27,12 +27,12 @@ def needs(job):
 
 
 class QueueBuildsTest(unittest.TestCase):
-    def test_adr_0137_names_the_builds_the_queue_skips(self):
+    def test_adr_0146_names_the_builds_the_queue_skips(self):
         # The decision record states which builds the merge_group run leaves out; it must say what
         # changes.py does, and every skip must cite a decision record that exists.
-        text = ADR_0137.read_text()
+        text = ADR_0146.read_text()
         found = re.search(r"^Not built in the queue: (.+)\.$", text, re.M)
-        self.assertIsNotNone(found, "ADR-0137 has no 'Not built in the queue:' line")
+        self.assertIsNotNone(found, "ADR-0146 has no 'Not built in the queue:' line")
         stated = {name.strip() for name in found.group(1).split(",")}
         self.assertEqual(stated, set(changes.QUEUE_SKIPS))
         for area, adr in changes.QUEUE_SKIPS.items():

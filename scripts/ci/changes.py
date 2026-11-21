@@ -24,7 +24,7 @@ it gates.
 docs_only is true when every changed file is documentation and no area is selected.
 EVENT is the event that runs pr.yml. On merge_group the areas of QUEUE_SKIPS (the kernel and the
 shell) are never selected; every other area is selected as on a pull request, so the queue builds
-the merge result of the specs (ADR-0137, PL44).
+the merge result of the specs (ADR-0146, PL44).
 docs_only is still measured on the paths.
 
 Path filters never decide whether pr.yml runs (PL3): this script decides which of its jobs
@@ -129,8 +129,8 @@ BUILDS = ("kernel", "specs", "shell")
 # kernel is built once, at the pull request head, and its RPMs are published from that build
 # (ADR-0110). The shell costs about 45-50 minutes of wall clock and about 240 runner minutes per
 # queue entry, so the push run of shell-surfaces.yml on iso-v0 catches it after the merge
-# (ADR-0137 decision 4). Any other build is repeated on the queue's merge result.
-QUEUE_SKIPS = {"kernel": "ADR-0110", "shell": "ADR-0137"}
+# (ADR-0146 decision 2). Any other build is repeated on the queue's merge result.
+QUEUE_SKIPS = {"kernel": "ADR-0110", "shell": "ADR-0146"}
 
 
 def touches(path, entries):
