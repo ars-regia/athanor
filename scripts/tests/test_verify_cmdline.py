@@ -92,6 +92,24 @@ class Cmdline(unittest.TestCase):
                 self.assertTrue(any(f"{parameter} ->" in p for p in self.problems()), self.problems())
                 self.edit("forge/specs/azoth/cmdline", f"page_alloc.shuffle=1 {words}", "page_alloc.shuffle=1")
 
+    def test_a_character_outside_ascii_is_a_finding(self):
+        for text in ("a\u00e0selinux=0", "quiet\u00a0selinux=0", "quiet\x0bselinux=0"):
+            with self.subTest(text=text):
+                self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", f"page_alloc.shuffle=1 {text}")
+                self.assertTrue(
+                    any("cmdline" in p and "non-ASCII byte" in p for p in self.problems()), self.problems()
+                )
+                self.edit("forge/specs/azoth/cmdline", f"page_alloc.shuffle=1 {text}", "page_alloc.shuffle=1")
+        self.edit(KARGS, '"page_alloc.shuffle=1",', '"page_alloc.shuffle=1 a\u00e0selinux=0",')
+        self.assertTrue(any(KARGS in p and "non-ASCII byte" in p for p in self.problems()), self.problems())
+
+    def test_a_dash_in_a_name_is_an_underscore(self):
+        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 amd-iommu=on x=a-b")
+        found = self.problems()
+        self.assertTrue(any("amd-iommu=on ->" in p for p in found), found)
+        self.edit("forge/specs/azoth/cmdline", " amd-iommu=on", "")
+        self.assertEqual(self.problems(), [])
+
     def test_a_name_that_only_starts_with_a_rejected_bare_one_passes(self):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 rd.breakpoint xselinux=0 rd.break.x")
         self.assertEqual(self.problems(), [])

@@ -3881,8 +3881,18 @@ KARGS_FILES = [
 def cmdline_words(text):
     """The parameters of a kernel command line: split on whitespace outside double quotes, as the
     kernel's next_arg does (a quoted run is one parameter, an unclosed quote runs to the end), with
-    the quotes dropped so that `"selinux=0"` is read as selinux=0 (it can only reject more)."""
+    the quotes dropped so that `"selinux=0"` is read as selinux=0 (it can only reject more). The kernel
+    counts bytes such as 0xA0 as whitespace, so a character outside printable ASCII, tab and line
+    breaks is refused (ValueError) instead of being read as part of a word."""
+    if re.search(r"[^\x20-\x7e\t\n\r]", text):
+        raise ValueError("non-ASCII byte in the command line")
     return [word.replace('"', "").strip() for word in re.findall(r'(?:[^\s"]|"[^"]*"?)+', text)]
+
+
+def cmdline_name(parameter):
+    """PARAMETER with `-` read as `_` in its name, as the kernel's parameqn does (not in its value)."""
+    name, equals, value = parameter.partition("=")
+    return name.replace("-", "_") + equals + value
 
 
 def cmdline_problems(root=None):
@@ -3910,10 +3920,11 @@ def cmdline_problems(root=None):
     for site, parameters in found.items():
         for parameter in parameters:
             for rejected, why in REJECTED_PARAMETERS.items():
+                name, rejected = cmdline_name(parameter), cmdline_name(rejected)
                 if rejected.endswith((".", "=")):
-                    matched = parameter.startswith(rejected)
+                    matched = name.startswith(rejected)
                 else:
-                    matched = parameter == rejected or parameter.startswith(rejected + "=")
+                    matched = name == rejected or name.startswith(rejected + "=")
                 if matched:
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
