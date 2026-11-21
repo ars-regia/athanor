@@ -216,9 +216,9 @@ pub enum Side {
     Right,
 }
 
-/// What runs on the driver: the surfaces it opens, and what it does with their events.
+/// What runs on the driver: the surfaces it opens after the registry's roundtrip, and their events.
 pub trait Application {
-    /// The surfaces to open once the registry's roundtrip is over, before any output is known.
+    /// The surfaces to open at start, before any output is known: a window, say.
     fn start(&mut self) -> Vec<(Ui, Role)> {
         Vec::new()
     }
