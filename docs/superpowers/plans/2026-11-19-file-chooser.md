@@ -549,14 +549,17 @@ D6. **`/run/media` at start.** Recommended: the image ships a tmpfiles.d line cr
 always have their anchor; a stick mounted later lies beneath it. Whether a mount made after the
 unit started is writable inside its namespace is unverified; Task 6's VM test decides. The
 alternative is no New Folder on removable drives.
-*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 19).*
+*Decided by the maintainer on 2026-11-21: as recommended in intent (`doc_portal.md` section 6,
+decision 19). udisks2 already ships `d /run/media 0755 root root` in
+`/usr/lib/tmpfiles.d/udisks2.conf`, so the image ships no duplicate, and the backend fails to
+start with a clear error when `/run/media` is absent.*
 
 D7. **Tabs and drops in the chooser.** Recommended: neither in this plan; tabs (SR5, FM19) and
 drag and drop (SR13, decision 40) belong to the file manager's window, as decision 39 orders
 them. The alternative pulls SR5, SR13 and decision 40 before the chooser, so that a file can be
 dropped onto it from the window.
-*Settled on 2026-11-21 as recommended, by texts already decided: `doc_files.md` revision 3,
-decisions 7 and 12, with the order of `doc_own_stack.md` decision 39 (`doc_portal.md` section 6).*
+*Settled on 2026-11-21 as recommended, by the order of `doc_own_stack.md` decision 39, proposed
+with `doc_files.md` revision 3 (`doc_portal.md` section 6).*
 
 D8. **Thumbnails at the switch.** Recommended: Task 4 lands before Task 8, the backend calling
 `athanor-preview`'s out-of-process render and holding results in memory. The alternative
