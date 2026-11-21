@@ -157,15 +157,16 @@ impl Settings {
         ui.layout();
     }
 
-    /// Shows `target` and writes it as the current target (SE5).
+    /// Shows `target` and writes it as the current target (SE5), once its page has drawn: a
+    /// page that aborts while it draws is not reopened at every restart.
     fn navigate(&mut self, ui: &mut Ui, target: Target) {
         self.current = target;
+        self.draw_page(ui);
         if let Some(dir) = &self.state_dir {
             if let Err(error) = window_state::save(dir, target) {
                 tracing::warn!(%error, "cannot write the current target; a restart opens the landing page");
             }
         }
-        self.draw_page(ui);
         let page = target.page();
         let row = self
             .nav_rows
@@ -418,6 +419,11 @@ mod tests {
         );
         assert_eq!(resolve(&registry, "no-such-page"), Target::Landing);
         assert_eq!(resolve(&registry, "about/no-such-section"), Target::Landing);
+        assert_eq!(
+            resolve(&registry, &Target::Page("network").to_string()),
+            Target::Landing,
+            "a state file left by a build that drew Network reopens the landing page"
+        );
     }
 
     #[test]
@@ -456,9 +462,16 @@ mod tests {
 
     #[test]
     fn every_navigation_writes_the_target_a_restart_reopens() {
-        let dir =
-            std::env::temp_dir().join(format!("athanor-settings-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        // A new directory of this run alone: `create_dir` refuses a path that already exists.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "athanor-settings-state-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).expect("a scratch directory");
         let mut settings = settings(Target::Landing);
         settings.state_dir = Some(dir.clone());
         let mut ui = settings.ui.take().expect("not started");
