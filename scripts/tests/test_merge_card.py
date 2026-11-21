@@ -104,6 +104,7 @@ def run(
     protection=merge_card.NotFound("404"),
     argv=(),
     behind=0,
+    compare_status="ahead",
     checks=GOOD,
     statuses=(),
     reviews=(),
@@ -120,7 +121,7 @@ def run(
     pr = {**PR, **(pr or {})}
     rules = RULES if rules is None else rules
     later = later or {}
-    calls = {"branch": 0, "reviews": 0}
+    calls = {"branch": 0, "reviews": 0, "compare": []}
 
     def fake_gh(*args):
         path = args[-1]
@@ -173,7 +174,10 @@ def run(
             sha = later.get("base_sha", BASE) if calls["branch"] > 1 else BASE
             return json.dumps({"commit": {"sha": sha}})
         if "/compare/" in path:
-            return json.dumps({"behind_by": behind})
+            calls["compare"].append(path.split("/compare/")[1])
+            if compare_status is None:
+                raise merge_card.NotFound("404")
+            return json.dumps({"behind_by": behind, "status": compare_status})
         raise AssertionError(f"unexpected gh call {args}")
 
     out, err = io.StringIO(), io.StringIO()
@@ -183,6 +187,7 @@ def run(
         contextlib.redirect_stderr(err),
     ):
         code = merge_card.main(["-R", "o/r", "5", *argv])
+    run.compare = calls["compare"]
     return code, out.getvalue(), err.getvalue()
 
 
@@ -280,6 +285,8 @@ class Approval(unittest.TestCase):
         "2026-01-01T12:00:00Z",
         "--head",
         HEAD,
+        "--base",
+        "iso-v0",
         "--base-sha",
         BASE,
     )
@@ -302,11 +309,94 @@ class Approval(unittest.TestCase):
         card = "2026-01-01T12:00:00Z"
         _, _, err = run(
             reviews=[APPROVAL],
-            argv=("--verify-approval", card, "--head", "d" * 40, "--base-sha", BASE),
+            argv=(
+                "--verify-approval",
+                card,
+                "--head",
+                "d" * 40,
+                "--base",
+                "iso-v0",
+                "--base-sha",
+                BASE,
+            ),
         )
         self.assertIn("the card's is " + "d" * 40, err)
-        _, _, err = run(reviews=[APPROVAL], argv=(*self.ARGS[:-1], "e" * 40))
+        _, _, err = run(
+            reviews=[APPROVAL], rules=NO_QUEUE, argv=(*self.ARGS[:-1], "e" * 40)
+        )
         self.assertIn("base head is", err)
+
+    def test_a_queue_base_that_only_moved_keeps_the_card(self):
+        argv = (*self.ARGS[:-1], "e" * 40)
+        code, out, err = run(reviews=[APPROVAL], argv=argv)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(run.compare, [f"{'e' * 40}...{BASE}"])
+        self.assertIn(
+            f"base moved from {'e' * 12} to {BASE[:12]}: "
+            "allowed on a merge_queue base, head unchanged",
+            out,
+        )
+
+    def test_a_queue_base_with_a_moved_head_is_refused(self):
+        argv = (
+            "--verify-approval",
+            self.ARGS[1],
+            "--head",
+            "d" * 40,
+            "--base",
+            "iso-v0",
+        )
+        code, _, err = run(reviews=[APPROVAL], argv=(*argv, "--base-sha", "e" * 40))
+        self.assertEqual(code, 1)
+        self.assertIn("the card's is " + "d" * 40, err)
+
+    def test_a_queue_base_the_card_base_does_not_lead_to_is_refused(self):
+        for status in ("diverged", "behind"):
+            code, out, err = run(
+                reviews=[APPROVAL],
+                compare_status=status,
+                argv=(*self.ARGS[:-1], "e" * 40),
+            )
+            self.assertEqual(code, 1)
+            self.assertIn(f"the card's base {'e' * 12} is not an ancestor of", err)
+            self.assertNotIn("base moved", out)
+
+    def test_an_unknown_card_base_is_refused_not_a_traceback(self):
+        code, out, err = run(
+            reviews=[APPROVAL], compare_status=None, argv=(*self.ARGS[:-1], "e" * 40)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn(f"the card's base {'e' * 12} is unknown", err)
+        self.assertIn("RESULT: REFUSED", out)
+
+    def test_a_retarget_is_refused_on_every_base_even_when_ancestry_holds(self):
+        for rules in (RULES, NO_QUEUE):
+            code, out, err = run(
+                reviews=[APPROVAL],
+                rules=rules,
+                argv=(*self.ARGS[:5], "main", *self.ARGS[6:-1], "e" * 40),
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("base is iso-v0, the card's is main: retargeted", err)
+            self.assertNotIn("base moved", out)
+
+    def test_head_and_base_sha_must_be_full_shas(self):
+        for flag, bad in (("--base-sha", "iso-v0~200"), ("--head", "abc123")):
+            argv = list(self.ARGS)
+            argv[argv.index(flag) + 1] = bad
+            with (
+                self.assertRaises(SystemExit),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                run(reviews=[APPROVAL], argv=argv)
+
+    def test_a_base_with_no_queue_that_moved_is_refused(self):
+        code, out, err = run(
+            reviews=[APPROVAL], rules=NO_QUEUE, argv=(*self.ARGS[:-1], "e" * 40)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("base head is", err)
+        self.assertNotIn("base moved", out)
 
 
 class Findings(unittest.TestCase):
@@ -315,8 +405,9 @@ class Findings(unittest.TestCase):
     def test_the_base_sha_and_the_head_are_both_needed_to_verify(self):
         card = "2026-01-01T12:00:00Z"
         for argv in (
-            ("--verify-approval", card, "--head", HEAD),
-            ("--verify-approval", card, "--base-sha", BASE),
+            ("--verify-approval", card, "--head", HEAD, "--base", "iso-v0"),
+            ("--verify-approval", card, "--base", "iso-v0", "--base-sha", BASE),
+            ("--verify-approval", card, "--head", HEAD, "--base-sha", BASE),
         ):
             with (
                 self.assertRaises(SystemExit),
@@ -365,7 +456,7 @@ class Findings(unittest.TestCase):
 
     def test_an_empty_or_zoneless_card_time_is_a_refusal_not_a_traceback(self):
         for text in ("", "2026-01-01T12:00:00", "not a time"):
-            argv = ("--verify-approval", text, "--head", HEAD, "--base-sha", BASE)
+            argv = (*Approval.ARGS[:1], text, *Approval.ARGS[2:])
             code, _, err = run(reviews=[APPROVAL], argv=argv)
             self.assertEqual(code, 1)
             self.assertIn("is not an ISO 8601 time with a time zone", err)
