@@ -1,0 +1,316 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the athanor-settings package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-settings\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:33
+msgid "Connections"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:34
+#: src/window.rs:250
+msgid "Device"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:35
+msgid "Personalisation"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:37
+#: src/window.rs:258 src/window.rs:260
+msgid "System"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:130
+msgid "Network"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:130
+msgid "network;wi-fi;wifi;wireless;ethernet;wired;internet;vpn;wireguard;hotspot;proxy;dns;mobile broadband;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:131
+msgid "Bluetooth"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:131
+msgid "bluetooth;pairing;headphones;wireless;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:132
+msgid "Displays"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:132
+msgid "display;monitor;screen;resolution;refresh rate;scale;rotation;night light;brightness;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:133
+msgid "Sound"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:133
+msgid "sound;audio;volume;speakers;microphone;headset;output;input;alert;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:134
+msgid "Power"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:134
+msgid "power;battery;charge;energy;profile;suspend;sleep;blank;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:135
+msgid "Keyboard"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:135
+msgid "keyboard;layout;shortcuts;keys;repeat;input method;input source;num lock;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:136
+msgid "Mouse and Touchpad"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:136
+msgid "mouse;touchpad;trackpad;pointer;scrolling;tap;click;tablet;touchscreen;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:137
+msgid "Appearance"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:137
+msgid "appearance;theme;dark;light;accent;colour;color;contrast;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:138
+msgid "Wallpaper"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:138
+msgid "wallpaper;background;picture;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:139
+msgid "Desktop"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:139
+msgid "desktop;layout;panel;bar;dock;workspaces;windows;tiling;hot corner;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:140
+msgid "Notifications"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:140
+msgid "notifications;alerts;do not disturb;popups;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:141
+msgid "Accessibility"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:141
+msgid "accessibility;screen reader;magnifier;zoom;contrast;large text;cursor;motion;animations;sticky keys;on-screen keyboard;mono audio;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:142
+msgid "Language and Region"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:142
+msgid "language;region;locale;formats;translation;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:143
+msgid "Date and Time"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:143
+msgid "date;time;clock;time zone;calendar;week;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:144
+msgid "Users"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:144
+msgid "users;account;name;picture;avatar;password;fingerprint;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:145
+msgid "Privacy and Security"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:145
+msgid "privacy;security;recent files;permissions;encryption;developer;usb;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:146
+msgid "Search"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:146
+msgid "search;index;files;folders;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:147
+msgid "Default Applications"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:147
+msgid "default applications;browser;mail;music;video;photos;terminal;startup;autostart;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:148
+msgid "Firmware"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:148
+msgid "firmware;bios;uefi;fwupd;device updates;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:149
+#: src/window.rs:247
+msgid "About"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:149
+msgid "about;system;version;device name;hostname;hardware;processor;memory;trust;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:157
+msgid "Do Not Disturb"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:158
+msgid "do not disturb;schedule;quiet;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:163
+msgid "Developer mode"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:164
+msgid "developer;development;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:168
+msgid "USB devices"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:169
+msgid "usb;usbguard;blocked devices;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:175
+msgid "Fingerprint"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:176
+msgid "fingerprint;finger;reader;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:183
+msgid "Display mode"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:184
+msgid "display mode;mirror;extend;projector;"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:188
+msgid "Blank and suspend"
+msgstr ""
+
+#: ../../../../system/athanor-settings-core/src/registry.rs:189
+msgid "blank screen;screen off;suspend;sleep;idle;"
+msgstr ""
+
+#: src/window.rs:85 src/window.rs:198
+msgid "Settings"
+msgstr ""
+
+#: src/window.rs:92
+msgid "Search settings"
+msgstr ""
+
+#: src/window.rs:93
+msgid "Pages"
+msgstr ""
+
+#: src/window.rs:201 src/window.rs:202
+msgid "Your account"
+msgstr ""
+
+#: src/window.rs:208 src/window.rs:209 src/window.rs:213
+msgid "This device"
+msgstr ""
+
+#: src/window.rs:226
+msgid "Groups"
+msgstr ""
+
+#: src/window.rs:252
+msgid "Device name"
+msgstr ""
+
+#: src/window.rs:253
+msgid "Manufacturer"
+msgstr ""
+
+#: src/window.rs:254
+msgid "Model"
+msgstr ""
+
+#: src/window.rs:261
+msgid "Updates"
+msgstr ""
+
+#: src/window.rs:266
+msgid "Processor"
+msgstr ""
+
+#: src/window.rs:267
+msgid "Memory"
+msgstr ""
+
+#: src/window.rs:273
+msgid "Graphics"
+msgstr ""
+
+#: src/window.rs:275
+msgid "Disk capacity"
+msgstr ""
+
+#: src/window.rs:276
+msgid "Hardware"
+msgstr ""
+
+#: src/window.rs:315
+msgid "Verified"
+msgstr ""
+
+#: src/window.rs:316
+msgid "The last update was refused by the policy"
+msgstr ""
+
+#: src/window.rs:317
+msgid "Not verified"
+msgstr ""

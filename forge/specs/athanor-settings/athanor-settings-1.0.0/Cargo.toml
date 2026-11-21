@@ -1,0 +1,23 @@
+[package]
+name = "athanor-settings"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+license = "GPL-3.0-or-later"
+description = "Athanor's Settings: one Sal window of grouped pages, opened through os.athanor.Settings1 (doc_settings.md)"
+
+# doc_settings.md SE2: the window and its pages on Sal; the logic in athanor-settings-core.
+# GLib's main context, which the bus name and the reads of AccountsService and hostnamed run
+# on, is driven by the compositor client's calloop source, as the control center's.
+[dependencies]
+athanor-i18n = { path = "../../../../system/athanor-i18n" }
+athanor-sal = { path = "../../../../system/athanor-sal" }
+athanor-settings-core = { path = "../../../../system/athanor-settings-core" }
+athanor-style = { path = "../../../../system/athanor-style", default-features = false }
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false, features = ["calloop"] }
+athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
+athanor-unit = { path = "../../../../system/athanor-unit" }
+gio = { workspace = true }
+glib = { workspace = true }
+nix = { workspace = true, features = ["fs"] }
+tracing = { workspace = true }

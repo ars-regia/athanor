@@ -754,6 +754,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-settings"
+version = "1.0.0"
+dependencies = [
+ "athanor-i18n",
+ "athanor-sal",
+ "athanor-settings-core",
+ "athanor-style",
+ "athanor-sulphur-client",
+ "athanor-trust-state",
+ "athanor-unit",
+ "gio",
+ "glib",
+ "nix 0.32.0",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-settings-core"
 version = "1.0.0"
 dependencies = [
