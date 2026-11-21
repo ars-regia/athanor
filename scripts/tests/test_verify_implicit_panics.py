@@ -1,7 +1,8 @@
 """Unit tests of the implicit-panics check of `verify.py`: clippy's JSON is counted per crate once
 per place and lint, a run that did not finish counts nothing, the budget only goes down and, without
 clippy, fails closed on a dropped line, a member without one and a configuration that hides a
-budget lint; clippy runs with the lints forced and without RUSTFLAGS (python3 -B -m unittest discover -s scripts/tests -v)."""
+budget lint; clippy runs with the lints forced and without RUSTFLAGS, and a build script may not
+set them back (python3 -B -m unittest discover -s scripts/tests -v)."""
 
 import importlib.util
 import json
@@ -58,6 +59,21 @@ class CountsTest(unittest.TestCase):
         failed = json.dumps({"reason": "build-finished", "success": False})
         self.assertEqual(len(verify.implicit_panic_counts([artifact(UNIT), FINISHED, failed])[1]), 1)
         self.assertEqual(len(verify.implicit_panic_counts([artifact(UNIT)])[1]), 1)
+
+    def test_a_build_script_that_sets_a_dropped_variable_is_a_problem(self):
+        def executed(package, *env):
+            return json.dumps({"reason": "build-script-executed", "package_id": package,
+                               "env": [[key, "x"] for key in env]})
+
+        lines = [executed(SHELLD, "CLIPPY_CONF_DIR", "OTHER"), executed(VENDORED, "CLIPPY_ARGS"),
+                 executed(UNIT, "CARGO_ENCODED_RUSTFLAGS"), executed(REGISTRY, "OTHER"),
+                 executed(REGISTRY), artifact(UNIT), FINISHED]
+        counts, problems = verify.implicit_panic_counts(lines)
+        self.assertEqual(counts, {"athanor-unit": 0})
+        self.assertEqual([p.split(":")[0] for p in problems],
+                         ["athanor-shelld", "accesskit_atspi_common", "athanor-unit"])
+        self.assertIn("CLIPPY_CONF_DIR", problems[0])
+        self.assertNotIn("OTHER", problems[0])
 
     def test_package_crate_reads_both_package_id_forms(self):
         self.assertEqual(verify.package_crate(SHELLD), "athanor-shelld")
@@ -136,9 +152,6 @@ class ConfigTest(unittest.TestCase):
             "config.toml": '[build]\nrustflags = ["-A", "x"]\n',
             "inc/.cargo/config.toml": 'include = ["other.toml"]\n',
             "wrap/.cargo/config.toml": '[build]\nrustc-wrapper = "w"\nrustc = "r"\njobs = 4\n',
-            "c/build.rs": 'fn main() { println!("cargo:rustc-env=CLIPPY_CONF_DIR=/x"); }\n',
-            "d/build.rs": 'fn main() { println!("cargo:rustc-env=CLIPPY_ARGS=x"); }\n',
-            "e/build.rs": 'fn main() { println!("cargo:rustc-env=OTHER=x"); }\n',
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -148,7 +161,7 @@ class ConfigTest(unittest.TestCase):
             found = verify.implicit_panic_configs(root, list(files))
         self.assertEqual([f.split(":")[0] for f in found], [
             ".cargo/config.toml", ".cargo/config.toml", ".cargo/config.toml", ".cargo/config.toml",
-            "bad/clippy.toml", "c/build.rs", "clippy.toml", "d/build.rs", "inc/.cargo/config.toml",
+            "bad/clippy.toml", "clippy.toml", "inc/.cargo/config.toml",
             "sub/.cargo/config", "wrap/.cargo/config.toml", "wrap/.cargo/config.toml", "x/.clippy.toml",
         ])
 

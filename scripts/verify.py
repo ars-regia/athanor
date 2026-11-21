@@ -7293,8 +7293,9 @@ def judge_known_red(entries, base, results, today):
 # that only goes down (#1352). The lints are passed on clippy's command line as `--force-warn`,
 # which no `allow` or `expect`, no `warnings` group and no [lints] table can lower: the compiler,
 # not a scan of the sources, decides what hides a hit. `--cap-lints` still caps them, and a
-# clippy.toml can relax them, so implicit_panic_configs reads the tracked configurations and the
-# measuring run drops from its environment what implicit_panic_env does.
+# clippy.toml can relax them, so implicit_panic_configs reads the tracked configurations, the
+# measuring run drops from its environment what implicit_panic_env does, and implicit_panic_counts
+# refuses a build script that sets it back.
 IMPLICIT_PANIC_LINTS = ("clippy::arithmetic_side_effects", "clippy::indexing_slicing", "clippy::string_slice")
 IMPLICIT_PANIC_BUDGET = "scripts/ci/implicit-panics.txt"
 # Two runs, as in security-audit.sh: athanor-preview-render needs zbus on async-io. No test target:
@@ -7310,9 +7311,9 @@ IMPLICIT_PANIC_RUNS = (
 # or dropped against the base, a member without a line, a configuration that hides a lint.
 IMPLICIT_PANIC_CARGO = "ATHANOR_IMPLICIT_PANICS_CARGO"
 # What a tracked Cargo configuration may not hold: a rustflags flag that allows a lint or caps
-# them all, an [env] variable, or a build script's `rustc-env`, that points clippy at another
-# configuration or other arguments, an `include` of a configuration not read here, and another
-# compiler or a wrapper around it, which could drop the command line's lints.
+# them all, an [env] variable that points clippy at another configuration or other arguments, an
+# `include` of a configuration not read here, and another compiler or a wrapper around it, which
+# could drop the command line's lints.
 IMPLICIT_PANIC_FLAGS = re.compile(r"-A.*|--allow(?:=.*)?|--cap-lints(?:=.*)?")
 IMPLICIT_PANIC_ENV = {"CLIPPY_CONF_DIR", "CLIPPY_ARGS"}
 IMPLICIT_PANIC_BUILD_KEYS = {"rustc", "rustc-wrapper", "rustc-workspace-wrapper"}
@@ -7322,11 +7323,17 @@ IMPLICIT_PANIC_CLIPPY_KEY = re.compile(
     r".*(?:arithmetic-side-effects|indexing-slicing|string-slice).*|suppress-restriction-lint-in-const")
 
 
+def implicit_panic_env_key(key):
+    """Whether the variable `key` may cap or relax the lints of the measuring run: each RUSTFLAGS
+    form cargo reads (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS,
+    CARGO_TARGET_<triple>_RUSTFLAGS, ...) and IMPLICIT_PANIC_ENV."""
+    return key.endswith("RUSTFLAGS") or key in IMPLICIT_PANIC_ENV
+
+
 def implicit_panic_env(env):
-    """`env` without what may cap or relax the lints of the measuring run: each RUSTFLAGS form cargo
-    reads (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS, CARGO_TARGET_<triple>_RUSTFLAGS,
-    ...) and IMPLICIT_PANIC_ENV. rig.sh passes no host variable into its container but those it names."""
-    return {k: v for k, v in env.items() if not k.endswith("RUSTFLAGS") and k not in IMPLICIT_PANIC_ENV}
+    """`env` without the variables implicit_panic_env_key names. rig.sh passes no host variable into
+    its container but those it names."""
+    return {k: v for k, v in env.items() if not implicit_panic_env_key(k)}
 
 
 def implicit_panic_budget(text):
@@ -7354,12 +7361,24 @@ def implicit_panic_counts(lines):
     """({crate: hits}, problems) of the JSON lines of clippy runs. A hit counts once per place and
     lint, though two targets or two runs compile the same module; every local crate built has an
     entry, zero included, and vendored crates have none. A run that did not finish, or failed, is
-    a problem: a crate it did not reach would read as zero."""
+    a problem: a crate it did not reach would read as zero. So is a build script, vendored or not,
+    that sets for its crate's compilation a variable implicit_panic_env_key names: cargo reports
+    it on every run, a cached one included, however the script spells its name.
+
+    The count is keyed by a hit's primary span, so the expansions of one macro, or the calls of
+    one function that indexes, are one hit: the budget counts the places in the source that can
+    panic, not the paths that reach them."""
     counts, seen, problems, finished = {}, set(), [], 0
     for line in lines:
         if not line.startswith("{"):
             continue
         msg = json.loads(line)
+        if msg.get("reason") == "build-script-executed":
+            hidden = sorted({key for key, _ in msg.get("env") or [] if implicit_panic_env_key(key)})
+            if hidden:
+                problems.append(f"{package_crate(msg.get('package_id', ''))}: its build script sets "
+                                f"{', '.join(hidden)}, which changes what clippy is run with")
+            continue
         if msg.get("reason") == "build-finished":
             finished += 1
             if msg.get("success") is not True:
@@ -7437,23 +7456,14 @@ def implicit_panic_unlisted(budget, members):
 
 
 def implicit_panic_configs(root, tracked):
-    """What hides a budget lint in the tracked Cargo configurations, clippy.toml files and build
-    scripts among `tracked` (paths relative to `root`): IMPLICIT_PANIC_FLAGS in a rustflags,
-    IMPLICIT_PANIC_ENV in [env] or in a build script, an `include`, an IMPLICIT_PANIC_BUILD_KEYS
-    key, an IMPLICIT_PANIC_CLIPPY_KEY. A configuration that is no TOML is a finding too."""
+    """What hides a budget lint in the tracked Cargo configurations and clippy.toml files among
+    `tracked` (paths relative to `root`): IMPLICIT_PANIC_FLAGS in a rustflags, IMPLICIT_PANIC_ENV
+    in [env], an `include`, an IMPLICIT_PANIC_BUILD_KEYS key, an IMPLICIT_PANIC_CLIPPY_KEY. A
+    configuration that is no TOML is a finding too."""
     found = []
     for path in sorted(tracked):
         parts = Path(path).parts
         cargo = len(parts) > 1 and parts[-2] == ".cargo" and parts[-1] in ("config", "config.toml")
-        if parts[-1] == "build.rs":
-            try:
-                text = read(root / path)
-            except OSError as e:
-                found.append(f"{path}: cannot be read: {e}")
-                continue
-            found += [f"{path}: names {name}, which changes what clippy is run with"
-                      for name in sorted(IMPLICIT_PANIC_ENV) if name in text]
-            continue
         if not cargo and parts[-1] not in ("clippy.toml", ".clippy.toml"):
             continue
         try:
@@ -7510,7 +7520,8 @@ def check_implicit_panics():
     if listed.returncode:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
-    for problem in implicit_panic_configs(ROOT, [f for f in listed.stdout.split("\0") if f]):
+    tracked = [f for f in listed.stdout.split("\0") if f]
+    for problem in implicit_panic_configs(ROOT, tracked):
         r.fail(problem)
     for problem in implicit_panic_unlisted(budget, members):
         r.fail(problem)
