@@ -188,6 +188,14 @@ class Forms(unittest.TestCase):
             self.assertIn("`src/x.rs:2` cites lines", out[0])
             self.assertEqual(messages(f"`src/x.rs` is built by `{other}`, then `grant` at `#grant`."), [])
 
+    def test_a_flake_reference_with_a_slash_leaves_the_last_file_as_it_was(self):
+        for other in ("github:NixOS/nixpkgs#cosign", "nixpkgs/foo#image", "./flake#image", "path:./x", "git+https://h/r"):
+            out = messages(f"`src/x.rs` is built by `{other}`; the `other` is at `:2`.", lines_kept={})
+            self.assertEqual(len(out), 1, (other, out))
+            self.assertIn("`src/x.rs:2` cites lines", out[0])
+            out = messages(f"`src/x.rs` is built by `{other}`, then `grant` at `#nope`.")
+            self.assertEqual(len(out), 1, (other, out))
+
     def test_a_name_that_several_files_end_with_is_ambiguous_by_symbol_only(self):
         extra = {"a/lib.rs": "fn grant() {}\n", "b/lib.rs": "fn grant() {}\n"}
         out = messages("The `grant` is at `lib.rs#grant`.", extra)

@@ -6612,6 +6612,7 @@ def moved_ranges(ranges, hunks):
 # What a backtick span cites by name: `path#symbol`, or `#symbol` for the path named last. A colour
 # (`#e62d42`, the placeholder `#rrggbb`) is no citation.
 SYMBOL_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?#([A-Za-z_][^`]*)")
+SCHEME = re.compile(r"[A-Za-z][\w+.-]*:")
 COLOUR = re.compile(r"#(?:[0-9A-Fa-f]{3,8}|r+g+b+a*)")
 # The files whose citations stay `path:N`, each with its reason: a file with no symbol to name (a
 # data file, a generated list). An entry that no `path:N` citation names fails, so the list only shrinks.
@@ -7011,6 +7012,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                           COLOUR.fullmatch(span.group(1)) and not defines(last, m[2].strip())):
                     m = None  # a flake reference, or a colour that its file does not define
             if not m:
+                head = span.group(1).partition("#")[0]
+                if SCHEME.match(span.group(1)) or (
+                        "#" in span.group(1) and not (names_a_file(head, crate) or names_a_gone_file(head))):
+                    continue  # a URL or a flake reference, which is no file of the repository
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
                 named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))
                 continue
