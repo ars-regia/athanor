@@ -493,6 +493,25 @@ class Kept(unittest.TestCase):
              "remove the entry"],
         )
 
+    def test_an_upstream_entry_that_is_a_tracked_file_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "docs/architecture").mkdir(parents=True)
+            (root / "docs/architecture/doc_x.md").write_text("The loop is at `src/w.rs:3` and `src/v.rs:1`.\n")
+            problems = verify.upstream_citation_problems(
+                root, {"crate/src/w.rs", "src/v.rs"}, {("doc_x.md", "src/w.rs"): "", ("doc_x.md", "src/v.rs"): ""})
+        self.assertEqual(problems, ["LINE_CITATIONS_UPSTREAM names `src/v.rs` of doc_x.md, a file of this "
+                                    "repository, not another project's: remove the entry"])
+
+    def test_an_upstream_entry_of_a_missing_document_fails_cleanly(self):
+        stale = {**verify.LINE_CITATIONS_UPSTREAM, ("doc_renamed.md", "src/wayland.rs"): "a reason"}
+        with mock.patch.object(verify, "LINE_CITATIONS_UPSTREAM", stale):
+            result = verify.check_line_citations()
+        problems = [p for p in result.problems if "LINE_CITATIONS_UPSTREAM" in p]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("LINE_CITATIONS_UPSTREAM names `src/wayland.rs` of doc_renamed.md, "
+                                               "a document that cannot be read ("), problems)
+
     def test_the_upstream_list_only_shrinks(self):
         self.assertLessEqual(len(verify.LINE_CITATIONS_UPSTREAM), 1)
 

@@ -6855,10 +6855,28 @@ def check_line_citations():
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
-    for doc, path in sorted(LINE_CITATIONS_UPSTREAM):
-        if not re.search(rf"`{re.escape(path)}(?::[\d,\s-]+)?`", read_file(f"docs/architecture/{doc}")):
-            r.fail(f"LINE_CITATIONS_UPSTREAM names `{path}` of {doc}, which no citation writes: remove the entry")
+    for problem in upstream_citation_problems(ROOT, tracked, LINE_CITATIONS_UPSTREAM):
+        r.fail(problem)
     return r
+
+
+def upstream_citation_problems(root, tracked, upstream):
+    """The entries of `upstream` (LINE_CITATIONS_UPSTREAM) that do not hold: a document that is not
+    under docs/architecture, a path that is itself a `tracked` file, which the entry would read
+    as another project's, and a path that no citation of the document writes."""
+    found = []
+    for doc, path in sorted(upstream):
+        name = f"LINE_CITATIONS_UPSTREAM names `{path}` of {doc}"
+        try:
+            text = read(root / "docs/architecture" / doc)
+        except (OSError, UnicodeDecodeError) as e:
+            found.append(f"{name}, a document that cannot be read ({e}): rename or remove the entry")
+            continue
+        if path in tracked:
+            found.append(f"{name}, a file of this repository, not another project's: remove the entry")
+        elif not re.search(rf"`{re.escape(path)}(?::[\d,\s-]+)?`", text):
+            found.append(f"{name}, which no citation writes: remove the entry")
+    return found
 
 
 OWN_ALLOW = "forge/config/own-allow.txt"
