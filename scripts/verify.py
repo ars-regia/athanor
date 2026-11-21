@@ -5513,9 +5513,9 @@ SESSION_EXEMPT = {
     ("athanor-settings.service", f"RestartSec=200ms, {SURFACE_WANTS} 0.1"):
         "doc_settings.md SE5 sets RestartSec=200ms",
     ("athanor-settings.service", f"StartLimitBurst=20, {SURFACE_WANTS} 10"):
-        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; 20 starts in 10 s stop a crash loop",
-    ("athanor-settings.service", f"StartLimitIntervalSec=10s, {SURFACE_WANTS} 600"):
-        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; 20 starts in 10 s stop a crash loop",
+        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; 20 starts in a minute stop a crash loop",
+    ("athanor-settings.service", f"StartLimitIntervalSec=60s, {SURFACE_WANTS} 600"):
+        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; 20 starts in a minute stop a crash loop",
     (
         "athanor-control-center-shortcut.service",
         f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
