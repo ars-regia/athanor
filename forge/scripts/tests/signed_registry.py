@@ -31,7 +31,7 @@ identity=$(< "$ANSWER_DIR/signer")
 """
 # What decides which signatures a run trusts: a test must not inherit the CI run's.
 TRUST_ENV = ("GITHUB_REF", "GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
-             "TIER_TRUSTED_REFS", "GITHUB_ACTIONS")
+             "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_REPOSITORY_OWNER")
 
 
 def stub_cosign(bin_dir):

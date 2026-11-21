@@ -5,6 +5,4 @@
 # scripts/verify.py (advisory-locks) fails on a tracked Cargo.lock that neither cargo-deny's loop
 # in security-audit.sh nor this list covers, so a new one cannot go unread.
 forge/specs/greenboot-rs/SOURCES/Cargo.lock
-# A build-time derive tool that no spec installs (`just check-deny` leaves it out too); its
-# lockfile fails `cargo audit --deny yanked` today.
-unaudited forge/tools/calmo-cosmic-theme/Cargo.lock #1301
+forge/tools/calmo-cosmic-theme/Cargo.lock

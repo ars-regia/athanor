@@ -7787,6 +7787,307 @@ def judge_known_red(entries, base, results, today):
         if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
+# A test that runs a script reaching system/tier-digests.sh and hands it a copy of
+# os.environ inherits the CI run's trust environment: on a pull request into rebase/*,
+# GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
+# The names are the ones tier-digests.sh reads: a rebase/* head switches the base and calls
+# `gh api` (GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REF, GITHUB_REPOSITORY, GITHUB_SERVER_URL,
+# TIER_TRUSTED_REFS, the tokens), and the registry owner comes from GITHUB_REPOSITORY_OWNER.
+TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REF", "GITHUB_REPOSITORY",
+                   "GITHUB_REPOSITORY_OWNER", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS", "GITHUB_ACTIONS",
+                   "GH_TOKEN", "GITHUB_TOKEN")
+TIER_DIGESTS = "system/tier-digests.sh"
+TEMPLATE_MODULE = "forge/scripts/tests/test_tier_cache.py"  # carries the isolation block every other copies
+SHARED_TRUST_ENV = "forge/scripts/tests/signed_registry.py"
+COMMENT_LINE = re.compile(r"(?m)^\s*#.*$")
+
+
+def dotted(node, aliases):
+    """`a.b.c` of a Name or Attribute chain whose first name is expanded through the import aliases,
+    "" for anything else."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(aliases.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def string_literals(tree):
+    """The module-level `NAME = (strings...)` tuples, lists and sets of a module, as {NAME: {strings}}."""
+    return {n.targets[0].id: {e.value for e in n.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+            for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name) and isinstance(n.value, (ast.Tuple, ast.List, ast.Set))}
+
+
+def scope_nodes(body):
+    """Every node that runs when a module is imported: the statements of `body` and what they hold, a class
+    body included; of a function or lambda only its decorators and default values, never its body."""
+    stack = list(body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            stack.extend(getattr(node, "decorator_list", []))
+            stack.extend(node.args.defaults + [d for d in node.args.kw_defaults if d is not None])
+        else:
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def bindings(tree, name):
+    """How many times the module scope binds `name`: a def, a class, an assignment, an import, a `for` or
+    `with` target, a match capture, a deletion. `import a` and `import a.b` bind `a` together, once; any `from` import binds on its own."""
+    count, plain = 0, set()
+    for n in scope_nodes(tree.body):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count += n.name == name
+        elif isinstance(n, ast.Name):
+            count += n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+        elif isinstance(n, ast.ImportFrom):
+            count += sum((a.asname or a.name) == name for a in n.names)
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if (a.asname or a.name.split(".")[0]) == name:
+                    if a.asname:
+                        count += 1
+                    else:
+                        plain.add(name)
+        elif isinstance(n, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            count += n.name == name
+        elif isinstance(n, ast.MatchMapping):
+            count += n.rest == name
+    return count + len(plain)
+
+
+def top_import_aliases(tree):
+    """{bound name: dotted target} of the imports that are direct children of the module."""
+    aliases = {}
+    for n in tree.body:
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            for a in n.names:
+                aliases[a.asname or a.name] = f"{n.module}.{a.name}"
+    return aliases
+
+
+def anchored(tree, name):
+    """Whether `name` is bound once, by an import that is a direct child of the module, and is neither
+    imported inside a function or a block nor declared `global`."""
+    if bindings(tree, name) != 1 or name not in top_import_aliases(tree):
+        return False
+    top = {id(n) for n in tree.body}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global) and name in n.names:
+            return False
+        if isinstance(n, (ast.Import, ast.ImportFrom)) and id(n) not in top \
+                and any((a.asname or a.name.split(".")[0]) == name for a in n.names):
+            return False
+    return True
+
+
+def environ_gaps(tree, aliases, exempt):
+    """The lines, at import time (module level, class bodies, function defaults and decorators), of a reference
+    to os.environ that is not a read of one variable that TRUST_ENV_NAMES does not hold: os.environ.get(<constant>
+    [, default]), os.getenv(<constant>[, default]) or os.environ[<constant>] in a load. `exempt` holds the ids of
+    the nodes allowed (the argument of the module's patch statement). Anything else is refused, which fails
+    closed: write `with mock.patch.dict(os.environ, ...)` inside the test in place of the decorator form,
+    read os.environ.get("<name outside the trust list>") in place of a membership test, and move a write into
+    the test or setUpModule. A load of `os` itself, one that is not the base of an attribute access (`o = os`,
+    `f(os)`, `[os]`), is refused too: an alias would reach the mapping unseen."""
+    scope = list(scope_nodes(tree.body))
+    bases = {id(n.value) for n in scope if isinstance(n, ast.Attribute)}
+    const = lambda a: isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value not in TRUST_ENV_NAMES  # noqa: E731
+    allowed = set(exempt)
+    lines = set()
+    for n in scope:
+        if isinstance(n, ast.Call) and n.args and isinstance(n.func, ast.Attribute) and n.func.attr == "get" \
+                and dotted(n.func.value, aliases) == "os.environ":
+            if const(n.args[0]):
+                allowed.add(id(n.func.value))
+        elif isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Load) and dotted(n.value, aliases) == "os.environ":
+            if const(n.slice):
+                allowed.add(id(n.value))
+        elif isinstance(n, ast.Call) and dotted(n.func, aliases) == "os.getenv" and not (n.args and const(n.args[0])):
+            lines.add(n.lineno)
+    lines |= {n.lineno for n in scope if isinstance(n, (ast.Name, ast.Attribute))
+              and dotted(n, aliases) == "os.environ" and id(n) not in allowed}
+    lines |= {n.lineno for n in scope if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+              and aliases.get(n.id) == "os" and id(n) not in bases}
+    return sorted(lines)
+
+
+def mutated(tree, name):
+    """Whether `name` is rebound or changed other than by its one binding: a method call, an item assignment
+    or deletion, a `global` statement."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+                and n.func.value.id == name:
+            return True
+        if isinstance(n, ast.Subscript) and isinstance(n.ctx, (ast.Store, ast.Del)) \
+                and isinstance(n.value, ast.Name) and n.value.id == name:
+            return True
+        if isinstance(n, ast.Global) and name in n.names:
+            return True
+    return False
+
+
+def passed(tree, name):
+    """Whether a statement that runs at import time passes `name` to a call, as `list.clear(NAMES)` does."""
+    return any(isinstance(n, ast.Call) and any(isinstance(x, ast.Name) and x.id == name
+                                               for a in [*n.args, *(k.value for k in n.keywords)]
+                                               for x in ast.walk(a))
+               for n in scope_nodes(tree.body))
+
+
+def isolation_gaps(tree, shared):
+    """What a test module lacks of the isolation block, which it copies from TEMPLATE_MODULE: a module-level
+    `P = mock.patch.dict(os.environ)`, a setUpModule that begins with `P.start()` and then
+    `for name in NAMES: os.environ.pop(name, None)`, a tearDownModule that begins with `P.stop()`; NAMES is
+    a literal list of strings (or the signed_registry import) that holds every TRUST_ENV_NAMES entry, bound
+    once and never changed. The leading statements are compared as trees, so nothing before or between them
+    can skip them. At import time the module reads no variable of TRUST_ENV_NAMES and no os.environ but one
+    named variable."""
+    aliases = top_import_aliases(tree)
+    lists = string_literals(tree)
+    if aliases.get("TRUST_ENV") == "signed_registry.TRUST_ENV":
+        lists["TRUST_ENV"] = shared
+    patches = [n for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+               and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Call)
+               and dotted(n.value.func, aliases) == "unittest.mock.patch.dict" and n.value.args
+               and dotted(n.value.args[0], aliases) == "os.environ"]
+    if not patches:
+        return ["a module-level mock.patch.dict(os.environ)"]
+    patch = patches[0].targets[0].id
+    os_names = [k for k, v in aliases.items() if v == "os"]
+    gaps = []
+    if bindings(tree, patch) != 1:
+        gaps.append(f"a patch variable {patch} bound once")
+    root = lambda node: dotted(node, {}).split(".")[0]  # noqa: E731
+    used = {root(patches[0].value.func), root(patches[0].value.args[0]), *os_names}
+    for name in sorted(used):
+        if not anchored(tree, name):
+            gaps.append(f"{name}, which the isolation block uses, bound once by a top-level import and never "
+                        "rebound or imported again elsewhere")
+
+    def expected(source):
+        return ast.dump(ast.parse(source).body[0])
+
+    def hook(name):
+        defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+        if len(defs) == 1 and not defs[0].decorator_list and bindings(tree, name) == 1:
+            return defs[0].body
+        gaps.append(f"a single undecorated {name}")
+        return None
+
+    setup, teardown = hook("setUpModule"), hook("tearDownModule")
+    if setup is not None:
+        if not (setup and ast.dump(setup[0]) == expected(f"{patch}.start()")):
+            gaps.append(f"a setUpModule that starts with {patch}.start()")
+        loop = setup[1] if len(setup) > 1 else None
+        names = loop.iter.id if isinstance(loop, ast.For) and isinstance(loop.iter, ast.Name) else None
+        pops = [expected(f"for name in {names}:\n    {o}.environ.pop(name, None)") for o in os_names]
+        if names is None or ast.dump(loop) not in pops:
+            gaps.append("a setUpModule whose second statement is `for name in NAMES: os.environ.pop(name, None)`")
+        elif bindings(tree, names) != 1 or mutated(tree, names) or passed(tree, names):
+            gaps.append(f"a list {names} bound once and never changed")
+        else:
+            missing = [n for n in TRUST_ENV_NAMES if n not in lists.get(names, set())]
+            if missing:
+                gaps.append(f"a setUpModule that pops {', '.join(missing)}")
+    if teardown is not None and not (teardown and ast.dump(teardown[0]) == expected(f"{patch}.stop()")):
+        gaps.append(f"a tearDownModule that starts with {patch}.stop()")
+    reads = environ_gaps(tree, aliases, {id(patches[0].value.args[0])})
+    if reads:
+        gaps.append("no use of os.environ at import time but the read of one named variable that is not a "
+                    f"trust variable (line {', '.join(map(str, reads))}); write the patch as "
+                    "`with mock.patch.dict(os.environ, ...)` inside the test, or read "
+                    "os.environ.get(\"<name outside the trust list>\")")
+    return gaps
+
+
+def trust_env_problems(root=None, reached=None):
+    """Every tracked test_*.py that names a script reaching tier-digests.sh carries the isolation block
+    (isolation_gaps); `reached`, when given, is filled with those tests. A script reaches it when a
+    non-comment line of a tracked .sh names tier-digests.sh or a script that reaches it, as a whole file
+    name. A Python intermediary is out of scope: the closure through the .py files that name a reaching
+    script would cover almost every test, and a test would carry the block for a script it never runs."""
+    root = root or ROOT
+    tracked = [f for f in subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
+                                         text=True, check=True).stdout.split("\0") if f]
+    is_test = re.compile(r"(?:^|/)test_[^/]*\.py$")
+    problems, texts = [], {}
+    for f in tracked:
+        if f.endswith(".sh") or is_test.search(f):
+            try:
+                texts[f] = COMMENT_LINE.sub("", read(root / f))
+            except OSError as e:
+                problems.append(f"{f}: tracked but unreadable ({e.strerror})")
+
+    def naming(names, candidates):
+        if not names:
+            return set()
+        found = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names))) + r")(?![\w.-])")
+        return {f for f in candidates if found.search(texts[f])}
+
+    base = lambda f: f.rsplit("/", 1)[-1]  # noqa: E731
+    if TIER_DIGESTS not in texts:
+        return problems + [f"{TIER_DIGESTS}: not tracked, so no test can be found that reaches it "
+                           "(renamed or removed? update TIER_DIGESTS in scripts/verify.py)"]
+    reaching = {TIER_DIGESTS}
+    pending, rest = {base(f) for f in reaching}, {f for f in texts if not is_test.search(f)} - reaching
+    while pending and rest:
+        more = naming(pending, rest)
+        rest -= more
+        reaching |= more
+        pending = {base(f) for f in more}
+    names = {base(f) for f in reaching}
+    tests = sorted(f for f in naming(names, [f for f in texts if is_test.search(f)]))
+    if reached is not None:
+        reached.extend(tests)
+    shared, shared_error = set(), None
+    try:
+        shared = string_literals(ast.parse(read(root / SHARED_TRUST_ENV))).get("TRUST_ENV", set())
+    except (OSError, SyntaxError) as e:
+        shared_error = f"{SHARED_TRUST_ENV}: cannot be read as the shared TRUST_ENV ({e})"
+    for f in tests:
+        try:
+            tree = ast.parse(read(root / f))
+        except SyntaxError as e:
+            problems.append(f"{f}: not parseable ({e.msg}, line {e.lineno})")
+            continue
+        if shared_error and "signed_registry" in texts[f]:
+            problems.append(f"{f}: {shared_error}")
+            continue
+        gaps = isolation_gaps(tree, shared)
+        if gaps:
+            problems.append(f"{f}: reaches tier-digests.sh without the isolation block; it lacks "
+                            + "; ".join(gaps) + f". Copy the block from {TEMPLATE_MODULE}")
+    return problems
+
+
+@check("test-trust-env", "A test that reaches tier-digests.sh isolates the CI run's trust environment (module-level patch, popped in setUpModule)")
+def check_test_trust_env():
+    """Static, so with known limits: a rebinding through globals(), exec or setattr, and a helper function called at
+    import time that copies the environment, are not seen (nor a Python intermediary between a test and a
+    reaching script, nor a test that reaches the script through a name built at run time). The adversarial
+    class is out too: reaching os.environ without naming it, or running a script at import time; one line each:
+    `from os import *`; os.environb or posix.environ; sys.modules; getattr or __import__; a mutation of the
+    names list through an alias; statements after the first two of setUpModule. Refused, so not limits: a
+    module-level rebinding of the os or mock name the patch statement uses, a call that passes the names list
+    as an argument, and a load of os that is not an attribute base. Ambient names outside
+    TRUST_ENV_NAMES are not dropped either: REGISTRY_HOST (read by tier-digests.sh in resolve), GH_HOST,
+    GH_REPO, COSIGN_* and REGISTRY_AUTH_FILE. REGISTRY_HOST stays out because the block comparison needs the
+    names literal of every carrying module (46 files) and signed_registry.TRUST_ENV to change with it."""
+    r = Result()
+    for problem in trust_env_problems():
+        r.fail(problem)
+    return r
+
+
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
     if name not in argv:
