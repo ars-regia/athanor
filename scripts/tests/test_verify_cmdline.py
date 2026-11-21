@@ -79,7 +79,18 @@ class Cmdline(unittest.TestCase):
 
     def test_a_double_quoted_parameter_is_read_as_the_kernel_reads_it(self):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", 'page_alloc.shuffle=1 "selinux=0"')
-        self.assertTrue(any('"selinux=0" ->' in p for p in self.problems()), self.problems())
+        self.assertTrue(any("selinux=0 ->" in p for p in self.problems()), self.problems())
+
+    def test_a_quoted_run_with_spaces_is_one_parameter(self):
+        for words, parameter in (
+            ('quiet "selinux=0 x"', "selinux=0 x"),
+            ('"lsm=a b"', "lsm=a b"),
+            ('quiet "selinux=0', "selinux=0"),
+        ):
+            with self.subTest(words=words):
+                self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", f"page_alloc.shuffle=1 {words}")
+                self.assertTrue(any(f"{parameter} ->" in p for p in self.problems()), self.problems())
+                self.edit("forge/specs/azoth/cmdline", f"page_alloc.shuffle=1 {words}", "page_alloc.shuffle=1")
 
     def test_a_name_that_only_starts_with_a_rejected_bare_one_passes(self):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 rd.breakpoint xselinux=0 rd.break.x")

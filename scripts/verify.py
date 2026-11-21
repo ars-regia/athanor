@@ -3878,6 +3878,13 @@ KARGS_FILES = [
 ]
 
 
+def cmdline_words(text):
+    """The parameters of a kernel command line: split on whitespace outside double quotes, as the
+    kernel's next_arg does (a quoted run is one parameter, an unclosed quote runs to the end), with
+    the quotes dropped so that `"selinux=0"` is read as selinux=0 (it can only reject more)."""
+    return [word.replace('"', "").strip() for word in re.findall(r'(?:[^\s"]|"[^"]*"?)+', text)]
+
+
 def cmdline_problems(root=None):
     """No place that writes the kernel command line carries a parameter the profile rejects."""
     root = root or ROOT
@@ -3894,21 +3901,19 @@ def cmdline_problems(root=None):
         elements = tomllib.loads(text)["kargs"]
         if not all(isinstance(element, str) for element in elements):
             raise ValueError("a kargs element is not a string")
-        return [parameter for element in elements for parameter in element.split()]
+        return [parameter for element in elements for parameter in cmdline_words(element)]
 
-    read_site(CMDLINE_FILE, str.split)
+    read_site(CMDLINE_FILE, cmdline_words)
     for relative in KARGS_FILES:
         read_site(relative, kargs)
 
     for site, parameters in found.items():
         for parameter in parameters:
-            # The kernel strips one pair of double quotes from a parameter (`"selinux=0"` is effective).
-            bare = parameter[1:-1] if len(parameter) > 1 and parameter[0] == parameter[-1] == '"' else parameter
             for rejected, why in REJECTED_PARAMETERS.items():
                 if rejected.endswith((".", "=")):
-                    matched = bare.startswith(rejected)
+                    matched = parameter.startswith(rejected)
                 else:
-                    matched = bare == rejected or bare.startswith(rejected + "=")
+                    matched = parameter == rejected or parameter.startswith(rejected + "=")
                 if matched:
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
