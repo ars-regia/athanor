@@ -1,6 +1,6 @@
 # Athanor workspace overview
 
-Status: **revision 3 (2026-11-06), approved by the maintainer with the pull request that records it, #1020.** Revision 3 designs the window switcher on Alt+Tab, `athanor-switcher`, which ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) places in release 1.0, in section 8, and points sections 1 to 7 at it; it changes nothing of the overview's behaviour, which stays in release 1.1 (ADR-0135). Its rules carry either "(maintainer decision, 2026-11-06)" or "(proposed, revision 3)". **Revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** **Amended on 2026-10-31 by `doc_own_stack.md` decision 32, in the note below (#903).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05, one of 2026-10-08 and, in revision 3, four of 2026-11-06. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur` and its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths). Only identifiers are renamed; the specified behaviour does not change.
+Status: **revision 4 (2026-11-21), proposed for approval, awaiting the maintainer's approval under ADR-0074; until it is approved, revision 3 is the approved text.** Revision 4 places the overview, `athanor-overview`, and the retirement of cosmic-workspaces in release 1.0 ([ADR-0141](../decisions/0141-everything-own-in-1-0.md) decision 4), writes the overview in Sal and builds it for athanor-sulphur alone, takes its workspace miniatures from the compositor's workspace capture (#1133), and brings back the bar's workspaces module and the dock's workspaces button with it (#835), in section 9, which overrides sections 1 to 8 where they disagree. Its rules carry either "(ADR-0141)" or "(proposed, revision 4)". Revision 3 (2026-11-06) was approved by the maintainer with the pull request that records it, #1020. Revision 3 designs the window switcher on Alt+Tab, `athanor-switcher`, which ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) places in release 1.0, in section 8, and points sections 1 to 7 at it; it changes nothing of the overview's behaviour, which stays in release 1.1 (ADR-0135). Its rules carry either "(maintainer decision, 2026-11-06)" or "(proposed, revision 3)". **Revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** **Amended on 2026-10-31 by `doc_own_stack.md` decision 32, in the note below (#903).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05, one of 2026-10-08 and, in revision 3, four of 2026-11-06. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur` and its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths). Only identifiers are renamed; the specified behaviour does not change.
 
 **Amendment of 2026-10-31** (`doc_own_stack.md` decision 32, the amendment approved by the maintainer with #903), in the first pull request of the implementation, as that document's decision 28 asks:
 
@@ -19,7 +19,7 @@ Stage 7 of `doc_shell.md`, as the status line lists it: the overview program `at
 
 ### Non-goals
 
-Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, and the shells drawn over other compositors' overviews (OV15); a compositor of our own (`doc_compositor.md` CO1); the bar's workspace indicator (F-bar-20); the window switcher's thumbnails, which come after its first release, and an overview in release 1.0 (section 8; maintainer decision, 2026-11-06).
+Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, and the shells drawn over other compositors' overviews (OV15); a compositor of our own (`doc_compositor.md` CO1); the bar's workspace indicator (F-bar-20); the window switcher's thumbnails, which come after its first release, and an overview in release 1.0 (section 8; maintainer decision, 2026-11-06), which revision 4 reverses: the overview is in release 1.0 (section 9; ADR-0141 decision 4).
 
 ### Rationale: context and verified facts
 
@@ -457,7 +457,7 @@ Decisions 1 to 7 were taken by the maintainer on 2026-10-05, and decision 8 on 2
 9. **Is the window switcher in 1.0, and what is it?** (OV20, OV21) (maintainer decision, 2026-11-06) Choice: in release 1.0, a Sal client, `athanor-switcher`, owning `os.athanor.Switcher1` with `Next` and `Previous`, serving both sessions: athanor-sulphur binds Alt+Tab through `Action::Call`, and cosmic-comp through its `system_actions`. Reason: ADR-0138 decisions 2 and 6; a client keeps `doc_own_stack.md` decision 30 (the compositor draws no text), reaches Orca through AT-SPI as OS8 asks, and keeps Alt+Tab working in cosmic-comp's session once cosmic-launcher leaves.
 10. **What does it show?** (OV22) (maintainer decision, 2026-11-06) Choice: every window of every workspace, by icon and title, in order of most recent use, on the focused output. Thumbnails come later.
 11. **Which keys?** (OV21) (maintainer decision, 2026-11-06) Choice: Alt+Tab and Alt+Shift+Tab.
-12. **What stays in 1.1?** (maintainer decision, 2026-11-06) Choice: the overview, `athanor-overview`, and the retirement of cosmic-workspaces (ADR-0135).
+12. **What stays in 1.1?** (maintainer decision, 2026-11-06) Choice: the overview, `athanor-overview`, and the retirement of cosmic-workspaces (ADR-0135). *Reversed by ADR-0141 decision 4, which amends ADR-0135 decision 3 and ADR-0138 decision 2: both are in release 1.0 (section 9).*
 13. **What leaves with cosmic-launcher?** (OV28 step 7) (maintainer decision, 2026-11-06) Choice: Athanor's own application library, `athanor-library` (`doc_launcher.md` LA1, LA7), is in 1.0, and cosmic-app-library leaves in the same change as cosmic-launcher and pop-launcher (ADR-0138 decision 2).
 14. **Which launcher becomes the default?** (OV28 step 7) (maintainer decision, 2026-11-06) Choice: `athanor-launcher`, today a GTK4 program, is rewritten in Sal in 1.0, chosen over keeping it in GTK4 until 1.1 (ADR-0138 decisions 2 and 6); its design is `doc_launcher.md`'s.
 
@@ -484,7 +484,7 @@ The program `athanor-switcher`: its bus interface, the bindings of both sessions
 ### Non-goals
 
 - Window thumbnails: they come later (maintainer decision, 2026-11-06).
-- The overview, `athanor-overview`, and the retirement of cosmic-workspaces: they stay in release 1.1 (ADR-0135; maintainer decision, 2026-11-06).
+- The overview, `athanor-overview`, and the retirement of cosmic-workspaces: they stay in release 1.1 (ADR-0135; maintainer decision, 2026-11-06). *Reversed by revision 4: both are in release 1.0 (section 9; ADR-0141 decision 4).*
 - Switching between the windows of one application (Alt+grave), and Super+Tab under athanor-sulphur: not bound (proposed, revision 3). Under cosmic-comp, COSMIC's defaults bind Super+Tab and Super+Shift+Tab to the same system actions as Alt+Tab, so they reach the switcher there, and Super is then the held modifier (OV24).
 - A switcher drawn by the compositor (section 6, decision 9).
 
@@ -617,3 +617,143 @@ On the reference laptop athanor-ref and on the maintainer's desktop, judged by t
 14. Memory stays within OV26's budget.
 15. SH1's rule holds in both sessions: the switcher passes `doc_shell_standard.md` (the gate of ST2, with scenarios, accessibility and languages and the maintainer's aesthetic signature) under athanor-sulphur and under cosmic-comp, before OV28 step 7.
 16. After OV28 step 7, `rpm -q cosmic-launcher pop-launcher cosmic-app-library` reports all three absent, and Alt+Tab still switches windows in both sessions.
+
+## 9. Revision 4: the overview in release 1.0, on athanor-sulphur and Sal
+
+Proposed on 2026-11-21, awaiting the maintainer's approval under ADR-0074. It overrides sections 1
+to 8 where they disagree. [ADR-0141](../decisions/0141-everything-own-in-1-0.md) brings the
+overview and the retirement of cosmic-workspaces back to release 1.0 (decision 4), because
+`doc_own_stack.md` decision 28 ties cosmic-comp's session leaving the greeter to the overview and to
+the window switcher, and cosmic-comp leaves in 1.0 (decision 3). Each rule names its source:
+"(ADR-0141)", or "(proposed, revision 4)" for what the approval of this revision decides.
+
+### Scope
+
+The overview's release, its toolkit, the compositor it is built for, its workspace miniatures, the
+keys and openers that reach it under athanor-sulphur, the retirement of cosmic-workspaces, and what
+of revision 3's window switcher is built once cosmic-comp's session leaves. Everything else of
+sections 2 to 5 holds as written: the model and the placement (OV5), the pointer and keyboard use
+(OV7, OV8), typing handed to the launcher (OV9), the hiding rules (OV10), the indicator (OV12), the
+hot corner (OV14), the confinement (OV16), the tests (OV18) and the acceptance (section 5).
+
+### Non-goals
+
+- The overview under cosmic-comp: its clauses stay as the record of revisions 2 and 3 and are not
+  built (OV31; proposed, revision 4).
+- The window switcher's thumbnails, which still come after its first release (section 8).
+
+### Interfaces
+
+**OV29. Release 1.0** (ADR-0141 decision 4). The overview, `athanor-overview`, and the retirement
+of cosmic-workspaces are in release 1.0. Both land before cosmic-comp's session leaves the greeter
+(`doc_own_stack.md` decision 28), as the window switcher of section 8, which is in release 1.0
+already (ADR-0138 decision 2), does.
+
+**OV30. The toolkit is Sal** (ADR-0141 decisions 5 and 7). The binary of OV2 draws the overview's
+surfaces with Sal, as the switcher does (OV20), not with GTK4 and Cairo; the library keeps OV2's
+rules, with no toolkit type and its tests run without a display. The crate reaches no `gtk4` crate,
+which `verify.py own` refuses for every crate built from the repository
+(`scripts/verify.py#check_own`). It is built without Sal's `gpu` feature
+(`system/athanor-sal/Cargo.toml`), so it draws on the CPU into `wl_shm` and creates no Vulkan
+instance, which keeps decision 8 and acceptance item 9 as written. Where OV4, OV16 and OV18 name
+GTK (gtk4-layer-shell, GTK's write paths, GTK's watches), the rule is Sal's equivalent, as OV26 and
+OV27 set it for the switcher (proposed, revision 4).
+
+**OV31. athanor-sulphur alone** (proposed, revision 4; ADR-0141 decision 3). The overview is built,
+tested and judged under athanor-sulphur only, as `doc_lock_and_prompts.md` decision 39 does for the
+lock. The clauses that hold for cosmic-comp only are not built, and stay in sections 2 to 6 as the
+record of revisions 2 and 3: the main socket of OV2, the special namespace and patch 0001 of OV4,
+the `WorkspaceOverview` system action of OV10 and OV17, the COSMIC shortcuts and patches of OV13,
+spike S1 on cosmic-comp (OV19, step 1), and decisions 1, 4 and 5. Under athanor-sulphur the overview
+reaches its privileged globals through its line in the allow-list (`doc_own_stack.md` OS4; the
+amendment of 2026-10-31), keeps the namespace `athanor-overview`, and asks for the keyboard as OV4's
+table says. Until cosmic-comp's session leaves the greeter, that session keeps cosmic-workspaces as
+its overview (OV34).
+
+**OV32. Workspace miniatures from the compositor's capture** (#1133; `doc_own_stack.md` decisions
+32 and 33; proposed, revision 4). Each miniature of the strip (OV5) is a capture of one workspace
+through `ext-image-copy-capture-v1`, from the source that `athanor_workspace_manager_v1` gives for
+that workspace. That capture holds the workspace's windows and no layer surface, so the overview
+never appears in its own miniatures, and decision 2's reason for composing them from window
+captures does not hold under athanor-sulphur.
+
+- The capture path is OV6's: into `wl_shm`, one capture in flight at a time, each workspace
+  captured once per opening and scaled down once, the full-size buffer released, nothing kept on
+  disk or across a lock.
+- A workspace whose capture fails or is refused is drawn as decision 2 draws it, from its windows'
+  captures and else schematically, so that every window stays visible.
+- The grid's live thumbnails stay window captures (OV6).
+- The source is granted by the overview's line in the allow-list and to no other client, and is
+  refused while the session is locked (#1133; `doc_own_stack.md` OS16).
+- Fixture test (`doc_own_stack.md` OS6): the overview's capture of the active workspace, taken while
+  the overview is shown, holds the workspace's windows and not the overview's surface.
+
+**OV33. Keys and openers under athanor-sulphur** (#835; the amendment of 2026-10-31; proposed,
+revision 4). In the change of OV19, step 5:
+
+- Super+W and `XF86LaunchA` become rows of the compositor's default bindings
+  (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings.rs#DEFAULTS`) whose action calls
+  `os.athanor.Overview1.Toggle`, coalesced and not while locked, as the launcher's call is; a
+  vertical three-finger swipe up calls `Show()` and down hides the overview. Each has its fixture
+  test (`doc_own_stack.md` OS13), and the keys that `doc_own_stack.md` decision 28 left unbound are
+  bound then.
+- `Opener::Workspaces` (`system/athanor-sulphur-client/src/launch.rs#Opener`) calls
+  `os.athanor.Overview1.Show` instead of starting cosmic-workspaces.
+- The bar's workspaces module and the dock's workspaces button show again under athanor-sulphur.
+  The entries of `forge/test/shell/golden/athanor-differences.toml` whose cause is that decision 28
+  hides them, and their rule in `forge/test/shell/golden_report.py#HIDDEN`, leave in the same
+  change, and the goldens are drawn with them shown.
+
+**OV34. Retiring cosmic-workspaces** (ADR-0141 decisions 3 and 4; proposed, revision 4). OV17 holds
+under athanor-sulphur through OV33. cosmic-workspaces itself leaves the image in the change that
+takes cosmic-comp's session off the greeter, the last session that runs it, or in OV19 step 5's change
+if that session has already left: its entry in `forge/config/packages.json`, its line in
+`forge/config/own-allow.txt`, and its opening in `scripts/devvm/compositor-acceptance.sh` leave
+together. Acceptance item 14 is read after that change.
+
+**OV35. The window switcher once cosmic-comp leaves** (ADR-0141 decision 3; proposed, revision 4).
+Section 8 holds, with athanor-sulphur's binding (OV21). The binding under cosmic-comp, OV26's grant
+for its one write, OV28 steps 5 and 6 and the cosmic-comp half of acceptance items 6 to 16 are
+built and judged only while cosmic-comp's session is in the image; once it has left, they are not
+built, and each acceptance item that names both sessions is judged under athanor-sulphur.
+
+### Construction
+
+OV19 holds under athanor-sulphur, with these changes (proposed, revision 4):
+
+- #1133's workspace source lands before step 2, which draws the first miniatures.
+- Steps 1 to 4 build nothing for cosmic-comp (OV31); step 4's patches are not written (amendment of
+  2026-10-31).
+- Step 5 is the change of OV33. cosmic-workspaces leaves as OV34 says.
+
+### Failure behaviour
+
+As section 2's, with one addition: a workspace capture refused or failed falls back as OV32 says,
+and is logged once per opening at debug.
+
+### Acceptance criteria
+
+Section 5 holds under athanor-sulphur, items 5 and 9 measured through the bar's module and the dock's
+button as the amendment of 2026-10-31 asks, with three more:
+
+15. The fixture test of OV32 passes, and a client without the overview's grant is refused the
+    workspace source.
+16. `rig.sh golden-report` passes with the bar's workspaces module and the dock's workspaces button
+    shown under athanor-sulphur, and `athanor-differences.toml` holds no entry whose cause is that
+    decision 28 hides them.
+17. After the change of OV34, `python3 scripts/verify.py own` passes with no `cosmic-workspaces` line
+    in `forge/config/own-allow.txt`.
+
+### Changes to other documents
+
+Owed, each by a revision of its own document:
+
+- `doc_own_stack.md` decision 33: the capture of a workspace for the overview's thumbnails is for
+  release 1.0, not 1.1 (#1133); decision 28 and OS13: Super+W, `XF86LaunchA` and the three-finger
+  swipe are bound by OV33.
+- `doc_session.md` SN16, gap 8: closed by this revision's overview and section 8's switcher (its
+  revision 5).
+- `doc_bar.md`, which specifies the bar and the dock: the workspaces module and button return under
+  athanor-sulphur (OV33).
+- `docs/architecture/components.toml`: entries for `athanor-overview` and `athanor-switcher`, which
+  have none yet.
