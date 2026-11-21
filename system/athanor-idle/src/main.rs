@@ -24,7 +24,8 @@ use athanor_unit::{journal, notify, sandbox};
 use futures_util::StreamExt;
 use gio::prelude::*;
 use tokio::io::Interest;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::watch;
 
 /// The run after which the manager is told the daemon is healthy (doc_session.md, SN6).
 const HEALTHY_RUN: std::time::Duration = std::time::Duration::from_secs(60);
@@ -65,8 +66,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (changes, received) = mpsc::unbounded_channel();
-    let Some(_watched) = watch(changes) else {
+    let Some((_watched, received)) = watch() else {
         return ExitCode::FAILURE;
     };
     std::thread::spawn(move || {
@@ -132,7 +132,11 @@ struct Watched {
 
 /// Runs SD16's migration once, follows the Power page, and sends the preferences at once and
 /// at every change. `None` when the schema is not installed.
-fn watch(changes: UnboundedSender<Prefs>) -> Option<Watched> {
+///
+/// Every message is the whole current preferences, never a delta, so a newer one makes an older
+/// one redundant: the channel keeps only the latest value and a burst of GSettings changes
+/// (the GLib thread is not ours to slow down) costs no memory and loses nothing the daemon needs.
+fn watch() -> Option<(Watched, watch::Receiver<Prefs>)> {
     let Some(idle) = settings(SCHEMA) else {
         tracing::error!("the schema {SCHEMA} is not installed");
         return None;
@@ -177,28 +181,31 @@ fn watch(changes: UnboundedSender<Prefs>) -> Option<Watched> {
         },
     };
 
+    let (changes, received) = watch::channel(read(&idle, interface.as_ref()));
     let send = {
         let (idle, interface) = (idle.clone(), interface.clone());
+        // `send_replace` stores the value even when the daemon thread has stopped; the process
+        // is then exiting.
         move || {
-            if changes.send(read(&idle, interface.as_ref())).is_err() {
-                tracing::debug!("the daemon thread has stopped; the process is exiting");
-            }
+            changes.send_replace(read(&idle, interface.as_ref()));
         }
     };
-    send();
     let on_idle = send.clone();
     idle.connect_changed(None, move |_, _| on_idle());
     if let Some(interface) = &interface {
         interface.connect_changed(Some("enable-animations"), move |_, _| send());
     }
-    Some(Watched {
-        _idle: idle,
-        _interface: interface,
-        _monitor: monitor,
-    })
+    Some((
+        Watched {
+            _idle: idle,
+            _interface: interface,
+            _monitor: monitor,
+        },
+        received,
+    ))
 }
 
-fn serve(dir: PathBuf, received: UnboundedReceiver<Prefs>) -> Result<(), Box<dyn StdError>> {
+fn serve(dir: PathBuf, received: watch::Receiver<Prefs>) -> Result<(), Box<dyn StdError>> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
@@ -351,7 +358,7 @@ impl Driver {
 
 async fn daemon(
     dir: PathBuf,
-    mut received: UnboundedReceiver<Prefs>,
+    mut received: watch::Receiver<Prefs>,
 ) -> Result<(), Box<dyn StdError>> {
     let session = zbus::connection::Builder::session().build().await?;
     let session_query = zbus::connection::Builder::session().build().await?;
@@ -380,7 +387,7 @@ async fn daemon(
     let socket = std::os::unix::net::UnixStream::from(display.fd()?);
     socket.set_nonblocking(true)?;
     let socket = tokio::net::UnixStream::from_std(socket)?;
-    let mut prefs = received.recv().await.ok_or("the settings thread stopped")?;
+    let mut prefs = *received.borrow_and_update();
     let (answers, mut answered) = mpsc::unbounded_channel();
     let mut driver = Driver {
         display,
@@ -401,8 +408,9 @@ async fn daemon(
     loop {
         let deadline = driver.next_deadline();
         tokio::select! {
-            changed = received.recv() => {
-                prefs = changed.ok_or("the settings thread stopped")?;
+            changed = received.changed() => {
+                changed.map_err(|_| "the settings thread stopped")?;
+                prefs = *received.borrow_and_update();
                 driver.reduced_motion = prefs.reduced_motion;
             }
             changed = hold.changed() => changed?,
@@ -456,5 +464,45 @@ async fn read_battery(system: &bus::System, battery: &mut Battery) -> Option<Ins
 async fn sleep_until(deadline: Option<Instant>) {
     if let Some(at) = deadline {
         tokio::time::sleep_until(at.into()).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prefs(blank_after: u32) -> Prefs {
+        Prefs {
+            config: Config {
+                blank_after,
+                suspend_after_battery: 0,
+                suspend_after_ac: 0,
+            },
+            reduced_motion: false,
+        }
+    }
+
+    /// A burst of changes faster than the daemon drains ends on the latest preferences, and the
+    /// channel never holds more than one value.
+    #[test]
+    fn a_flood_of_changes_ends_on_the_latest_and_holds_one() {
+        let (changes, mut received) = watch::channel(prefs(0));
+        let flood = std::thread::spawn(move || {
+            for n in 1..=100_000 {
+                changes.send_replace(prefs(n));
+            }
+            changes
+        });
+        let changes = flood.join().expect("the sender thread panicked");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            received.changed().await.expect("a pending change");
+        });
+        assert_eq!(*received.borrow_and_update(), prefs(100_000));
+        assert!(!received.has_changed().expect("sender alive"));
+        drop(changes);
+        assert!(received.has_changed().is_err(), "a dropped sender is seen");
     }
 }
