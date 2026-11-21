@@ -239,7 +239,7 @@ Status: **revision 3, approved by the maintainer on 2026-11-21 with the pull req
 Applied with the approval of this document. Requests met, by the rule that made them:
 
 - `doc_visual_language.md` VL5 (`:105-111`), `:179` and acceptance `:340`: met by PT5. `color-scheme` 0 for light is served as VL5 fixes it.
-- `doc_accessibility.md` AX2 (rows at `:56` and `:76`): `text-scaling-factor`, `enable-animations`, `cursor-size` and `org.gnome.desktop.a11y.interface high-contrast` are served by PT5.
+- `doc_accessibility.md` AX2 (the paragraph at `:56` and the bullet at `:76`): `text-scaling-factor`, `enable-animations`, `cursor-size` and `org.gnome.desktop.a11y.interface high-contrast` are served by PT5.
 - `doc_languages.md` LN15 (`:341`, `:443`): `clock-format` is served by PT5.
 - `doc_osd.md` OD18 (`:266`, `:273`): applications' log-out inhibitions reach `athanor-osd` through `SessionInhibitors` (PT10, PT11). Amendment to OD18, accepted on 2026-10-05: the restart and shut-down dialogs list them too, since both end the session.
 - `doc_lock_and_prompts.md` (`:171`, `:210`, F-lock-30): the application permission prompt is PT6.
