@@ -18,10 +18,6 @@ cd "$root"
 cargo clippy --workspace --exclude athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee "$out/clippy.log"
 cargo clippy -p athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee -a "$out/clippy.log"
 cargo clippy --manifest-path system/athanor-sal/gallery/Cargo.toml --locked --all-targets -- -D warnings 2>&1 | tee -a "$out/clippy.log"
-# The implicit panics per crate (overflow, index, string slice) against their budget (#1352). The
-# check runs the two workspace clippy runs above again with its lints, on the same target, and
-# fails on a crate over its line, a crate without one and a line above the measured count.
-ATHANOR_IMPLICIT_PANICS_CARGO=cargo python3 -B scripts/verify.py implicit-panics 2>&1 | tee "$out/implicit-panics.log"
 
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
@@ -49,3 +45,9 @@ for lock in "${locks[@]}"; do
     echo "security-audit: cargo audit $lock" | tee -a "$out/audit.log"
     cargo audit --deny yanked --file "$lock" < /dev/null 2>&1 | tee -a "$out/audit.log"
 done
+
+# The implicit panics per crate (overflow, index, string slice) against their budget (#1352), last:
+# under `set -e` its failure would hide the results of cargo-deny and cargo-audit. The check runs
+# the two workspace clippy runs of the start again with its lints, on the same target, and fails on
+# a crate over its line, a crate without one and a line above the measured count.
+ATHANOR_IMPLICIT_PANICS_CARGO=cargo python3 -B scripts/verify.py implicit-panics 2>&1 | tee "$out/implicit-panics.log"
