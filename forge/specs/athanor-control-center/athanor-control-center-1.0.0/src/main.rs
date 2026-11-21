@@ -65,6 +65,7 @@ fn bind_shortcut(state: &Path) {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     let Some(dirs) = Dirs::from_vars("athanor-control-center", |name| env::var_os(name)) else {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the configuration and the cache");

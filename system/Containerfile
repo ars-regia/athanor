@@ -66,7 +66,7 @@ FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo@${TIER3_DIGEST} AS tier3-repo
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py). The two RPMs
 # built here carry SOURCE_DATE_EPOCH as their build time and file times, which the rpm database of
 # the NVIDIA variants records.
-FROM registry.fedoraproject.org/fedora:45@sha256:f236063d5a7a15e76ff034f2be5fa6f7a8922fcb655093ad972a1f196b14a007 AS nvidia-rpms
+FROM registry.fedoraproject.org/fedora:45@sha256:7b6d9048825950573e58b7185631f6bd38f7c24f5c0e68ae902870aedebb86e0 AS nvidia-rpms
 ARG KERNEL_REGISTRY
 ARG SOURCE_DATE_EPOCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -77,7 +77,7 @@ RUN dnf5 install -y --setopt=install_weak_deps=False rpm-build python3 && \
 
 # Fedora's atomic desktop base (S1): the bootc base of Silverblue and Kinoite, pinned by
 # digest and moved by the bump bot.
-FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:76d6fbb3b011fb57595933ab08985248b4658857f45ccdbe5b7ebf6f22af483f AS system
+FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:ec86944e5b331b58d48b8375f678e4e30e95ad55db79304462391569c012c6df AS system
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG FEDORA_VERSION=45
 ENV FEDORA_VERSION=$FEDORA_VERSION

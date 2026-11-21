@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+# The panic hook (`athanor_unit::panic`).
+athanor-unit = { path = "../../../../system/athanor-unit" }
 jiff = { workspace = true }
 nix = { workspace = true, features = ["fs", "user"] }
 

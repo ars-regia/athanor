@@ -45,7 +45,6 @@ M  drivers/block/zram/zcomp.c
 M  drivers/block/zram/zcomp.h
 M  drivers/block/zram/zram_drv.c
 M  drivers/bluetooth/btusb.c
-M  drivers/cpufreq/amd-pstate.c
 M  drivers/cpufreq/intel_pstate.c
 M  drivers/gpio/Kconfig
 M  drivers/gpio/gpio-macsmc.c
@@ -129,6 +128,7 @@ M  drivers/mfd/Kconfig
 M  drivers/mfd/Makefile
 A  drivers/mfd/macsmc-core.c
 D  drivers/mfd/macsmc.c
+M  drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
 M  drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
 M  drivers/net/wireless/intel/iwlwifi/mld/mac80211.c
 M  drivers/net/wireless/intel/iwlwifi/mld/tx.c
@@ -264,6 +264,7 @@ M  net/ipv4/tcp_minisocks.c
 M  net/ipv4/tcp_output.c
 M  net/ipv4/tcp_timer.c
 M  scripts/package/PKGBUILD
+M  security/apparmor/match.c
 M  security/integrity/platform_certs/keyring_handler.h
 M  security/integrity/platform_certs/load_uefi.c
 M  sound/hda/codecs/realtek/alc269.c

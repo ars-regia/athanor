@@ -43,12 +43,12 @@ directory e come si usa.
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.3.3-300.fc45` |
+| `FEDORA_KERNEL_NVR` | `7.3.4-300.fc45` |
 | `FEDORA_KEY_FPR` | `4f50a6114cd5c6976a7f1179655a4b02f577861e` |
 | `KERNEL_CHANNEL` | `stable` |
-| `CACHYOS_RELEASE` | `cachyos-7.3.3-1` |
+| `CACHYOS_RELEASE` | `cachyos-7.3.4-1` |
 | `CACHYOS_CONFIG_COMMIT` | `cbd3c2573e7281c006e8f4dbf4e2dd781542d7f7` |
-| `CACHYOS_PATCHES_COMMIT` | `21d721415790e6717b2ece16e82e08eb98d16c00` |
+| `CACHYOS_PATCHES_COMMIT` | `664442dd1a913ef8838453828d26ae13b2e7334d` |
 | `NVIDIA_OPEN_VERSION` | `615.78.08` |
 | `NVIDIA_OPEN_COMMIT` | `1a82fbfda8f321b056eb3568850f9316c5e465c5` |
 | `NVIDIA_LEGACY_VERSION` | `580.196.07` |

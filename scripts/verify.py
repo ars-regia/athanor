@@ -89,22 +89,29 @@ class Result:
 
 
 PRUNE = {"target", ".git", "repo-cache", ".cache", "node_modules",
-         "graph-vaults", "graph-pages", ".codegraph", "graphify-out",
-         "experimental"}
+         "graph-vaults", "graph-pages", ".codegraph", "graphify-out"}
+# `ROOT/experimental` is pruned too, at the root only (`walk`, `links`).
 
 
 # Units that sealed LUKS to the TPM or bumped its rollback counter on their own (D42, issue #148).
 AUTO_TPM_UNITS = ("athanor-tpm-luks-seal", "athanor-tpm-rollback-check", "athanor-tpm-rollback-update")
 
 
+def entered(here, dirnames, base):
+    """The directories of `dirnames`, under `here`, that a walk of `base` enters: not a PRUNE name
+    nor ROOT/experimental. Under a crate's src/ a `target` or `.cache` is a module, and is entered."""
+    inside = here.relative_to(ROOT if here.is_relative_to(ROOT) else base).parts
+    return [d for d in dirnames if ("src" in inside or d not in PRUNE) and here / d != ROOT / "experimental"]
+
+
 def walk(base, suffix):
-    """os.walk con potatura: rglob su questo repo entra in target/ (decine di
-    migliaia di file) e su un filesystem montato ci mette minuti."""
+    """os.walk with pruning: rglob enters target/ (tens of thousands of files) and takes
+    minutes on a mounted filesystem. An `experimental/` below the root is code, and is walked."""
     base = Path(base)
     if not base.is_dir():
         return
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE]
+        dirnames[:] = entered(Path(dirpath), dirnames, base)
         for f in filenames:
             if f.endswith(suffix):
                 yield Path(dirpath) / f
@@ -452,35 +459,17 @@ def merge_queue_problems(root):
 
 
 ALERT_ACTION = "./.github/actions/alert"
-# Scheduled workflows that have no alert job yet, each with the reason. An entry whose workflow
-# gains the job is itself reported, so the list only shrinks.
-ALERT_EXEMPT = {
-    "athanor-forge-orchestrator.yml": "its alert job lands in a separate pull request (#1353 follow-up)",
-}
-
-
 def scheduled_alert_problems(root):
     """PL51: a workflow with an `on.schedule` trigger ends with alert jobs that use the alert
     action on a GitHub-hosted runner, run with `always()`, and between them need every other job,
     so a scheduled failure, a lost runner or a timeout opens a ci-alert issue."""
     problems = []
     workflows = Path(root) / ".github/workflows"
-    for name in sorted(ALERT_EXEMPT):
-        path = workflows / name
-        doc = yaml.safe_load(read(path)) if path.is_file() else None
-        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
-            problems.append(f"ALERT_EXEMPT names {name}, which does not exist or has no schedule: "
-                            "remove the entry (PL51)")
     for wf in sorted(workflows.glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
         if not isinstance(doc, dict) or "schedule" not in triggers(doc):
             continue
         jobs = doc.get("jobs") or {}
-        if wf.name in ALERT_EXEMPT:
-            if alert_jobs(jobs):
-                problems.append(f"{wf.name}: has an alert job, so it is no longer exempt: "
-                                "remove it from ALERT_EXEMPT (PL51)")
-            continue
         problems += alert_job_problems(wf.name, jobs, "schedule")
     return problems
 
@@ -645,7 +634,9 @@ def release_problems(root):
     condition = request.get("if", "")
     if "!cancelled()" not in condition:
         problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
-    for job_id in sorted(set(jobs) - {"request-release"}):
+    # A job that needs request-release (the PL51 alert) ends the run and cannot be needed by it.
+    after = {job_id for job_id, job in jobs.items() if "request-release" in (job.get("needs") or [])}
+    for job_id in sorted(set(jobs) - {"request-release"} - after):
         if job_id not in request.get("needs", []):
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
         elif job_id == "system-image":
@@ -2460,11 +2451,11 @@ def check_shipped():
         if not (has_spec and in_dag):
             why = []
             if not has_spec:
-                why.append("nessuno .spec")
+                why.append("no .spec")
             if not in_dag:
-                why.append("non in packages.json")
-            r.fail(f"{name}: {', '.join(why)} -> compila ma non arriva sul sistema. "
-                   f"Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT")
+                why.append("not in packages.json")
+            r.fail(f"{name}: {', '.join(why)} -> it builds but never reaches the system. "
+                   f"Package it, move it under experimental/, or list it in experimental/EXEMPT")
 
     for p in sorted(dag - tiers):
         r.fail(f"{p}: in custom_packages ma in nessun tier -> costruito e mai installato")
@@ -3076,7 +3067,7 @@ def hidden_failures(text):
 def links(base):
     """The links under `base`, to a file or a directory: `walk` follows neither."""
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE]
+        dirnames[:] = entered(Path(dirpath), dirnames, base)
         for name in dirnames + filenames:
             if (Path(dirpath) / name).is_symlink():
                 yield Path(dirpath) / name
@@ -6671,6 +6662,13 @@ LINE_CITATIONS_KEPT = {
     ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
+# Another project's file that a document cites by a path a tracked file also ends with, each
+# (document, path as written) with the project it belongs to: the path resolves to no file, sets no
+# crate, and a `:N` after it cites nothing. An entry whose path no citation of its document writes
+# fails, so the list only shrinks.
+LINE_CITATIONS_UPSTREAM = {
+    ("doc_osd.md", "src/wayland.rs"): "cosmic-settings-daemon's, not athanor-idle's",
+}
 
 
 def holds_token(text, token, quoted=False):
@@ -7010,7 +7008,8 @@ def symbol_definitions(path, body):
     return None
 
 
-def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None):
+def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None,
+                      upstream=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -7022,7 +7021,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     before it, then by the one tracked file whose path ends with it; a name that several files
     end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
-    file is a finding, as is a bare `*.md` name that no tracked file ends with. A range is no line range when it starts at 0, ends before it starts,
+    file is a finding, as is a bare `*.md` name that no tracked file ends with. A path that
+    `upstream` ({(document, path)}, LINE_CITATIONS_UPSTREAM by default) lists for `doc` is another
+    project's and resolves to no file. A range is no line range when it starts at 0, ends before it starts,
     reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
     document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
     sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
@@ -7070,7 +7071,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     on a line that names no file before it is a finding; after a name that resolves to no file (code
     outside the repository), it is not checked. A `path#symbol` whose path is the end of several tracked
     files is a finding ("ambiguous"); a `path:N` of one is not. Trade-off: an upstream crate's
-    `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`.
+    `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`; a path that
+    `upstream` lists for `doc` is another project's, is not ambiguous, and its `#symbol` is not checked.
 
     With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
     is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
@@ -7084,7 +7086,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         for i in range(len(parts)):
             suffixes.setdefault("/".join(parts[i:]), []).append(path)
 
+    foreign = {path for d, path in (LINE_CITATIONS_UPSTREAM if upstream is None else upstream) if d == doc}
+
     def resolve(name, crate):
+        if name in foreign:
+            return None
         for candidate in (f"{crate}/{name}" if crate else None, name):
             if candidate in known:
                 return candidate
@@ -7139,12 +7145,12 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             symbol = spec.strip() if m.re is SYMBOL_CITATION else None
             spec, sep = (f"#{symbol}", "") if symbol else (spec, ":")
             path = last if named is None else resolve(named, crate)
-            if path is None and named and names_a_gone_file(named):
+            if path is None and named and named not in foreign and names_a_gone_file(named):
                 out.append((number, named, spec, None,
                             f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
-                if symbol and named and len(suffixes.get(named, ())) > 1:
+                if symbol and named and named not in foreign and len(suffixes.get(named, ())) > 1:
                     out.append((number, named, spec, None, f"{doc}:{number}: `{named}{spec}` is ambiguous: "
                                 "several files end with it, give a longer path"))
                 if named is None and not named_any and (symbol or lines_kept is not None):
@@ -7319,7 +7325,28 @@ def check_line_citations():
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    for problem in upstream_citation_problems(ROOT, tracked, LINE_CITATIONS_UPSTREAM):
+        r.fail(problem)
     return r
+
+
+def upstream_citation_problems(root, tracked, upstream):
+    """The entries of `upstream` (LINE_CITATIONS_UPSTREAM) that do not hold: a document that is not
+    under docs/architecture, a path that is itself a `tracked` file, which the entry would read
+    as another project's, and a path that no citation of the document writes."""
+    found = []
+    for doc, path in sorted(upstream):
+        name = f"LINE_CITATIONS_UPSTREAM names `{path}` of {doc}"
+        try:
+            text = read(root / "docs/architecture" / doc)
+        except (OSError, UnicodeDecodeError) as e:
+            found.append(f"{name}, a document that cannot be read ({e}): rename or remove the entry")
+            continue
+        if path in tracked:
+            found.append(f"{name}, a file of this repository, not another project's: remove the entry")
+        elif not re.search(rf"`{re.escape(path)}(?::[\d,\s-]+)?`", text):
+            found.append(f"{name}, which no citation writes: remove the entry")
+    return found
 
 
 @check("symbol-citations", "A path#symbol citation of an architecture document names one definition, which holds the code its sentence names")
@@ -7787,6 +7814,409 @@ def judge_known_red(entries, base, results, today):
         if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
+
+# --------------------------------------------------------------------------- #
+# implicit-panics — the panics that no token shows
+# --------------------------------------------------------------------------- #
+
+# Under `panic = "abort"` with `overflow-checks = true` ([profile.release] of Cargo.toml) an
+# overflow, an index out of bounds or a slice off a character boundary ends the process, and no
+# `.unwrap()` marks the place. Clippy finds them: their count per crate is a ratchet, as BUDGET is,
+# that only goes down (#1352). The lints are passed on clippy's command line as `--force-warn`,
+# which no `allow` or `expect`, no `warnings` group and no [lints] table can lower: the compiler,
+# not a scan of the sources, decides what hides a hit. `--cap-lints` still caps them, and a
+# clippy.toml can relax them, so implicit_panic_configs reads the tracked configurations, the
+# measuring run drops from its environment what implicit_panic_env does, and implicit_panic_counts
+# refuses a build script that sets it back. Code that clippy does not compile is not measured:
+# implicit_panic_cfgs refuses a `cfg` on `clippy` or on `debug_assertions`.
+IMPLICIT_PANIC_LINTS = ("clippy::arithmetic_side_effects", "clippy::indexing_slicing", "clippy::string_slice")
+IMPLICIT_PANIC_BUDGET = "scripts/ci/implicit-panics.txt"
+# Two runs, as in security-audit.sh: athanor-preview-render needs zbus on async-io. No test target:
+# a panic in a test fails the test, it does not end a service.
+IMPLICIT_PANIC_RUNS = (
+    ["--workspace", "--exclude", "athanor-preview-render"],
+    ["-p", "athanor-preview-render"],
+)
+# The cargo command the check runs clippy with. The GTK crates build only where their libraries
+# are, so measuring is opt-in: scripts/ci/security-audit.sh sets it in the builder (pr.yml's
+# rust_audit job), and `ATHANOR_IMPLICIT_PANICS_CARGO="bash forge/test/shell/rig.sh cargo"` locally.
+# Without it the check still fails closed on the budget file and the configurations: a line raised
+# or dropped against the base, a member without a line, a configuration that hides a lint.
+IMPLICIT_PANIC_CARGO = "ATHANOR_IMPLICIT_PANICS_CARGO"
+# What a tracked Cargo configuration may not hold: a rustflags flag that allows a lint or caps
+# them all, an [env] variable that points clippy at another configuration or other arguments, an
+# `include` of a configuration not read here, and another compiler or a wrapper around it, which
+# could drop the command line's lints.
+IMPLICIT_PANIC_FLAGS = re.compile(r"-A.*|--allow(?:=.*)?|--cap-lints(?:=.*)?")
+IMPLICIT_PANIC_ENV = {"CLIPPY_CONF_DIR", "CLIPPY_ARGS"}
+IMPLICIT_PANIC_BUILD_KEYS = {"rustc", "rustc-wrapper", "rustc-workspace-wrapper"}
+# A clippy.toml key that relaxes a budget lint: the operations arithmetic_side_effects lets
+# through, or no restriction lint in a `const` context.
+IMPLICIT_PANIC_CLIPPY_KEY = re.compile(
+    r".*(?:arithmetic-side-effects|indexing-slicing|string-slice).*|suppress-restriction-lint-in-const")
+
+
+def implicit_panic_env_key(key):
+    """Whether the variable `key` may cap or relax the lints of the measuring run: each RUSTFLAGS
+    form cargo reads (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS,
+    CARGO_TARGET_<triple>_RUSTFLAGS, ...) and IMPLICIT_PANIC_ENV."""
+    return key.endswith("RUSTFLAGS") or key in IMPLICIT_PANIC_ENV
+
+
+def implicit_panic_env(env):
+    """`env` without the variables implicit_panic_env_key names. rig.sh passes no host variable into
+    its container but those it names."""
+    return {k: v for k, v in env.items() if not implicit_panic_env_key(k)}
+
+
+def implicit_panic_budget(text):
+    """{crate: count} of the budget file: one `crate count` line per crate, `#` comments."""
+    budget = {}
+    for n, line in enumerate(text.split("\n"), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        name, _, count = line.partition(" ")
+        if not count.strip().isdigit() or name in budget:
+            raise ValueError(f"{IMPLICIT_PANIC_BUDGET}:{n}: not one `crate count` line per crate: {line}")
+        budget[name] = int(count)
+    return budget
+
+
+def package_crate(package_id):
+    """The crate of a local `package_id`: `path+file:///d/dir#name@1.0`, or `path+file:///d/name#1.0`
+    when the directory is named after the crate."""
+    path, _, fragment = package_id.partition("#")
+    return fragment.partition("@")[0] if "@" in fragment else path.rsplit("/", 1)[-1]
+
+
+def implicit_panic_counts(lines):
+    """({crate: hits}, problems) of the JSON lines of clippy runs. A hit counts once per place and
+    lint, though two targets or two runs compile the same module; every local crate built has an
+    entry, zero included, and vendored crates have none. A run that did not finish, or failed, is
+    a problem: a crate it did not reach would read as zero. So is a build script, vendored or not,
+    that sets for its crate's compilation a variable implicit_panic_env_key names: cargo reports
+    it on every run, a cached one included, however the script spells its name.
+
+    The count is keyed by a hit's primary span, so the expansions of one macro, or the calls of
+    one function that indexes, are one hit: the budget counts the places in the source that can
+    panic, not the paths that reach them."""
+    counts, seen, problems, finished = {}, set(), [], 0
+    for line in lines:
+        if not line.startswith("{"):
+            continue
+        msg = json.loads(line)
+        if msg.get("reason") == "build-script-executed":
+            hidden = sorted({key for key, _ in msg.get("env") or [] if implicit_panic_env_key(key)})
+            if hidden:
+                problems.append(f"{package_crate(msg.get('package_id', ''))}: its build script sets "
+                                f"{', '.join(hidden)}, which changes what clippy is run with")
+            continue
+        if msg.get("reason") == "build-finished":
+            finished += 1
+            if msg.get("success") is not True:
+                problems.append("a clippy run did not succeed, so its crates were not all counted")
+            continue
+        package = msg.get("package_id", "")
+        if not package.startswith("path+") or "/vendor/" in package:
+            continue
+        crate = package_crate(package)
+        counts.setdefault(crate, 0)
+        lint = ((msg.get("message") or {}).get("code") or {}).get("code")
+        if msg.get("reason") != "compiler-message" or lint not in IMPLICIT_PANIC_LINTS:
+            continue
+        spans = [(s["file_name"], s["line_start"], s["column_start"])
+                 for s in msg["message"]["spans"] if s.get("is_primary")]
+        key = (crate, lint, *spans[:1])
+        if key not in seen:
+            seen.add(key)
+            counts[crate] += 1
+    if not finished:
+        problems.append("no clippy run finished")
+    return counts, problems
+
+
+def implicit_panic_problems(counts, budget):
+    """(problems, notes) of the measured `counts` against `budget`: a line holds its crate's count
+    exactly, so a count that went down lowers it in the same change, and a new crate enters at its
+    count. (`panics` only notes a lower count.)"""
+    problems, notes = [], []
+    for crate in sorted(counts.keys() | budget.keys()):
+        have, allowed = counts.get(crate), budget.get(crate)
+        if have is None:
+            problems.append(f"{crate}: in {IMPLICIT_PANIC_BUDGET} but built by no clippy run: remove its line")
+        elif allowed is None:
+            problems.append(f"{crate}: {have} implicit panics and no line in {IMPLICIT_PANIC_BUDGET}")
+        elif have > allowed:
+            problems.append(f"{crate}: {have} implicit panics over the budget of {allowed}: use checked or "
+                            f"saturating arithmetic, `.get()`, or a split on a character boundary")
+        elif have < allowed:
+            problems.append(f"{crate}: {have} implicit panics under the budget of {allowed}: lower its line "
+                            f"in {IMPLICIT_PANIC_BUDGET} to {have}")
+    return problems, notes
+
+
+def implicit_panic_raises(budget, base):
+    """The crates whose line `budget` raises over `base`: the budget only goes down."""
+    return [f"{crate}: {IMPLICIT_PANIC_BUDGET} raises its budget from {base[crate]} to {n}"
+            for crate, n in sorted(budget.items()) if n > base.get(crate, n)]
+
+
+def implicit_panic_dropped(budget, base, crates):
+    """The crates whose line `budget` drops from `base` while a manifest of theirs is still among
+    `crates`: a line goes with its crate, never alone, and an emptied file drops them all."""
+    found = [f"{crate}: {IMPLICIT_PANIC_BUDGET} drops its line of {base[crate]} while the crate is still in the tree"
+             for crate in sorted(base.keys() - budget.keys()) if crate in crates]
+    return found + implicit_panic_renamed(budget, base)
+
+
+def implicit_panic_renamed(budget, base):
+    """A change that drops lines and adds lines of names the base has none for is read as a
+    rename: the added lines may hold at most what the dropped ones held, or a crate renamed
+    would carry a higher count past implicit_panic_raises."""
+    dropped = {crate: base[crate] for crate in base.keys() - budget.keys()}
+    added = {crate: budget[crate] for crate in budget.keys() - base.keys()}
+    if not dropped or sum(added.values()) <= sum(dropped.values()):
+        return []
+    return [f"{', '.join(sorted(added))}: {IMPLICIT_PANIC_BUDGET} adds {sum(added.values())} where it drops "
+            f"{sum(dropped.values())} ({', '.join(sorted(dropped))}): a rename keeps at most the old count"]
+
+
+def implicit_panic_unlisted(budget, members):
+    """The workspace `members` with no line in `budget`: each has one, zero included."""
+    return [f"{crate}: a workspace member with no line in {IMPLICIT_PANIC_BUDGET}: add it at its measured count"
+            for crate in sorted(members - budget.keys())]
+
+
+def implicit_panic_configs(root, tracked):
+    """What hides a budget lint in the tracked Cargo configurations and clippy.toml files among
+    `tracked` (paths relative to `root`): IMPLICIT_PANIC_FLAGS in a rustflags, IMPLICIT_PANIC_ENV
+    in [env], an `include`, an IMPLICIT_PANIC_BUILD_KEYS key, an IMPLICIT_PANIC_CLIPPY_KEY. A
+    configuration that is no TOML is a finding too."""
+    found = []
+    for path in sorted(tracked):
+        parts = Path(path).parts
+        cargo = len(parts) > 1 and parts[-2] == ".cargo" and parts[-1] in ("config", "config.toml")
+        if not cargo and parts[-1] not in ("clippy.toml", ".clippy.toml"):
+            continue
+        try:
+            doc = tomllib.loads(read(root / path))
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            found.append(f"{path}: cannot be read: {e}")
+            continue
+        if not cargo:
+            found += [f"{path}: `{key}` relaxes a lint of {IMPLICIT_PANIC_BUDGET}"
+                      for key in doc if IMPLICIT_PANIC_CLIPPY_KEY.fullmatch(key)]
+            continue
+        found += [f"{path}: [env] {key} changes what clippy is run with"
+                  for key in doc.get("env", {}) if key in IMPLICIT_PANIC_ENV]
+        found += [f"{path}: `include` reads a configuration this check does not"] if "include" in doc else []
+        found += [f"{path}: [build] {key} replaces or wraps the compiler clippy runs"
+                  for key in doc.get("build", {}) if key in IMPLICIT_PANIC_BUILD_KEYS]
+        tables = [doc]
+        while tables:
+            table = tables.pop()
+            for key, value in table.items():
+                if isinstance(value, dict):
+                    tables.append(value)
+                elif key == "rustflags":
+                    flags = value.split() if isinstance(value, str) else value
+                    found += [f"{path}: rustflags `{flag}` allows or caps the lints of {IMPLICIT_PANIC_BUDGET}"
+                              for flag in flags if isinstance(flag, str) and IMPLICIT_PANIC_FLAGS.fullmatch(flag)]
+    return found
+
+
+# `clippy` or `debug_assertions` as a name, not as the head of a `clippy::` lint path.
+IMPLICIT_PANIC_CFG_NAME = re.compile(r"\b(clippy|debug_assertions)\b(?!\s*::)")
+
+
+def implicit_panic_cfgs(root, tracked, members):
+    """The tracked .rs files of the workspace members (directories relative to `root`), vendored
+    crates aside as in implicit_panic_counts, that name
+    `clippy` or `debug_assertions` outside a `clippy::` path. Under `cfg(not(clippy))` code is
+    hidden from clippy, and under `cfg(not(debug_assertions))` from the dev profile clippy builds,
+    while the release build compiles it. The whole file is read, not only the `cfg(` and
+    `cfg_attr(` attributes: a macro can take the predicate as an argument."""
+    found = []
+    for path in sorted(tracked):
+        if not path.endswith(".rs") or "/vendor/" in path or not any(path.startswith(f"{m}/") for m in members):
+            continue
+        try:
+            text = read(root / path)
+        except OSError as e:
+            found.append(f"{path}: cannot be read: {e}")
+            continue
+        for n, line in enumerate(text.split("\n"), 1):
+            found += [f"{path}:{n}: names `{m.group(1)}`, which a `cfg` can hide code from clippy with"
+                      for m in IMPLICIT_PANIC_CFG_NAME.finditer(line)]
+    return found
+
+
+def workspace_crates(root=None):
+    """{package name: directory} of the members of the root workspace."""
+    root = root or ROOT
+    crates = {}
+    for member in tomllib.loads(read(root / "Cargo.toml"))["workspace"]["members"]:
+        crates[tomllib.loads(read(root / member / "Cargo.toml"))["package"]["name"]] = root / member
+    return crates
+
+
+def local_crates():
+    """The package names of the manifests under RS_DIRS, workspace members or not."""
+    return {tomllib.loads(read(m)).get("package", {}).get("name") for d in RS_DIRS for m in walk(ROOT / d, "Cargo.toml")}
+
+
+@check("implicit-panics", "Implicit panics (overflow, index, string slice) per crate do not grow")
+def check_implicit_panics():
+    r = Result()
+    try:
+        budget = implicit_panic_budget(read(ROOT / IMPLICIT_PANIC_BUDGET))
+        crates = workspace_crates()
+    except (OSError, ValueError, KeyError) as e:
+        r.fail(str(e))
+        return r
+    members = set(crates)
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = [f for f in listed.stdout.split("\0") if f]
+    member_dirs = [d.relative_to(ROOT).as_posix() for d in crates.values()]
+    for problem in implicit_panic_configs(ROOT, tracked) + implicit_panic_cfgs(ROOT, tracked, member_dirs):
+        r.fail(problem)
+    for problem in implicit_panic_unlisted(budget, members):
+        r.fail(problem)
+    if BASE_REF is not None:
+        # git's own words tell a budget the change adds from a base that cannot be read.
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{IMPLICIT_PANIC_BUDGET}"],
+                               capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"})
+        try:
+            if shown.returncode == 0:
+                base = implicit_panic_budget(shown.stdout)
+                for problem in implicit_panic_raises(budget, base) + implicit_panic_dropped(budget, base, local_crates()):
+                    r.fail(problem)
+            elif "does not exist" not in shown.stderr and "but not in" not in shown.stderr:
+                r.fail(f"git show {BASE_REF}:{IMPLICIT_PANIC_BUDGET}: {shown.stderr.strip()}")
+        except ValueError as e:
+            r.fail(f"{BASE_REF}: {e}")
+    cargo = os.environ.get(IMPLICIT_PANIC_CARGO)
+    if not cargo:
+        r.note(f"clippy not run, only the budget read: {IMPLICIT_PANIC_CARGO}=\"bash forge/test/shell/rig.sh "
+               f"cargo\" measures it")
+        return r
+    lines = []
+    for run in IMPLICIT_PANIC_RUNS:
+        args = [*cargo.split(), "clippy", "--locked", *run, "--all-features", "--message-format=json",
+                "--", *(arg for lint in IMPLICIT_PANIC_LINTS for arg in ("--force-warn", lint))]
+        try:
+            p = subprocess.run(args, cwd=ROOT, stdout=subprocess.PIPE, text=True, env=implicit_panic_env(os.environ))
+        except OSError as e:
+            r.fail(f"{' '.join(args)}: {e}")
+            return r
+        if p.returncode != 0:
+            r.fail(f"{' '.join(args)}: exit {p.returncode}")
+            return r
+        lines += p.stdout.split("\n")
+    try:
+        counts, problems = implicit_panic_counts(lines)
+    except (ValueError, KeyError, TypeError) as e:
+        r.fail(f"clippy's JSON could not be read: {e!r}")
+        return r
+    if not problems:
+        problems, notes = implicit_panic_problems(counts, budget)
+        r.notes += notes
+    for problem in problems:
+        r.fail(problem)
+    return r
+
+# --------------------------------------------------------------------------- #
+# panic-hook — a shipped program logs its panic before it aborts
+# --------------------------------------------------------------------------- #
+
+# The first statement of every shipped program's `main` (#1352): with core dumps off (doc_session.md
+# SN8) the hook's message, place, thread and backtrace are all a crash leaves.
+PANIC_HOOK = "athanor_unit::panic::install();"
+# A program whose `main` starts with something else: the hook follows it at once. The greeter is
+# confined first, while it is the only thread, and refuses core dumps, and then installs the hook
+# (maintainer decision, 2026-11-21).
+PANIC_HOOK_AFTER = {
+    "athanor-greeter-ui": r"if\s+let\s+Err\(err\)\s*=\s*sandbox::ensure_single_threaded\(\)[^{]*"
+                          r"apply_landlock_sandbox\(\)[^{]*forbid_core_dumps\(\)[^{]*\{[^{}]*\}\s*",
+}
+# athanor-lock does not depend on athanor-unit yet: the lock pull request (LP18 step 2) adds the
+# hook and removes this entry. The set only shrinks.
+PANIC_HOOK_PENDING = {"athanor-lock"}
+# What a hooked program may take from tracing_subscriber: a filter, and the trait that installs
+# the subscriber athanor_unit::journal builds. Any other subscriber writes the hook's report to
+# the journal without the `<3>` that sets its priority, and with colour codes.
+PANIC_HOOK_SUBSCRIBER = re.compile(r"\btracing_subscriber\b(?:\s*::\s*(\{[^}]*\}|[\w\s:]+))?")
+PANIC_HOOK_SUBSCRIBER_ITEM = re.compile(r"EnvFilter\b.*|util::SubscriberInitExt|util::\{SubscriberInitExt\}")
+
+
+def program_mains(crate_dir):
+    """The source files of a crate's programs: src/main.rs, src/bin/, and each [[bin]] path."""
+    manifest = tomllib.loads(read(crate_dir / "Cargo.toml"))
+    found = {crate_dir / b["path"] for b in manifest.get("bin", []) if "path" in b}
+    found |= {p for p in [crate_dir / "src" / "main.rs"] if p.exists()}
+    bins = crate_dir / "src" / "bin"
+    if bins.is_dir():
+        found |= set(bins.glob("*.rs")) | set(bins.glob("*/main.rs"))
+    return sorted(found)
+
+
+def panic_hook_problems(root=None):
+    """The shipped programs whose `main` does not start with PANIC_HOOK, or with what
+    PANIC_HOOK_AFTER names and then PANIC_HOOK: every program of a workspace member that
+    experimental/EXEMPT does not list, but PANIC_HOOK_PENDING."""
+    root = root or ROOT
+    exempt_file = root / "experimental" / "EXEMPT"
+    exempt = ({ln.strip() for ln in read(exempt_file).split("\n") if ln.strip() and not ln.startswith("#")}
+              if exempt_file.exists() else set())
+    problems = []
+    for name, crate_dir in workspace_crates(root).items():
+        if name in exempt or name in PANIC_HOOK_PENDING:
+            continue
+        first = re.compile(r"\bfn\s+main\s*\(\s*\)[^{]*\{\s*" + PANIC_HOOK_AFTER.get(name, "") + re.escape(PANIC_HOOK))
+        mains = program_mains(crate_dir)
+        for main in mains:
+            if not main.exists():
+                problems.append(f"{main.relative_to(root)}: a [[bin]] path of {name} that does not exist")
+            elif not first.search(without_literals(without_test_items(read(main)))):
+                problems.append(f"{main.relative_to(root)}: `main` does not start with `{PANIC_HOOK}`")
+        if mains:
+            problems += panic_hook_subscriber_problems(root, crate_dir)
+    return problems
+
+
+def panic_hook_subscriber_problems(root, crate_dir):
+    """`path:line` of each subscriber a hooked program sets up outside athanor_unit::journal,
+    outside tests: a use of tracing_subscriber other than PANIC_HOOK_SUBSCRIBER_ITEM, or a
+    `set_global_default`. Limit: a subscriber of another crate that the program calls is not seen."""
+    files = sorted(walk(crate_dir / "src", ".rs"))
+    test_modules = test_module_files(files)
+    found = []
+    for p in files:
+        if is_test_file(p) or p in test_modules:
+            continue
+        txt = without_literals(without_test_items(read(p)))
+        bad = [m for m in PANIC_HOOK_SUBSCRIBER.finditer(txt)
+               if not (m.group(1) and all(PANIC_HOOK_SUBSCRIBER_ITEM.fullmatch(item)
+                                          for item in re.split(r"\s*,\s*", re.sub(r"\s+", "", m.group(1)).strip("{},"))))]
+        bad += list(re.finditer(r"\bset_global_default\s*\(", txt))
+        found += [f"{p.relative_to(root)}:{txt.count(chr(10), 0, m.start()) + 1}: a subscriber other than "
+                  "athanor_unit::journal's, which writes the panic report at no journal priority"
+                  for m in sorted(bad, key=lambda m: m.start())]
+    return found
+
+
+@check("panic-hook", "Every shipped program installs the panic hook first in main and logs through athanor_unit::journal")
+def check_panic_hook():
+    r = Result()
+    for problem in panic_hook_problems():
+        r.fail(problem)
+    return r
+
+
 # A test that runs a script reaching system/tier-digests.sh and hands it a copy of
 # os.environ inherits the CI run's trust environment: on a pull request into rebase/*,
 # GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).

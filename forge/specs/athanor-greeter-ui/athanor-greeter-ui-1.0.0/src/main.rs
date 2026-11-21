@@ -54,6 +54,8 @@ fn main() -> glib::ExitCode {
         );
         return glib::ExitCode::FAILURE;
     }
+    // Straight after the confinement, before anything else can panic (#1352).
+    athanor_unit::panic::install();
 
     // Before GTK initialises, and while this is still the only thread: setting an
     // environment variable is not thread-safe, and the Tokio runtime below starts a
@@ -63,12 +65,7 @@ fn main() -> glib::ExitCode {
         std::env::set_var("GSK_RENDERER", renderer);
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    athanor_unit::journal::init_stdout();
 
     i18n::init();
 

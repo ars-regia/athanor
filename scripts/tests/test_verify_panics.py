@@ -173,5 +173,28 @@ class VendoredTest(unittest.TestCase):
         self.assertFalse(verify.vendored("system/athanor-sal/src/a11y.rs"))
 
 
+class ExperimentalTest(unittest.TestCase):
+    """Only `experimental/` at the root of the repository is pruned: a directory of that name
+    inside a crate is code that ships, and its panics count."""
+
+    def test_a_nested_experimental_directory_still_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            nested = root / "system" / "athanor-x" / "src" / "experimental"
+            nested.mkdir(parents=True)
+            (nested / "mod.rs").write_text("fn f() { g().unwrap(); }\n")
+            (root / "experimental").mkdir()
+            (root / "experimental" / "lib.rs").write_text("fn f() { g().unwrap(); }\n")
+            with mock.patch.object(verify, "ROOT", root):
+                walked = [p.relative_to(root).as_posix() for p in verify.walk(root, ".rs")]
+                res = verify.check_panics()
+        self.assertEqual(walked, ["system/athanor-x/src/experimental/mod.rs"])
+        self.assertEqual(
+            res.problems,
+            ["system/athanor-x/src/experimental/mod.rs:1: .unwrap() over the budget of 0, "
+             "propagate with `?`"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
