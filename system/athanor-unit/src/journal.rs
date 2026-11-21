@@ -46,7 +46,7 @@ pub fn init() {
 }
 
 /// The journal subscriber, writing to `writer`.
-fn subscriber<W>(writer: W) -> impl Subscriber + Send + Sync + 'static
+pub(crate) fn subscriber<W>(writer: W) -> impl Subscriber + Send + Sync + 'static
 where
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
 {
