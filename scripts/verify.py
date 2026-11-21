@@ -3840,7 +3840,8 @@ def check_allow_list():
 # --------------------------------------------------------------------------- #
 
 # Parameters the kernel profile decided against (docs/architecture/doc_kernel_profile.md,
-# "Command line"). A name ending in a dot is a prefix. profile.toml is the single source of
+# "Command line"). A name ending in a dot or an equals sign is a prefix; any other name is the
+# parameter bare or with a value (`rd.break` and `rd.break=pre-mount`). profile.toml is the single source of
 # the base command line and kernel_profile.py check holds its generated files to it; this
 # keeps a contradicting parameter out of the manifest and of the variant files beside it.
 REJECTED_PARAMETERS = {
@@ -3851,6 +3852,14 @@ REJECTED_PARAMETERS = {
     "amd_iommu=on": "not a parameter of the amd_iommu driver, which logs it as unknown",
     "lam=on": "not an x86 parameter",
     "arm64.mte=on": "not an x86 parameter",
+    "selinux=": "switches SELinux off at boot, against D20 and TM7",
+    "enforcing=": "puts SELinux in permissive mode at boot, against D20 and TM7",
+    "security=": "selects one legacy major security module at boot and can switch SELinux off, against D20 and TM7",
+    "lsm=": "replaces the compiled-in security module order and can omit SELinux, IPE and Yama (doc_kernel_profile.md section 5)",
+    "init=": "replaces PID 1 with another program, outside the image's trust chain (doc_kernel_profile.md section 7)",
+    "rdinit=": "replaces the initramfs' first program with another one, outside the image's trust chain (doc_kernel_profile.md section 7)",
+    "rd.break": "stops the initramfs at a root shell, against rd.shell=0 (doc_kernel_profile.md section 6)",
+    "cfi=": "weakens or disables kCFI at boot; cfi=warn is for one diagnostic boot only (forge/specs/azoth/AGENTS.md)",
 }
 
 # The files that carry the kernel command line: the boot line of azoth and every kargs.d
@@ -3860,6 +3869,23 @@ KARGS_FILES = [
     "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml",
     "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml",
 ]
+
+
+def cmdline_words(text):
+    """The parameters of a kernel command line: split on whitespace outside double quotes, as the
+    kernel's next_arg does (a quoted run is one parameter, an unclosed quote runs to the end), with
+    the quotes dropped so that `"selinux=0"` is read as selinux=0 (it can only reject more). The kernel
+    counts bytes such as 0xA0 as whitespace, so a character outside printable ASCII, tab and line
+    breaks is refused (ValueError) instead of being read as part of a word."""
+    if re.search(r"[^\x20-\x7e\t\n\r]", text):
+        raise ValueError("non-ASCII byte in the command line")
+    return [word.replace('"', "").strip() for word in re.findall(r'(?:[^\s"]|"[^"]*"?)+', text)]
+
+
+def cmdline_name(parameter):
+    """PARAMETER with `-` read as `_` in its name, as the kernel's parameqn does (not in its value)."""
+    name, equals, value = parameter.partition("=")
+    return name.replace("-", "_") + equals + value
 
 
 def cmdline_problems(root=None):
@@ -3874,14 +3900,27 @@ def cmdline_problems(root=None):
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as err:
             problems.append(f"{relative}: cannot read the command line ({err})")
 
-    read_site(CMDLINE_FILE, str.split)
+    def kargs(text):
+        elements = tomllib.loads(text)["kargs"]
+        if not isinstance(elements, list):
+            raise ValueError("kargs is not an array")
+        if not all(isinstance(element, str) for element in elements):
+            raise ValueError("a kargs element is not a string")
+        return [parameter for element in elements for parameter in cmdline_words(element)]
+
+    read_site(CMDLINE_FILE, cmdline_words)
     for relative in KARGS_FILES:
-        read_site(relative, lambda text: tomllib.loads(text)["kargs"])
+        read_site(relative, kargs)
 
     for site, parameters in found.items():
         for parameter in parameters:
             for rejected, why in REJECTED_PARAMETERS.items():
-                if parameter == rejected or (rejected.endswith(".") and parameter.startswith(rejected)):
+                name, rejected = cmdline_name(parameter), cmdline_name(rejected)
+                if rejected.endswith((".", "=")):
+                    matched = name.startswith(rejected)
+                else:
+                    matched = name == rejected or name.startswith(rejected + "=")
+                if matched:
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
 
