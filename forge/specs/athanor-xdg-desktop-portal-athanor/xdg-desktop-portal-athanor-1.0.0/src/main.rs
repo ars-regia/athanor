@@ -34,6 +34,7 @@ pub enum Error {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     let Some(runtime) = env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)

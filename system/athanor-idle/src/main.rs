@@ -40,6 +40,7 @@ struct Prefs {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
