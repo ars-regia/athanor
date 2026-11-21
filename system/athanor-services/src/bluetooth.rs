@@ -89,18 +89,37 @@ pub struct BluetoothState {
     pub refused: u32,
 }
 
+/// The icon the theme has for each of BlueZ's `Icon` kinds; the last, generic, for any other.
+const KINDS: [(&[&str], &str); 8] = [
+    (&["audio-headphones", "audio-headset"], "audio-headphones-symbolic"),
+    (&["audio-card", "audio-speakers"], "audio-speakers-symbolic"),
+    (&["input-keyboard"], "input-keyboard-symbolic"),
+    (&["input-mouse", "input-tablet"], "input-mouse-symbolic"),
+    (&["input-gaming"], "input-gaming-symbolic"),
+    (&["phone"], "phone-symbolic"),
+    (&["computer"], "computer-symbolic"),
+    (&[], "bluetooth-symbolic"),
+];
+
+/// Every icon [`icon`] maps to, from the same table: a page looks them up before it knows its
+/// devices' kinds.
+pub const ICONS: [&str; KINDS.len()] = {
+    let mut names = [""; KINDS.len()];
+    let mut i = 0;
+    while i < KINDS.len() {
+        names[i] = KINDS[i].1;
+        i += 1;
+    }
+    names
+};
+
 /// BlueZ's `Icon` property, mapped to an icon the theme has; anything else is generic.
 pub fn icon(bluez: &str) -> &'static str {
-    match bluez {
-        "audio-headphones" | "audio-headset" => "audio-headphones-symbolic",
-        "audio-card" | "audio-speakers" => "audio-speakers-symbolic",
-        "input-keyboard" => "input-keyboard-symbolic",
-        "input-mouse" | "input-tablet" => "input-mouse-symbolic",
-        "input-gaming" => "input-gaming-symbolic",
-        "phone" => "phone-symbolic",
-        "computer" => "computer-symbolic",
-        _ => "bluetooth-symbolic",
-    }
+    let generic = KINDS[KINDS.len() - 1].1;
+    KINDS
+        .iter()
+        .find(|(kinds, _)| kinds.contains(&bluez))
+        .map_or(generic, |(_, name)| name)
 }
 
 fn name(props: &Props, key: &str) -> Option<String> {
@@ -1033,6 +1052,15 @@ mod tests {
             vec![("Alias", Variant::from("CC-DD"))],
         );
         objects
+    }
+
+    #[test]
+    fn every_icon_a_device_maps_to_is_in_the_list() {
+        let named = KINDS.iter().flat_map(|(kinds, _)| kinds.iter().copied());
+        for kind in named.chain(["printer", ""]) {
+            assert!(ICONS.contains(&icon(kind)), "{kind:?} maps to an unlisted icon");
+        }
+        assert_eq!(icon("printer"), "bluetooth-symbolic");
     }
 
     #[test]
