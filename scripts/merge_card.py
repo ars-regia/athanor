@@ -135,6 +135,13 @@ def check_state(item):
 def read_checks(repo, head):
     """The check runs and the commit statuses of the head, as entries of one shape."""
     items = []
+    # A check run names its check suite, one per workflow run; the workflow is what a later
+    # run of the same check supersedes, within one event, so each suite is mapped to both.
+    workflow = {
+        run["check_suite_id"]: f"{run['workflow_id']}/{run['event']}"
+        for page in pages(f"repos/{repo}/actions/runs?head_sha={head}")
+        for run in page["workflow_runs"]
+    }
     for page in pages(f"repos/{repo}/commits/{head}/check-runs"):
         for r in page["check_runs"]:
             items.append(
@@ -144,7 +151,9 @@ def read_checks(repo, head):
                     "status": (r["status"] or "").upper(),
                     "conclusion": (r["conclusion"] or "").upper(),
                     "startedAt": r["started_at"] or "",
-                    "workflowName": str(r["check_suite"]["id"]),
+                    "workflowName": str(
+                        workflow.get(r["check_suite"]["id"], r["check_suite"]["id"])
+                    ),
                 }
             )
     for page in pages(f"repos/{repo}/commits/{head}/status"):
@@ -169,13 +178,11 @@ def latest_checks(items):
         state = check_state(item)
         stamp = item.get("startedAt") or item.get("createdAt") or ""
         old = found.get(key)
-        if (
-            old is None
-            or (state == "pending") > (old[0] == "pending")
-            or ((state == "pending") == (old[0] == "pending") and stamp >= old[2])
-        ):
-            found[key] = (state, item, stamp)
-    return {key: (state, item) for key, (state, item, _) in found.items()}
+        # Pending first, then the newest, then the worse of two at one instant.
+        rank = (state == "pending", stamp, state == "fail")
+        if old is None or rank >= old[3]:
+            found[key] = (state, item, stamp, rank)
+    return {key: (state, item) for key, (state, item, _, _) in found.items()}
 
 
 def required_checks(rules, protection):
