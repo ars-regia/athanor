@@ -65,6 +65,25 @@ class PanicHookTest(unittest.TestCase):
             with self.subTest(main=main):
                 self.assertEqual(self.problems({greeter: ("", {"src/main.rs": main})}), problems)
 
+    def test_a_hooked_program_logs_through_the_journal_subscriber(self):
+        journal = (
+            "use tracing_subscriber::util::SubscriberInitExt;\n"
+            "fn log() {\n    let filter = tracing_subscriber::EnvFilter::new(\"info\");\n"
+            "    athanor_unit::journal::with_filter(filter, std::io::stdout).try_init();\n}\n"
+        )
+        crates = {
+            "fmt": ("", {"src/main.rs": HOOKED + "fn log() {\n    tracing_subscriber::fmt().init();\n}\n"}),
+            "imported": ("", {"src/main.rs": HOOKED, "src/log.rs": "use tracing_subscriber::{EnvFilter, fmt};\n"}),
+            "renamed": ("", {"src/main.rs": HOOKED, "src/log.rs": "use tracing_subscriber as ts;\n"}),
+            "global": ("", {"src/main.rs": HOOKED + "fn g(s: S) {\n    tracing::subscriber::set_global_default(s);\n}\n"}),
+            "journal": ("", {"src/main.rs": HOOKED + journal}),
+            "tested": ("", {"src/main.rs": HOOKED + "#[cfg(test)]\nmod tests {\n    fn t() { tracing_subscriber::fmt().init(); }\n}\n"}),
+            "lib": ("", {"src/lib.rs": "pub fn f() { tracing_subscriber::fmt().init(); }\n"}),
+        }
+        self.assertEqual(self.problems(crates), [
+            "fmt/src/main.rs", "global/src/main.rs", "imported/src/log.rs", "renamed/src/log.rs",
+        ])
+
     def test_the_pending_set_only_shrinks(self):
         self.assertLessEqual(verify.PANIC_HOOK_PENDING, {"athanor-lock"})
 

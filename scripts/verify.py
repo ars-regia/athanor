@@ -7484,6 +7484,11 @@ PANIC_HOOK_AFTER = {
 # athanor-lock does not depend on athanor-unit yet: the lock pull request (LP18 step 2) adds the
 # hook and removes this entry. The set only shrinks.
 PANIC_HOOK_PENDING = {"athanor-lock"}
+# What a hooked program may take from tracing_subscriber: a filter, and the trait that installs
+# the subscriber athanor_unit::journal builds. Any other subscriber writes the hook's report
+# without the `<3>` that sets its journal priority, and with colour codes.
+PANIC_HOOK_SUBSCRIBER = re.compile(r"\btracing_subscriber\b(?:\s*::\s*(\{[^}]*\}|[\w\s:]+))?")
+PANIC_HOOK_SUBSCRIBER_ITEM = re.compile(r"EnvFilter\b.*|util::SubscriberInitExt|util::\{SubscriberInitExt\}")
 
 
 def program_mains(crate_dir):
@@ -7510,15 +7515,39 @@ def panic_hook_problems(root=None):
         if name in exempt or name in PANIC_HOOK_PENDING:
             continue
         first = re.compile(r"\bfn\s+main\s*\(\s*\)[^{]*\{\s*" + PANIC_HOOK_AFTER.get(name, "") + re.escape(PANIC_HOOK))
-        for main in program_mains(crate_dir):
+        mains = program_mains(crate_dir)
+        for main in mains:
             if not main.exists():
                 problems.append(f"{main.relative_to(root)}: a [[bin]] path of {name} that does not exist")
             elif not first.search(without_literals(without_test_items(read(main)))):
                 problems.append(f"{main.relative_to(root)}: `main` does not start with `{PANIC_HOOK}`")
+        if mains:
+            problems += panic_hook_subscriber_problems(root, crate_dir)
     return problems
 
 
-@check("panic-hook", "Every shipped program installs the panic hook first in main")
+def panic_hook_subscriber_problems(root, crate_dir):
+    """`path:line` of each subscriber a hooked program sets up outside athanor_unit::journal,
+    outside tests: a use of tracing_subscriber other than PANIC_HOOK_SUBSCRIBER_ITEM, or a
+    `set_global_default`. Limit: a subscriber of another crate that the program calls is not seen."""
+    files = sorted(walk(crate_dir / "src", ".rs"))
+    test_modules = test_module_files(files)
+    found = []
+    for p in files:
+        if is_test_file(p) or p in test_modules:
+            continue
+        txt = without_literals(without_test_items(read(p)))
+        bad = [m for m in PANIC_HOOK_SUBSCRIBER.finditer(txt)
+               if not (m.group(1) and all(PANIC_HOOK_SUBSCRIBER_ITEM.fullmatch(item)
+                                          for item in re.split(r"\s*,\s*", re.sub(r"\s+", "", m.group(1)).strip("{},"))))]
+        bad += list(re.finditer(r"\bset_global_default\s*\(", txt))
+        found += [f"{p.relative_to(root)}:{txt.count(chr(10), 0, m.start()) + 1}: a subscriber other than "
+                  "athanor_unit::journal's, which writes the panic report at no journal priority"
+                  for m in sorted(bad, key=lambda m: m.start())]
+    return found
+
+
+@check("panic-hook", "Every shipped program installs the panic hook first in main and logs through athanor_unit::journal")
 def check_panic_hook():
     r = Result()
     for problem in panic_hook_problems():
