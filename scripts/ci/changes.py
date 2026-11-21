@@ -115,6 +115,7 @@ AREAS = {
         "forge/scripts/retry.sh",
         "scripts/ci/security-audit.sh",
         "scripts/ci/audited-lockfiles.txt",
+        "scripts/ci/implicit-panics.txt",
         ".github/workflows/rust-security-audit.yml",
     ),
 }

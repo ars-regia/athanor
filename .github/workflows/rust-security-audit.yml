@@ -25,6 +25,7 @@ on:
       - "forge/scripts/retry.sh"
       - "scripts/ci/security-audit.sh"
       - "scripts/ci/audited-lockfiles.txt"
+      - "scripts/ci/implicit-panics.txt"
       - ".github/workflows/rust-security-audit.yml"
   # The advisory database changes without a commit: maintenance.yml calls this workflow every
   # day, and its alert job opens a ci-alert issue when the run fails (PL51).

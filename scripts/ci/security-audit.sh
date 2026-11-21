@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Rust security audit: clippy (warnings denied) over the root workspace and the toolkit's gallery,
+# the implicit panics of the root workspace against scripts/ci/implicit-panics.txt (verify.py),
 # and the advisory check of the cargo-deny policy (deny.toml) over their lockfiles and fuzz/'s, and
 # `cargo audit --deny yanked` over the vendored lockfiles of scripts/ci/audited-lockfiles.txt.
 # Licences, bans and sources of the same policy run in the pull request gate (`just check-deny`), so they are not repeated here.
@@ -17,6 +18,10 @@ cd "$root"
 cargo clippy --workspace --exclude athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee "$out/clippy.log"
 cargo clippy -p athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee -a "$out/clippy.log"
 cargo clippy --manifest-path system/athanor-sal/gallery/Cargo.toml --locked --all-targets -- -D warnings 2>&1 | tee -a "$out/clippy.log"
+# The implicit panics per crate (overflow, index, string slice) against their budget (#1352). The
+# check runs the two workspace clippy runs above again with its lints, on the same target, and
+# fails on a crate over its line, a crate without one and a line above the measured count.
+ATHANOR_IMPLICIT_PANICS_CARGO=cargo python3 -B scripts/verify.py implicit-panics 2>&1 | tee "$out/implicit-panics.log"
 
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
