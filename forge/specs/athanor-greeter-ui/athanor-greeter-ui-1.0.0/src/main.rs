@@ -54,6 +54,8 @@ fn main() -> glib::ExitCode {
         );
         return glib::ExitCode::FAILURE;
     }
+    // Straight after the confinement, before anything else can panic (#1352).
+    athanor_unit::panic::install();
 
     // Before GTK initialises, and while this is still the only thread: setting an
     // environment variable is not thread-safe, and the Tokio runtime below starts a

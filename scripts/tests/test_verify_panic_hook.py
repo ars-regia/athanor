@@ -15,6 +15,13 @@ spec.loader.exec_module(verify)
 HOOKED = "fn main() -> ExitCode {\n    athanor_unit::panic::install();\n    run()\n}\n"
 LATE = "fn main() {\n    journal::init();\n    athanor_unit::panic::install();\n}\n"
 COMMENTED = "fn main() {\n    // athanor_unit::panic::install();\n    run();\n}\n"
+CONFINE = (
+    "    if let Err(err) = sandbox::ensure_single_threaded()\n"
+    "        .and_then(|()| sandbox::apply_landlock_sandbox())\n"
+    "        .and_then(|()| sandbox::forbid_core_dumps())\n"
+    "    {\n        eprintln!(\"cannot confine: {err}\");\n        return ExitCode::FAILURE;\n    }\n"
+)
+HOOK = "    athanor_unit::panic::install();\n"
 
 
 class PanicHookTest(unittest.TestCase):
@@ -47,6 +54,19 @@ class PanicHookTest(unittest.TestCase):
             "bins/src/tool/main.rs", "comment/src/main.rs", "late/src/main.rs",
             "missing/src/gone.rs", "nested/src/bin/three/main.rs",
         ])
+
+    def test_the_greeter_installs_the_hook_right_after_its_confinement(self):
+        greeter = "athanor-greeter-ui"
+        for main, problems in (
+            ("fn main() -> ExitCode {\n" + CONFINE + HOOK + "    run()\n}\n", []),
+            ("fn main() -> ExitCode {\n" + HOOK + CONFINE + "    run()\n}\n", [f"{greeter}/src/main.rs"]),
+            ("fn main() -> ExitCode {\n" + CONFINE + "    setup();\n" + HOOK + "}\n", [f"{greeter}/src/main.rs"]),
+        ):
+            with self.subTest(main=main):
+                self.assertEqual(self.problems({greeter: ("", {"src/main.rs": main})}), problems)
+
+    def test_the_pending_set_only_shrinks(self):
+        self.assertLessEqual(verify.PANIC_HOOK_PENDING, {"athanor-lock"})
 
     def test_an_exempt_or_pending_crate_is_not_checked(self):
         pending = sorted(verify.PANIC_HOOK_PENDING)[0]
