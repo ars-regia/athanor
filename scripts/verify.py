@@ -7278,8 +7278,15 @@ IMPLICIT_PANIC_RUNS = (
     ["-p", "athanor-preview-render"],
 )
 # The cargo command the check runs clippy with. The GTK crates build only where their libraries
-# are, so measuring is opt-in: `ATHANOR_IMPLICIT_PANICS_CARGO="bash forge/test/shell/rig.sh cargo"`.
+# are, so measuring is opt-in: scripts/ci/security-audit.sh sets it in the builder (pr.yml's
+# rust_audit job), and `ATHANOR_IMPLICIT_PANICS_CARGO="bash forge/test/shell/rig.sh cargo"` locally.
+# Without it the check still fails closed on the budget file: a line raised or dropped against the
+# base, a member without a line, an `allow` of a budget lint.
 IMPLICIT_PANIC_CARGO = "ATHANOR_IMPLICIT_PANICS_CARGO"
+# An `allow` or `expect` of a budget lint, or of clippy's restriction group they belong to, hides
+# a hit from the count: refused outside tests.
+IMPLICIT_PANIC_ALLOW = re.compile(
+    r"\b(?:allow|expect)\s*\([^)]*\bclippy::(?:arithmetic_side_effects|indexing_slicing|string_slice|restriction)\b")
 
 
 def implicit_panic_budget(text):
@@ -7360,21 +7367,66 @@ def implicit_panic_raises(budget, base):
             for crate, n in sorted(budget.items()) if n > base.get(crate, n)]
 
 
+def implicit_panic_dropped(budget, base, crates):
+    """The crates whose line `budget` drops from `base` while a manifest of theirs is still among
+    `crates`: a line goes with its crate, never alone, and an emptied file drops them all."""
+    return [f"{crate}: {IMPLICIT_PANIC_BUDGET} drops its line of {base[crate]} while the crate is still in the tree"
+            for crate in sorted(base.keys() - budget.keys()) if crate in crates]
+
+
+def implicit_panic_unlisted(budget, members):
+    """The workspace `members` with no line in `budget`: each has one, zero included."""
+    return [f"{crate}: a workspace member with no line in {IMPLICIT_PANIC_BUDGET}: add it at its measured count"
+            for crate in sorted(members - budget.keys())]
+
+
+def implicit_panic_allows(files):
+    """`path:line` of each `allow` or `expect` of a budget lint outside tests in `files`."""
+    found = []
+    test_modules = test_module_files(files)
+    for p in files:
+        if is_test_file(p) or p in test_modules or vendored(rel(p)):
+            continue
+        txt = without_literals(without_test_items(read(p)))
+        found += [f"{rel(p)}:{txt.count(chr(10), 0, m.start()) + 1}" for m in IMPLICIT_PANIC_ALLOW.finditer(txt)]
+    return found
+
+
+def workspace_crates(root=None):
+    """{package name: directory} of the members of the root workspace."""
+    root = root or ROOT
+    crates = {}
+    for member in tomllib.loads(read(root / "Cargo.toml"))["workspace"]["members"]:
+        crates[tomllib.loads(read(root / member / "Cargo.toml"))["package"]["name"]] = root / member
+    return crates
+
+
+def local_crates():
+    """The package names of the manifests under RS_DIRS, workspace members or not."""
+    return {tomllib.loads(read(m)).get("package", {}).get("name") for d in RS_DIRS for m in walk(ROOT / d, "Cargo.toml")}
+
+
 @check("implicit-panics", "Implicit panics (overflow, index, string slice) per crate do not grow")
 def check_implicit_panics():
     r = Result()
     try:
         budget = implicit_panic_budget(read(ROOT / IMPLICIT_PANIC_BUDGET))
-    except (OSError, ValueError) as e:
+        members = set(workspace_crates())
+    except (OSError, ValueError, KeyError) as e:
         r.fail(str(e))
         return r
+    for at in implicit_panic_allows(list(rust_files())):
+        r.fail(f"{at}: an `allow` of a lint of {IMPLICIT_PANIC_BUDGET} outside tests hides an implicit panic")
+    for problem in implicit_panic_unlisted(budget, members):
+        r.fail(problem)
     if BASE_REF is not None:
         # git's own words tell a budget the change adds from a base that cannot be read.
         shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{IMPLICIT_PANIC_BUDGET}"],
                                capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"})
         try:
             if shown.returncode == 0:
-                for problem in implicit_panic_raises(budget, implicit_panic_budget(shown.stdout)):
+                base = implicit_panic_budget(shown.stdout)
+                for problem in implicit_panic_raises(budget, base) + implicit_panic_dropped(budget, base, local_crates()):
                     r.fail(problem)
             elif "does not exist" not in shown.stderr and "but not in" not in shown.stderr:
                 r.fail(f"git show {BASE_REF}:{IMPLICIT_PANIC_BUDGET}: {shown.stderr.strip()}")
