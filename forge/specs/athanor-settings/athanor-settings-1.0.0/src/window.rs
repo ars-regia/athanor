@@ -27,6 +27,12 @@ pub const BUILT: &[&str] = &["about"];
 /// A row of a read-only page: its label, and its value when one was read.
 type Line = (String, Option<String>);
 
+/// The target of the oldest queued `Show`, which leaves the queue.
+pub fn take_show(registry: &Registry, shows: &RefCell<VecDeque<String>>) -> Option<Target> {
+    let text = shows.borrow_mut().pop_front()?;
+    Some(resolve(registry, &text))
+}
+
 /// What a `Show` of `text` opens: the target, when it is a page this build draws; otherwise
 /// the landing page, with one journal line (SE4).
 pub fn resolve(registry: &Registry, text: &str) -> Target {
@@ -453,6 +459,15 @@ mod tests {
             Rc::default(),
             None,
         )
+    }
+
+    #[test]
+    fn a_show_queued_while_the_window_closes_is_taken_once_in_order() {
+        let registry = Registry::new();
+        let shows = RefCell::new(VecDeque::from(["about".to_owned(), String::new()]));
+        assert_eq!(take_show(&registry, &shows), Some(Target::Page("about")));
+        assert_eq!(take_show(&registry, &shows), Some(Target::Landing));
+        assert_eq!(take_show(&registry, &shows), None);
     }
 
     #[test]

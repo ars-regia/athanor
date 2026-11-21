@@ -116,44 +116,50 @@ fn main() -> ExitCode {
         // A page a later build no longer draws opens the landing page, as a Show of it would.
         Some(target) => First::Reopen(window::resolve(&registry, &target.to_string())),
         None => First::Show(loop {
-            let next = shows.borrow_mut().pop_front();
-            if let Some(text) = next {
-                break window::resolve(&registry, &text);
+            if let Some(target) = window::take_show(&registry, &shows) {
+                break target;
             }
             glib::MainContext::default().iteration(true);
         }),
     };
 
-    let glib = match GlibSource::new() {
-        Ok(glib) => glib,
-        Err(error) => {
-            tracing::error!(%error, "cannot run GLib's main context");
+    let mut first = first;
+    // A `Show` that was accepted always opens a window: one that arrived while the last window
+    // was closing is still queued when the run ends, so the next run opens it.
+    loop {
+        let glib = match GlibSource::new() {
+            Ok(glib) => glib,
+            Err(error) => {
+                tracing::error!(%error, "cannot run GLib's main context");
+                return ExitCode::FAILURE;
+            }
+        };
+        let info = Rc::default();
+        info::fetch(&info);
+        let settings = Settings::new(
+            Registry::new(),
+            look::look(&Appearance::read()),
+            i18n::is_rtl(),
+            first,
+            info,
+            shows.clone(),
+            Some(state_dir.clone()),
+        );
+        // ponytail: the run ends with the window until Sal keeps a run without one (SL1); each
+        // opening is then a cold start, and the unit is started again by the bus.
+        if let Err(error) = driver::run_with(settings, glib) {
+            tracing::error!(%error, "Settings stopped");
             return ExitCode::FAILURE;
         }
-    };
-    let info = Rc::default();
-    info::fetch(&info);
-    let settings = Settings::new(
-        registry,
-        look::look(&Appearance::read()),
-        i18n::is_rtl(),
-        first,
-        info,
-        shows,
-        Some(state_dir.clone()),
-    );
-    // ponytail: the run, and the process, end with the window until Sal keeps a run without
-    // one (SL1); each opening is then a cold start, and the unit is started again by the bus.
-    match driver::run_with(settings, glib) {
-        Ok(()) => {
-            if let Err(error) = window_state::clear(&state_dir) {
-                tracing::warn!(%error, "cannot clear the window state; a restart reopens it");
-            }
-            ExitCode::SUCCESS
+        if let Err(error) = window_state::clear(&state_dir) {
+            tracing::warn!(%error, "cannot clear the window state; a restart reopens it");
         }
-        Err(error) => {
-            tracing::error!(%error, "Settings stopped");
-            ExitCode::FAILURE
+        // Dispatch the calls the bus has already read, so the queue is complete.
+        let context = glib::MainContext::default();
+        while context.iteration(false) {}
+        match window::take_show(&Registry::new(), &shows) {
+            Some(target) => first = First::Show(target),
+            None => return ExitCode::SUCCESS,
         }
     }
 }
