@@ -8629,12 +8629,36 @@ def trusted_ref_problems(scripts):
     return out
 
 
-@check("trusted-refs", "Every trusted-ref default of the signing scripts names only iso-v0 (issue #1346)")
+# Files that run signing or publishing on a branch: `main` is not one of the branches that start
+# them. A line holds it when a `branches: [...]` list or a `refs/heads/main` condition names it.
+MAIN_BRANCH_FILES = (
+    ".github/workflows/azoth-signer.yml",
+    ".github/workflows/kernel-build.yml",
+    "forge/scripts/publish_tiers.sh",
+)
+MAIN_BRANCH_LINE = re.compile(r"branches:\s*\[[^\]]*(?<![\w-])main(?![\w-])[^\]]*\]|refs/heads/main(?![\w-])")
+
+
+def main_branch_problems(files):
+    """`files` maps a path to its text; a comment line is not read."""
+    out = []
+    for path in MAIN_BRANCH_FILES:
+        text = files.get(path)
+        if text is None:
+            out.append(f"{path}: cannot be read")
+            continue
+        out.extend(f"{path}:{n}: names the retired main branch (issue #1346)"
+                   for n, line in enumerate(text.splitlines(), 1)
+                   if not line.lstrip().startswith("#") and MAIN_BRANCH_LINE.search(line))
+    return out
+
+
+@check("trusted-refs", "Every trusted-ref default of the signing scripts names only iso-v0, and no signing or publishing trigger names main (issue #1346)")
 def check_trusted_refs():
     r = Result()
-    scripts = {path: (ROOT / path).read_text() if (ROOT / path).is_file() else None
-               for path, _ in TRUSTED_REF_DEFAULTS}
-    for problem in trusted_ref_problems(scripts):
+    texts = {path: (ROOT / path).read_text() if (ROOT / path).is_file() else None
+             for path in [path for path, _ in TRUSTED_REF_DEFAULTS] + list(MAIN_BRANCH_FILES)}
+    for problem in trusted_ref_problems(texts) + main_branch_problems(texts):
         r.fail(problem)
     return r
 

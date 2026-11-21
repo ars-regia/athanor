@@ -30,6 +30,24 @@ class TrustedRefs(unittest.TestCase):
         del s["system/tier-digests.sh"]
         self.assertEqual(len(verify.trusted_ref_problems(s)), 2)
 
+    def test_main_in_a_trigger_condition_or_case_fails(self):
+        files = {path: "on:\n  push:\n    branches: [iso-v0]\n" for path in verify.MAIN_BRANCH_FILES}
+        self.assertEqual(verify.main_branch_problems(files), [])
+        for line in (
+            "    branches: [iso-v0, main]",
+            "    branches: [main]",
+            "    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'",
+            "    refs/heads/iso-v0 | refs/heads/main) TAG=latest ;;",
+        ):
+            with self.subTest(line=line):
+                bad = dict(files, **{verify.MAIN_BRANCH_FILES[0]: line + "\n"})
+                self.assertEqual(len(verify.main_branch_problems(bad)), 1)
+
+    def test_a_comment_or_a_longer_name_is_not_main(self):
+        text = "# refs/heads/main\n    branches: [main-evil]\n    if: x == 'refs/heads/main-evil'\n"
+        files = {path: text for path in verify.MAIN_BRANCH_FILES}
+        self.assertEqual(verify.main_branch_problems(files), [])
+
     def test_the_repository_passes(self):
         self.assertEqual(verify.check_trusted_refs().problems, [])
 
