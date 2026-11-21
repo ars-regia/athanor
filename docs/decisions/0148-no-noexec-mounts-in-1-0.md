@@ -33,7 +33,7 @@ fs-verity. D23 of the same document already keeps the home and `/tmp` without `n
    The `noexec` default of removable media and drives mounted by udisks
    ([ADR-0025](0025-noexec-exception-for-udisks.md), `doc_disks.md` DK20 B) is not changed.
 2. **fs-verity on the ostree objects is in 1.0 only if btrfs takes it without a migration** of
-   on-disk state on installed machines. Otherwise it comes after 1.0, with the 1.1 seal. Whether
+   on-disk state on installed machines. Otherwise it comes after 1.0. Whether
    btrfs takes it so is open: the plan of the change reads it, and a migration is not started on
    this record.
 
