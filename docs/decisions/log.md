@@ -18,7 +18,7 @@ A line has the form `YYYY-MM-DD: what was decided. Where.` Documents cite a deci
 ## Backfill
 
 The lines below are the decisions that `CLAUDE.md`, `.claude/rules/` and the specifications
-cite as "maintainer decision, <date>" on 2026-11-21. Each states what was decided and links to
+cite as "maintainer decision, <date>" on 2026-11-21; every date they cite has at least one line. Each states what was decided and links to
 where it is recorded; where one document carries more than about eight decisions of a date, one
 line names the document with a short summary, and the document holds the text of each.
 A line says only what its source records.
@@ -80,6 +80,8 @@ A line says only what its source records.
 - 2026-10-15, #144: the unit fix for the volume keys shipped earlier than the retirement step. [doc_osd](../architecture/doc_osd.md) (four amendments).
 - 2026-10-15, #144: the portal's `writable` follows the real access of the user to the file. [doc_portal](../architecture/doc_portal.md).
 - 2026-10-14: what waits on the maintainer is reported with the paste-ready command. [.claude/rules/workflow.md](../../.claude/rules/workflow.md). With 2026-10-08 and 2026-10-09, every merge goes through a real approval: [ADR-0103](0103-audit-5-decisions.md) D2, cited in [CLAUDE.md](../../CLAUDE.md).
+- 2026-10-14: the greeter's account list and "Other user", decisions D17 to D23. [doc_lock_and_prompts](../architecture/doc_lock_and_prompts.md) LP19, section 6.
+- 2026-10-09: low battery belongs to `athanor-sessiond`; one process watches UPower, not two (ADR-0100). [doc_notification_center](../architecture/doc_notification_center.md) NC13.
 - 2026-10-09: the audit calendar and the audit types. [ADR-0102](0102-audit-calendar.md).
 - 2026-10-09: UD51 stays; it is not part of the Bridge. [doc_update_delivery](../architecture/doc_update_delivery.md).
 - 2026-10-08: the at-spi bind is kept into broker-confined applications, a stated leak that ends at the reader gate (AX18 step 6). [ADR-0099](0099-desktop-specs-batch-4.md), [doc_accessibility](../architecture/doc_accessibility.md), [doc_threat_model](../architecture/doc_threat_model.md).
@@ -91,7 +93,17 @@ A line says only what its source records.
 - 2026-10-08: the greeter, `athanor-greeter-session` and the user manager's environment set `GTK_IM_MODULE=simple`. [doc_languages](../architecture/doc_languages.md).
 - 2026-10-08: in 1.0 disk encryption is a choice the person makes in the installer, not a default. [doc_platform_experience](../architecture/doc_platform_experience.md), [doc_kernel_profile](../architecture/doc_kernel_profile.md).
 - 2026-10-08: remote login is off by default on new installs (ADR-0089). [doc_software](../architecture/doc_software.md).
+- 2026-10-06: Athanor does not build its own disk utility; GNOME Disks is the disk utility (A2-14, #159). [doc_disks](../architecture/doc_disks.md).
 - 2026-10-06: `athanor-sessiond` and `athanor-a11y-gate` are guards (#156): restarted always, never given up. [doc_session](../architecture/doc_session.md), [doc_session_daemons](../architecture/doc_session_daemons.md).
 - 2026-10-06: the seal appears only in the trust shield of the bar (ADR-0077 point 4). [doc_visual_language](../architecture/doc_visual_language.md).
+- 2026-10-05: a USB storage device that USBGuard blocks is offered "Allow once / Allow always" in the unlocked session, authorised by polkit; everything stays blocked while locked, which needs the lock to set logind's `LockedHint`. [doc_disks](../architecture/doc_disks.md) decision 10, DK21; [doc_overview](../architecture/doc_overview.md).
 - 2026-10-05: removable media and drives mounted by udisks carry `noexec` by default, with no switch in 1.0 (`doc_disks.md` DK20 B). [doc_kernel_profile](../architecture/doc_kernel_profile.md).
+- 2026-10-04: Athanor writes its own, real portal backend and an integrated recorder; `doc_portal.md` designs them. [doc_control_center](../architecture/doc_control_center.md) doubt 4, [doc_portal](../architecture/doc_portal.md).
+- 2026-09-30: the recovery console takes option A, option B later. [doc_recovery](../architecture/doc_recovery.md).
+- 2026-09-30: the software specification, revision 2: every recommendation of section 6. [doc_software](../architecture/doc_software.md) section 6.
+- 2026-09-30: a light local AI, and consent to the microphone as a switch in the bar for Athanor's own voice control (AI6). [doc_local_ai](../architecture/doc_local_ai.md).
+- 2026-09-25: the end state of the desktop: cosmic-comp is the only COSMIC component left, with GTK4, in a modular way (SH1, SH3). [doc_shell](../architecture/doc_shell.md).
+- 2026-09-25: `athanor-sulphur-client` links neither `cosmic-client-toolkit` nor `cosmic-protocols` and stays MIT. [doc_shell](../architecture/doc_shell.md) stage 2a.
+- 2026-09-25: the bar specification, revision 1. [doc_bar](../architecture/doc_bar.md).
+- 2026-09-19: one crate per program; every surface is its own binary in its own crate. [doc_shell](../architecture/doc_shell.md).
 - 2026-09-13: `kernel.yama.ptrace_scope=1` everywhere. [doc_kernel_profile](../architecture/doc_kernel_profile.md).
