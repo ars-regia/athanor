@@ -2,7 +2,7 @@
 id: ADR-0138
 title: "Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal"
 date: 2026-11-06
-status: amended by ADR-0141, ADR-0143
+status: amended by ADR-0141, ADR-0143, ADR-0147
 issues: []
 areas: [shell, security, process, docs]
 ---
