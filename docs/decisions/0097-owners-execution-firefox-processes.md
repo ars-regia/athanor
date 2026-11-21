@@ -2,7 +2,7 @@
 id: ADR-0097
 title: "Component owners, 1.0 execution control, the Firefox switch and one process per surface"
 date: 2026-10-08
-status: accepted
+status: amended by ADR-0148
 issues: []
 areas: [security, kernel, shell, apps, governance]
 ---

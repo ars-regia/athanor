@@ -144,7 +144,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
 | ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | amended by ADR-0145 | docs |
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | amended by ADR-0143 | build, security |
-| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
+| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | amended by ADR-0148 | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
@@ -165,7 +165,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0094 | 0094 | [Update control: the settled points of the postpone and the opt-out](0094-update-control-settled-points.md) | accepted | update, security |
 | ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | amended by ADR-0103 | kernel, session, security, storage, desktop |
 | ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | amended by ADR-0098 | security, pipeline |
-| ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | accepted | security, kernel, shell, apps, governance |
+| ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | amended by ADR-0148 | security, kernel, shell, apps, governance |
 | ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | amended by ADR-0103, ADR-0104, ADR-0107, ADR-0114, ADR-0125 | update, build, signing, process |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | amended by ADR-0124 | shell, session, security, desktop |
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
@@ -216,3 +216,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0145 | 0145 | [A small amendment to an approved specification is approved in the pull request of its code](0145-small-spec-amendment-in-the-code-pull-request.md) | accepted | process, docs |
 | ADR-0146 | 0146 | [The merge queue builds the specs, not the kernel or the shell, and the shell is covered by a push alert](0146-merge-queue-builds-the-specs-only.md) | accepted | process, build |
 | ADR-0147 | 0147 | [The keyring prompter is in 1.0, and colour management and HDR come after it](0147-keyring-prompter-in-1-0-colour-after.md) | accepted | security, shell, process, docs |
+| ADR-0148 | 0148 | [Release 1.0 ships no noexec mount, and fs-verity only if btrfs takes it without a migration](0148-no-noexec-mounts-in-1-0.md) | accepted | security, kernel, platform |
