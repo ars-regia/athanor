@@ -825,3 +825,32 @@ fn an_icon_offset_past_the_limit_saturates() {
     release(&mut run);
     run.stop();
 }
+
+/// An icon drawn at the pointer is sent its frames by the output under the pointer, as the
+/// cursor is, even when its offsets put its top left off every output.
+#[test]
+fn an_icon_off_every_output_at_its_top_left_is_sent_its_frames() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+
+    let serial = from.press(&mut run);
+    let compositor: wl_compositor::WlCompositor = from.local.bind(5);
+    let icon = compositor.create_surface(&from.local.queue.handle(), ());
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    icon.offset(-20, -20);
+    icon.commit();
+    run.state.pointer_to((5.0, 5.0).into(), InputTime::now());
+    from.local.roundtrip(&mut run);
+    assert_eq!(at(&frame(&mut run), 10, 10), RED, "drawn at the pointer");
+    icon.frame(&from.local.queue.handle(), ());
+    from.local.client.frame_done = false;
+    icon.commit();
+    from.local
+        .pump(&mut run, "the icon's frame callback", |client, _| {
+            client.frame_done
+        });
+    release(&mut run);
+    run.stop();
+}

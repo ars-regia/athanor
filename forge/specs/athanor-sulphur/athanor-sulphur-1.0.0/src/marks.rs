@@ -298,7 +298,7 @@ pub struct Marks {
     pub edge: Edge,
     /// The surfaces that set a blur region (`background_effect.rs`).
     pub blurred: crate::background_effect::Regions,
-    /// The drag icons and where each goes (`State::drag_icons`).
+    /// The drag icons and where each goes (`State::drawn_drag_icons`).
     pub drag: Vec<(WlSurface, Point<i32, Logical>)>,
 }
 

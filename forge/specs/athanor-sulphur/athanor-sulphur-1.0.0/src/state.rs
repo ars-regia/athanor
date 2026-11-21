@@ -1333,13 +1333,10 @@ impl State {
                 });
             }
         }
-        // Nor are the drag icons: their frames go to the output each is at.
+        // Nor are the drag icons: their frames go to the output under the pointer or the touch
+        // point each follows.
         for (icon, at) in self.drag_icons() {
-            let on = self
-                .space
-                .output_geometry(output)
-                .is_some_and(|area| area.contains(at));
-            if on {
+            if self.space.output_under(at).any(|under| under == output) {
                 send_frames_surface_tree(&icon, output, frame_target, throttle, |_, _| {
                     Some(output.clone())
                 });

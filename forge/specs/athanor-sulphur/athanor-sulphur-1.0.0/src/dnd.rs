@@ -209,18 +209,18 @@ impl State {
         }
     }
 
-    /// The drag icons, and where each surface goes: at the touch point its drag follows, or at
-    /// the pointer, moved by the icon's offset. Each is sent its frames, drawn or not.
-    pub(crate) fn drag_icons(&self) -> Vec<(WlSurface, Point<i32, Logical>)> {
+    /// The drag icons, each with the touch point its drag follows or the pointer. Each is sent
+    /// its frames, drawn or not, by the output under that point, as the cursor is.
+    pub(crate) fn drag_icons(&self) -> Vec<(WlSurface, Point<f64, Logical>)> {
         self.drag_icons
             .iter()
-            .filter_map(|icon| self.placed(icon))
+            .filter_map(|icon| Some((icon.surface.clone(), self.followed(icon)?)))
             .collect()
     }
 
-    /// The drag icons that are drawn: as `drag_icons`, less an icon whose offsets moved it off
-    /// the pointer or the touch point, as a cursor whose hotspot lies off it is not drawn
-    /// (`cursor.rs`).
+    /// The drag icons that are drawn, and where each surface goes: at the touch point its drag
+    /// follows, or at the pointer, moved by the icon's offset; less an icon whose offsets moved
+    /// it off that point, as a cursor whose hotspot lies off it is not drawn (`cursor.rs`).
     pub(crate) fn drawn_drag_icons(&self) -> Vec<(WlSurface, Point<i32, Logical>)> {
         self.drag_icons
             .iter()
@@ -231,20 +231,23 @@ impl State {
                 ));
                 crate::cursor::drawable(bbox_from_surface_tree(&icon.surface, (0, 0)), hotspot)
             })
-            .filter_map(|icon| self.placed(icon))
+            .filter_map(|icon| {
+                let at = self.followed(icon)?.to_i32_round();
+                Some((icon.surface.clone(), moved(at, icon.offset)))
+            })
             .collect()
     }
 
-    /// Where `icon` goes, if its surface is alive and its pointer or touch point is there.
-    fn placed(&self, icon: &DragIcon) -> Option<(WlSurface, Point<i32, Logical>)> {
+    /// The touch point or the pointer that `icon` follows, if its surface is alive and the
+    /// point is there.
+    fn followed(&self, icon: &DragIcon) -> Option<Point<f64, Logical>> {
         if !icon.surface.alive() {
             return None;
         }
-        let at = match icon.slot {
-            Some(slot) => self.touch_at(slot)?,
-            None => self.seat.get_pointer()?.current_location(),
-        };
-        Some((icon.surface.clone(), moved(at.to_i32_round(), icon.offset)))
+        match icon.slot {
+            Some(slot) => self.touch_at(slot),
+            None => Some(self.seat.get_pointer()?.current_location()),
+        }
     }
 
     /// A commit of a drag icon's surface moves the icon by the offset it carries, of
