@@ -338,6 +338,9 @@ struct Client {
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
+    /// Each xdg surface's configures, in order: a surface's own is told from one that another
+    /// surface of the client receives meanwhile, which a flush can bring in the same read.
+    configures: Vec<(ObjectId, u32)>,
     /// The width, height and states of the last configure of a toplevel.
     toplevel_configure: Option<(i32, i32, Vec<u32>)>,
     /// The serial, width and height of the last configure of a layer surface.
@@ -544,7 +547,7 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for Client {
 impl Dispatch<xdg_surface::XdgSurface, ()> for Client {
     fn event(
         client: &mut Self,
-        _: &xdg_surface::XdgSurface,
+        xdg: &xdg_surface::XdgSurface,
         event: xdg_surface::Event,
         _: &(),
         _: &Connection,
@@ -552,6 +555,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for Client {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             client.configure = Some(serial);
+            client.configures.push((xdg.id(), serial));
         }
     }
 }
@@ -2951,12 +2955,9 @@ impl Local {
         let surface = compositor.create_surface(&qh, ());
         let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
         let toplevel = xdg.get_toplevel(&qh, ());
-        self.client.configure = None;
         surface.commit();
-        self.pump(run, "the window is configured", |client, _| {
-            client.configure.is_some()
-        });
-        xdg.ack_configure(self.client.configure.expect("a configure"));
+        let serial = self.first_configure(run, &xdg);
+        xdg.ack_configure(serial);
         let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
         surface.attach(Some(&buffer), 0, 0);
         surface.commit();
@@ -5787,6 +5788,22 @@ struct Other {
 }
 
 impl Local {
+    /// Waits for the first configure of the new surface `xdg` and returns its serial.
+    fn first_configure(&mut self, run: &mut Running, xdg: &xdg_surface::XdgSurface) -> u32 {
+        let id = xdg.id();
+        let of = |client: &Client| {
+            client
+                .configures
+                .iter()
+                .find(|(surface, _)| *surface == id)
+                .map(|(_, serial)| *serial)
+        };
+        self.pump(run, "the surface is configured", |client, _| {
+            of(client).is_some()
+        });
+        of(&self.client).expect("a configure")
+    }
+
     /// Maps a `WIDTH`x`HEIGHT` window titled `title`; `place` decides its place and focus.
     fn another(&mut self, run: &mut Running, title: &str) -> Other {
         let compositor: wl_compositor::WlCompositor = self.bind(4);
@@ -5797,12 +5814,10 @@ impl Local {
         let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
         let toplevel = xdg.get_toplevel(&qh, ());
         toplevel.set_title(title.into());
-        self.client.configure = None;
         surface.commit();
-        self.pump(run, "the window is configured", |client, _| {
-            client.configure.is_some()
-        });
-        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        let serial = self.first_configure(run, &xdg);
+        self.client.configure = None;
+        xdg.ack_configure(serial);
         let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
         surface.attach(Some(&buffer), 0, 0);
         surface.commit();
@@ -8783,10 +8798,8 @@ fn focused_window_in(
     let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
     let _toplevel = xdg.get_toplevel(&qh, ());
     surface.commit();
-    local.pump(run, "the window is configured", |client, _| {
-        client.configure.is_some()
-    });
-    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let serial = local.first_configure(run, &xdg);
+    xdg.ack_configure(serial);
     let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
@@ -13417,12 +13430,10 @@ fn grabbing_popup(
     let serial = SERIAL_COUNTER.next_serial();
     run.state.grab_serials.key_press = Some((serial, local.id.clone().expect("an id")));
     popup.grab(&seat, serial.into());
-    local.client.configure = None;
     surface.commit();
-    local.pump(run, "the popup is configured", |client, _| {
-        client.configure.is_some()
-    });
-    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let serial = local.first_configure(run, &xdg);
+    local.client.configure = None;
+    xdg.ack_configure(serial);
     let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
