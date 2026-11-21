@@ -2,7 +2,8 @@
 """Read the facts of the merge card of a pull request and print it (CLAUDE.md, "Merging").
 
 Usage: merge_card.py [-R OWNER/REPO] PR
-       merge_card.py [-R OWNER/REPO] PR --verify-approval CARD_TIME --head SHA --base-sha SHA
+       merge_card.py [-R OWNER/REPO] PR --verify-approval CARD_TIME --head SHA --base NAME
+                     --base-sha SHA
                      [--approver LOGIN ...]
 
 The script only reads: it never approves, merges, comments or pushes, and it reads no token.
@@ -11,10 +12,14 @@ on stderr), then a last stdout line, `RESULT: OK` or `RESULT: REFUSED (n)`; it e
 refusal. Every path, name and evidence line is printed with control and non-printable characters
 and backslashes escaped, so no name can forge a line of the card. A 404 on the branch protection means only the rulesets count.
 --verify-approval is the re-check just before the merge: it repeats the reading and adds that
-the head and the base are the card's and that a code owner approved at the card's head after
+the head is the card's, the base branch is the card's (--base) and that a code owner approved at the card's head after
 CARD_TIME (ISO 8601 with a time zone): the `card time:` line the card printed. The approver is `hr-mes` (the
 rule of CLAUDE.md, "Merging") unless --approver names others; the last `*` line of
 .github/CODEOWNERS at the base sha must list each approver, else the script refuses.
+The base head must also be the card's, except on a base with a merge_queue rule: the queue
+re-runs the required checks on the base each pull request lands on, so a base that has only
+moved forward on the same branch (the card's base sha is an ancestor of the current one) is noted, not refused, and CODEOWNERS, the categories and the checks are read at the
+current base head (maintainer decision, 2026-11-21). A retarget fails on every base; --head and --base-sha must be full 40-hex shas.
 
 Everything comes from the GitHub API, paginated, and no diff is parsed: the files from
 pulls/<n>/files (the number must equal changedFiles and stay under the API's 3000 cap), the
@@ -338,6 +343,17 @@ def stale_base(repo, pr, base_sha, has_queue):
     return f"the head does not contain {pr['baseRefName']} at {base_sha[:12]}"
 
 
+def card_base_leads(repo, card_sha, base_sha):
+    """True when base_sha is ahead of the card's base sha, else the reason it is not."""
+    try:
+        status = api(f"repos/{repo}/compare/{card_sha}...{base_sha}").get("status")
+    except NotFound:
+        return f"the card's base {card_sha[:12]} is unknown"
+    if status == "ahead":
+        return True
+    return f"the card's base {card_sha[:12]} is not an ancestor of the base at {base_sha[:12]}"
+
+
 def code_owners(repo, base_sha):
     """The owners on the last `*` line of CODEOWNERS at the pinned base sha, or None."""
     try:
@@ -424,8 +440,18 @@ def refusals(repo, pr, base_sha, rules, protection, args, files):
             )
         if pr["headRefOid"] != args.head:
             bad.append(f"head is {pr['headRefOid']}, the card's is {args.head}")
-        if base_sha != args.base_sha:
-            bad.append(f"base head is {base_sha}, the card's is {args.base_sha}")
+        if base != args.base:
+            bad.append(f"base is {base}, the card's is {args.base}: retargeted")
+        elif base_sha != args.base_sha:
+            if not any(r["type"] == "merge_queue" for r in rules):
+                bad.append(f"base head is {base_sha}, the card's is {args.base_sha}")
+            elif (lead := card_base_leads(repo, args.base_sha, base_sha)) is not True:
+                bad.append(lead)
+            else:
+                print(
+                    f"base moved from {esc(args.base_sha[:12])} to {base_sha[:12]}: "
+                    "allowed on a merge_queue base, head unchanged"
+                )
         approvers = set(args.approver or [APPROVER])
         owners = code_owners(repo, base_sha)
         if owners is None:
@@ -613,6 +639,7 @@ def main(argv):
     ap.add_argument("-R", "--repo")
     ap.add_argument("--verify-approval", metavar="CARD_TIME")
     ap.add_argument("--head", help="the card's full head sha (with --verify-approval)")
+    ap.add_argument("--base", help="the card's base branch (with --verify-approval)")
     ap.add_argument(
         "--base-sha", help="the card's base head sha (with --verify-approval)"
     )
@@ -623,8 +650,12 @@ def main(argv):
         help="use the local categories table when the base has none",
     )
     args = ap.parse_args(argv)
-    if args.verify_approval is not None and not (args.head and args.base_sha):
-        ap.error("--verify-approval needs --head and --base-sha")
+    if args.verify_approval is not None:
+        if not (args.head and args.base and args.base_sha):
+            ap.error("--verify-approval needs --head, --base and --base-sha")
+        for sha in (args.head, args.base_sha):
+            if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                ap.error(f"{sha!r} is not a full 40-hex sha")
 
     repo = (
         args.repo
