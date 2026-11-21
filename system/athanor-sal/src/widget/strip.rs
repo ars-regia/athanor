@@ -616,4 +616,31 @@ mod tests {
             assert_eq!(ui.widget(cells[2]).rect.x, 0.0, "{width}: the last cell on the left edge");
         }
     }
+
+    /// A sidebar of a fixed width and a page that fills the rest: unequal shares of an inline,
+    /// the sidebar at the start edge, as the split of a Settings window (doc_settings.md SL3).
+    #[test]
+    fn a_sidebar_and_a_page_take_unequal_shares_of_an_inline() {
+        for rtl in [false, true] {
+            for width in [900.0, 1200.0] {
+                let mut ui = Ui::new("Strip", theme(), rtl);
+                ui.min_width = width;
+                let split = ui.inline(Ui::ROOT, [0.0, 0.0]);
+                let sidebar = ui.add(split, Kind::Column);
+                ui.add(sidebar, Kind::Button("Network".into()));
+                assert!(ui.set_min_width(sidebar, 280.0));
+                let page = ui.add(split, Kind::Column);
+                assert!(ui.set_fill(page, true));
+                ui.switch(page, "Wi-Fi", false);
+                ui.layout();
+                let (split, side, page) =
+                    (ui.widget(split).rect, ui.widget(sidebar).rect, ui.widget(page).rect);
+                assert_eq!(side.w, 280.0, "the sidebar keeps its width");
+                assert_eq!(side.w + ui.theme.gap + page.w, split.w, "the page takes the rest");
+                assert_eq!((side.h, page.h), (split.h, split.h), "both as tall as the split");
+                let start = if rtl { side.x + side.w == split.x + split.w } else { side.x == split.x };
+                assert!(start, "the sidebar at the start edge");
+            }
+        }
+    }
 }

@@ -797,6 +797,19 @@ pub enum Event {
         /// The widget under the pointer at the release, if any.
         to: Option<WidgetId>,
     },
+    /// The compositor configured a window that takes its size ([`Ui::sized_by_compositor`])
+    /// to another one: the size the window takes, in logical pixels, which is the one configured
+    /// but never less than its widgets' size, and 0 along an axis the compositor leaves to the
+    /// window, as xdg-toplevel's configure. It comes before the window is drawn at that size, so
+    /// that the application lays its widgets out for it: a sidebar and a page that collapse into
+    /// one column below a width.
+    #[non_exhaustive]
+    Resized {
+        /// The window's width, or 0.
+        width: u32,
+        /// The window's height, or 0.
+        height: u32,
+    },
     /// Escape reached the surface and no menu took it: the application may close the surface,
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
@@ -982,6 +995,12 @@ pub struct Ui {
     /// Whether the compositor may make the window larger than its widgets, as GTK's
     /// `resizable`: when false, the window's maximum size is its minimum. True by default.
     pub resizable: bool,
+    /// Whether a resizable window takes the size the compositor configures, as a GTK window
+    /// does, and tells the application through [`Event::Resized`]. When false, as by default,
+    /// it keeps its widgets' size whatever the compositor suggests. Its widgets' size stays the
+    /// window's minimum either way. Set it before the window is opened: a window hears only the
+    /// sizes configured after it is set, and returns to its widgets' size when it is cleared.
+    pub sized_by_compositor: bool,
     /// The items of a drop-down whose menu is open changed: the driver closes the menu, whose
     /// items are the old ones.
     pub(crate) stale_popup: bool,
@@ -993,6 +1012,12 @@ pub struct Ui {
     /// A modal dialog's widgets: see [`Ui::set_dialog`].
     pub(crate) modal: bool,
     size: (f32, f32),
+    /// The size the compositor configured a window that takes it, which the root fills; 0
+    /// along an axis left to the window. The driver sets it before each layout.
+    pub(crate) configured: (f32, f32),
+    /// The root's size without [`Ui::configured`] after the last layout: the widgets' size,
+    /// which the window's minimum is.
+    pub(crate) natural: (f32, f32),
     hover: Option<WidgetId>,
     press: Option<Press>,
     /// The widget under the pointer the wheel last turned over, and the turns on each axis,
@@ -1045,6 +1070,7 @@ impl Ui {
             min_height: 0.0,
             popup: false,
             resizable: true,
+            sized_by_compositor: false,
             stale_popup: false,
             focus: None,
             quiet_focus: None,
@@ -1052,6 +1078,8 @@ impl Ui {
             title_bar: None,
             modal: false,
             size: (0.0, 0.0),
+            configured: (0.0, 0.0),
+            natural: (0.0, 0.0),
             hover: None,
             press: None,
             wheel: None,
@@ -2370,6 +2398,7 @@ impl Ui {
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let (margin, section_gap) = (t.margin, t.section_gap);
         let (min_width, min_height) = (self.min_width, self.min_height);
+        let configured = self.configured;
         let (island_pad, button_min) = (t.island_padding, t.button_min);
         let inks = [t.text, t.on_accent];
         let (control_border, control_min) = (t.control_border, t.control_min_height);
@@ -2453,7 +2482,8 @@ impl Ui {
                 if id == Self::ROOT {
                     let edge = 2.0 * margin;
                     let w = (w + edge).max(bar.0).max(min_width);
-                    (w, (h + edge + bar.1).max(min_height))
+                    self.natural = (w, (h + edge + bar.1).max(min_height));
+                    (w.max(configured.0), self.natural.1.max(configured.1))
                 } else {
                     (w, h)
                 }
