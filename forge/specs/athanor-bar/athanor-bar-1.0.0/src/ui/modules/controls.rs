@@ -65,16 +65,17 @@ pub fn image(icons: &mut Icons, name: &str, scale: u16, rtl: bool) -> Option<Ima
 
 /// What the bar does after a page's `turn`: a popover keeps its size once open, so a page that
 /// built its widgets again, or whose widgets set in place changed the layout's size
-/// (`resized`, run only then), is built again at the new size; else `stay` says.
+/// (`resized`, run only then), is built again at the new size; else `stay` says. A close the
+/// page asked for wins over either reopen, and `stay` consumes it.
 pub fn after_turn(turn: Turn, resized: impl FnOnce() -> bool, stay: impl FnOnce() -> Reply) -> Reply {
-    match turn {
-        Turn::Rebuild => Reply::Reopen,
-        // A close the page asked for wins over a reopen: `stay` consumes it.
-        Turn::Updated if resized() => match stay() {
-            Reply::Stay => Reply::Reopen,
-            other => other,
-        },
-        Turn::Updated | Turn::Unchanged => stay(),
+    let reopening = match turn {
+        Turn::Rebuild => true,
+        Turn::Updated => resized(),
+        Turn::Unchanged => false,
+    };
+    match stay() {
+        Reply::Stay if reopening => Reply::Reopen,
+        reply => reply,
     }
 }
 
@@ -105,7 +106,8 @@ mod tests {
         assert_eq!(after_turn(Turn::Updated, || true, || Reply::Stay), Reply::Reopen);
         assert_eq!(after_turn(Turn::Updated, || true, stay), Reply::Close, "a close wins");
         assert_eq!(after_turn(Turn::Updated, || false, stay), Reply::Close);
-        assert_eq!(after_turn(Turn::Rebuild, || false, stay), Reply::Reopen);
+        assert_eq!(after_turn(Turn::Rebuild, || false, || Reply::Stay), Reply::Reopen);
+        assert_eq!(after_turn(Turn::Rebuild, || false, stay), Reply::Close, "a close wins");
         assert_eq!(after_turn(Turn::Unchanged, || panic!("no turn, no layout"), stay), Reply::Close);
     }
 
