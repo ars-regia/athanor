@@ -6604,6 +6604,9 @@ def check_agent_docs():
 
 # What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path named last.
 LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
+# A path abbreviation that a document defines, "(`forge/specs/x/x-1.0.0`, below `S`)", after which
+# `S/src/a.rs:12` cites `forge/specs/x/x-1.0.0/src/a.rs:12` (#1428).
+PATH_ABBREVIATION = re.compile(r"\(`([^`\s]+)`, below `([^`\s/]+)`\)")
 # What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
 # `cosmic-osd.service`), or a bare snake_case or `::` path.
 CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
@@ -6661,6 +6664,9 @@ LINE_CITATIONS_KEPT = {
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
     ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
+    ("doc_overview.md", "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/fixture.rs", "11320",
+     "the_unnamed_cosmic_keys_reach_the_client", 1):
+        "the citation names the test's row of Alt+Tab; the test's name is at the citation before it, `:11314`",
 }
 # Another project's file that a document cites by a path a tracked file also ends with, each
 # (document, path as written) with the project it belongs to: the path resolves to no file, sets no
@@ -7051,7 +7057,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
     file is a finding, as is a bare `*.md` name that no tracked file ends with. A path that
     `upstream` ({(document, path)}, LINE_CITATIONS_UPSTREAM by default) lists for `doc` is another
-    project's and resolves to no file. A range is no line range when it starts at 0, ends before it starts,
+    project's and resolves to no file. A span `S/rest` whose `S` the document defines as a path
+    abbreviation (PATH_ABBREVIATION) is read as the defined path followed by `/rest`, in every line
+    of the document. A range is no line range when it starts at 0, ends before it starts,
     reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
     document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
     sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
@@ -7118,6 +7126,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             suffixes.setdefault("/".join(parts[i:]), []).append(path)
 
     foreign = {path for d, path in (LINE_CITATIONS_UPSTREAM if upstream is None else upstream) if d == doc}
+    abbreviations = {m[2]: m[1] for m in PATH_ABBREVIATION.finditer(text)}
+
+    def expand(name):
+        head, slash, rest = name.partition("/")
+        return f"{abbreviations[head]}/{rest}" if slash and head in abbreviations else name
 
     def resolve(name, crate):
         if name in foreign:
@@ -7158,19 +7171,20 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         named_any = False
         line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
-            m = LINE_CITATION.fullmatch(span.group(1))
+            cite = expand(span.group(1))
+            m = LINE_CITATION.fullmatch(cite)
             if not m:
-                m = SYMBOL_CITATION.fullmatch(span.group(1))
+                m = SYMBOL_CITATION.fullmatch(cite)
                 if m and (not (names_a_file(m[1], crate) or names_a_gone_file(m[1])) if m[1] else
-                          COLOUR.fullmatch(span.group(1)) and not defines(last, m[2].strip())):
+                          COLOUR.fullmatch(cite) and not defines(last, m[2].strip())):
                     m = None  # a flake reference, or a colour that its file does not define
             if not m:
-                head = span.group(1).partition("#")[0]
-                if SCHEME.match(span.group(1)) or (
-                        "#" in span.group(1) and not (names_a_file(head, crate) or names_a_gone_file(head))):
+                head = cite.partition("#")[0]
+                if SCHEME.match(cite) or (
+                        "#" in cite and not (names_a_file(head, crate) or names_a_gone_file(head))):
                     continue  # a URL or a flake reference, which is no file of the repository
-                last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
-                named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))
+                last = resolve(cite, crate) if FILE_LIKE.search(cite) else last
+                named_any = named_any or bool(FILE_LIKE.search(cite) and counts_as_named(cite, crate))
                 continue
             named, spec = m.groups()
             symbol = spec.strip() if m.re is SYMBOL_CITATION else None
