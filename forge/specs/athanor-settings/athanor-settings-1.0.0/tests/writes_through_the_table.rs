@@ -48,8 +48,9 @@ fn offences(text: &str) -> Vec<String> {
     });
     for (at, _) in uses {
         let statement = text.get(at..).and_then(|t| t.split(';').next()).unwrap_or_default();
+        let renamed = statement.split_whitespace().collect::<Vec<_>>().join(" ").contains("self as");
         if has_token(statement, "gio")
-            && (has_token(statement, "Settings") || statement.contains("gio::*"))
+            && (has_token(statement, "Settings") || statement.contains("gio::*") || renamed)
         {
             found.push(statement.trim().to_owned());
         }
@@ -83,6 +84,8 @@ fn the_scan_finds_settings_however_it_is_imported() {
         "use gio as g;",
         "extern crate gio as g;",
         "use {gio as g};",
+        "use gio::{self as g};",
+        "use gio::{prelude::*, self  as\n g};",
         "s.set_value(\"font-name\", &\"Inter\".to_variant());",
     ] {
         assert!(!offences(text).is_empty(), "missed: {text}");
