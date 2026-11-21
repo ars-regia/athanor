@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Name[it]=Impostazioni
+Comment=Change the settings of this computer
+Comment[it]=Modifica le impostazioni di questo computer
+# Started anywhere, the binary forwards to os.athanor.Settings1 and exits (doc_settings.md SE4).
+Exec=athanor-settings
+Icon=preferences-system
+Categories=Settings;
+Keywords=settings;preferences;configuration;about;system;
+Keywords[it]=impostazioni;preferenze;configurazione;informazioni;sistema;
+StartupNotify=true
+# Hidden until Settings passes the gate and cosmic-settings retires (SE23).
+NoDisplay=true

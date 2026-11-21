@@ -342,6 +342,15 @@ item = "SD22"
 purpose = "The session services' package: the binary, its guard unit and preset"
 
 [[component]]
+path = "forge/specs/athanor-settings"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_settings.md"
+item = "SE4"
+purpose = "Settings: the window drawn with Sal, its user unit, os.athanor.Settings1 and the forwarder"
+
+[[component]]
 path = "forge/specs/athanor-shelld"
 kind = "rpm spec"
 area = "shell"

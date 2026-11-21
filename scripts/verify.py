@@ -5433,6 +5433,7 @@ SESSION_UNITS = {
     "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
+    "athanor-settings.service": ("surface", True, "activated"),
     # Started by nothing until its bus service file comes with doc_osd.md's retirement step
     # (OD15, OD17 step 5).
     "athanor-osd.service": ("surface", True, "activated"),
@@ -5509,6 +5510,8 @@ SESSION_EXEMPT = {
         "enabled by hand until the switch (doc_launcher.md, LA12)",
     ("athanor-control-center.service", ACTIVATED_INSTALL):
         "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
+    ("athanor-settings.service", f"RestartSec=200ms, {SURFACE_WANTS} 0.1"):
+        "doc_settings.md SE5 sets RestartSec=200ms",
     (
         "athanor-control-center-shortcut.service",
         f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
