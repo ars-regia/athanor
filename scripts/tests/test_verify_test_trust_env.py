@@ -444,10 +444,37 @@ class TestTrustEnv(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 problems = self.problems(BLOCK + change + USES)
-                self.assertTrue(any(f"{name}, which the patch statement uses" in p for p in problems), problems)
+                self.assertTrue(any(f"{name}, which the isolation block uses" in p for p in problems), problems)
+
+    def test_the_names_are_anchored_by_top_level_imports(self):
+        fake = "class _F:\n    environ = {}\n\n\n"
+        for label, body, name in (
+            ("from-import patch, os rebound", BLOCK.replace("m.patch.dict(o.environ)", "m.patch.dict(e)")
+             .replace(IMPORTS, "import os as o\nfrom os import environ as e\nfrom unittest import mock as m\n")
+             + fake + "o = _F()\n", "o"),
+            ("match capture", BLOCK + "match 1:\n    case o:\n        pass\n", "o"),
+            ("function-level import", BLOCK + fake + "o = _F()\nm = _F()\n\n\ndef _u():\n"
+             "    import os as o\n    from unittest import mock as m\n", "o"),
+            ("import in a block", BLOCK + "if True:\n    import os as o\n", "o"),
+            ("comprehension target", BLOCK + "A = [1 for o in ()]\n", "o"),
+            ("match star", BLOCK + "match [1]:\n    case [*o]:\n        pass\n", "o"),
+        ):
+            with self.subTest(label=label):
+                problems = self.problems(body + USES)
+                self.assertTrue(any(f"{name}, which the isolation block uses" in p for p in problems), problems)
+
+    def test_import_a_and_import_a_b_bind_one_name(self):
+        body = (
+            "import os\nimport unittest\nimport unittest.mock\n"
+            + LITERAL
+            + "_p = unittest.mock.patch.dict(os.environ)\n"
+            + SETUP.replace("o.environ", "os.environ")
+            + TEARDOWN
+        )
+        self.assertEqual(self.problems(body + USES), [])
 
     def test_a_call_passing_the_names_list_is_named(self):
-        for change in ("list.clear(TRUST_ENV)\n", "f(TRUST_ENV)\n", "f(x=TRUST_ENV)\n"):
+        for change in ("list.clear(TRUST_ENV)\n", "f(TRUST_ENV)\n", "f(x=TRUST_ENV)\n", "list.clear(*[TRUST_ENV])\n"):
             with self.subTest(change=change):
                 body = BLOCK.replace(repr(NAMES), repr(list(NAMES))) + change + USES
                 problems = self.problems(body)

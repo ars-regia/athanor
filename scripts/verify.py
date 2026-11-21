@@ -7310,18 +7310,52 @@ def scope_nodes(body):
 
 def bindings(tree, name):
     """How many times the module scope binds `name`: a def, a class, an assignment, an import, a `for` or
-    `with` target, a deletion."""
-    count = 0
+    `with` target, a match capture, a deletion. `import a` and `import a.b` bind `a` together, once."""
+    count, plain = 0, set()
     for n in scope_nodes(tree.body):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             count += n.name == name
         elif isinstance(n, ast.Name):
             count += n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
         elif isinstance(n, ast.alias):
-            count += (n.asname or n.name.split(".")[0]) == name
-        elif isinstance(n, ast.ExceptHandler):
+            if (n.asname or n.name.split(".")[0]) == name:
+                if n.asname:
+                    count += 1
+                else:
+                    plain.add(name)
+        elif isinstance(n, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
             count += n.name == name
-    return count
+        elif isinstance(n, ast.MatchMapping):
+            count += n.rest == name
+    return count + len(plain)
+
+
+def top_import_aliases(tree):
+    """{bound name: dotted target} of the imports that are direct children of the module."""
+    aliases = {}
+    for n in tree.body:
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            for a in n.names:
+                aliases[a.asname or a.name] = f"{n.module}.{a.name}"
+    return aliases
+
+
+def anchored(tree, name):
+    """Whether `name` is bound once, by an import that is a direct child of the module, and is neither
+    imported inside a function or a block nor declared `global`."""
+    if bindings(tree, name) != 1 or name not in top_import_aliases(tree):
+        return False
+    top = {id(n) for n in tree.body}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global) and name in n.names:
+            return False
+        if isinstance(n, (ast.Import, ast.ImportFrom)) and id(n) not in top \
+                and any((a.asname or a.name.split(".")[0]) == name for a in n.names):
+            return False
+    return True
 
 
 def environ_gaps(tree, aliases, exempt):
@@ -7372,8 +7406,9 @@ def mutated(tree, name):
 
 def passed(tree, name):
     """Whether a statement that runs at import time passes `name` to a call, as `list.clear(NAMES)` does."""
-    return any(isinstance(n, ast.Call) and any(isinstance(a, ast.Name) and a.id == name
-                                               for a in [*n.args, *(k.value for k in n.keywords)])
+    return any(isinstance(n, ast.Call) and any(isinstance(x, ast.Name) and x.id == name
+                                               for a in [*n.args, *(k.value for k in n.keywords)]
+                                               for x in ast.walk(a))
                for n in scope_nodes(tree.body))
 
 
@@ -7385,14 +7420,7 @@ def isolation_gaps(tree, shared):
     once and never changed. The leading statements are compared as trees, so nothing before or between them
     can skip them. At import time the module reads no variable of TRUST_ENV_NAMES and no os.environ but one
     named variable."""
-    aliases = {}
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Import):
-            for a in n.names:
-                aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
-        elif isinstance(n, ast.ImportFrom) and n.module:
-            for a in n.names:
-                aliases[a.asname or a.name] = f"{n.module}.{a.name}"
+    aliases = top_import_aliases(tree)
     lists = string_literals(tree)
     if aliases.get("TRUST_ENV") == "signed_registry.TRUST_ENV":
         lists["TRUST_ENV"] = shared
@@ -7408,10 +7436,11 @@ def isolation_gaps(tree, shared):
     if bindings(tree, patch) != 1:
         gaps.append(f"a patch variable {patch} bound once")
     root = lambda node: dotted(node, {}).split(".")[0]  # noqa: E731
-    used = {root(patches[0].value.func), root(patches[0].value.args[0])}
+    used = {root(patches[0].value.func), root(patches[0].value.args[0]), *os_names}
     for name in sorted(used):
-        if bindings(tree, name) != 1 or any(isinstance(n, ast.Global) and name in n.names for n in ast.walk(tree)):
-            gaps.append(f"{name}, which the patch statement uses, bound once at module level and never rebound")
+        if not anchored(tree, name):
+            gaps.append(f"{name}, which the isolation block uses, bound once by a top-level import and never "
+                        "rebound or imported again elsewhere")
 
     def expected(source):
         return ast.dump(ast.parse(source).body[0])
