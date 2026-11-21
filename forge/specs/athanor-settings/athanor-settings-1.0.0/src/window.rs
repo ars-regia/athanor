@@ -327,6 +327,8 @@ impl Settings {
         if !self.reopening {
             return;
         }
+        // Accepted: a compositor that restarts between the marker and the first frame leaves
+        // the marker, so the next start opens the landing page, not this one.
         if let Some(dir) = &self.state_dir {
             if let Err(error) = window_state::mark(dir) {
                 tracing::warn!(%error, "cannot mark the reopened page; a crash drawing it reopens it again");
