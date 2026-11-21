@@ -534,34 +534,31 @@ fn a_confined_clients_icon_is_bordered() {
     run.stop();
 }
 
-impl Party {
-    /// Maps a popup on the client's window that grabs the seat with `serial`.
-    fn grabbing_popup(&mut self, run: &mut Running, serial: u32) {
-        let (_, parent) = self.local.window.clone().expect("a window");
-        let compositor: wl_compositor::WlCompositor = self.local.bind(4);
-        let wm_base: xdg_wm_base::XdgWmBase = self.local.bind(1);
-        let shm: wl_shm::WlShm = self.local.bind(1);
-        let seat = self.local.seat.clone().expect("a seat");
-        let qh = self.local.queue.handle();
-        let positioner = wm_base.create_positioner(&qh, ());
-        positioner.set_size(40, 40);
-        positioner.set_anchor_rect(0, 0, 1, 1);
-        let surface = compositor.create_surface(&qh, ());
-        let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
-        let popup = xdg.get_popup(Some(&parent), &positioner, &qh, ());
-        popup.grab(&seat, serial);
-        self.local.client.configure = None;
-        surface.commit();
-        self.local
-            .pump(run, "the popup is configured", |client, _| {
-                client.configure.is_some()
-            });
-        xdg.ack_configure(self.local.client.configure.take().expect("a configure"));
-        let (buffer, _) = self.local.buffer(&shm, 40, 40, [0, 0, 0, 255]);
-        surface.attach(Some(&buffer), 0, 0);
-        surface.commit();
-        self.local.roundtrip(run);
-    }
+/// Maps a popup on `local`'s window that grabs the seat with `serial`.
+pub(super) fn popup_grabbing(run: &mut Running, local: &mut Local, serial: u32) {
+    let (_, parent) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let seat = local.seat.clone().expect("a seat");
+    let qh = local.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(Some(&parent), &positioner, &qh, ());
+    popup.grab(&seat, serial);
+    local.client.configure = None;
+    surface.commit();
+    local.pump(run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(run);
 }
 
 /// A drag needs its press still held: a popup's grab keeps the press's serial past the release,
@@ -574,7 +571,7 @@ fn a_drag_needs_its_press_held() {
     let mut to = party(&mut run, (500, 100), None);
     let serial = from.press(&mut run);
     release(&mut run);
-    from.grabbing_popup(&mut run, serial);
+    popup_grabbing(&mut run, &mut from.local, serial);
     let pointer = run.state.seat.get_pointer().expect("a pointer");
     assert!(
         pointer.has_grab(serial.into()),
