@@ -6975,6 +6975,12 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         """NAME is a tracked file or the end of some tracked files' paths."""
         return name in suffixes or bool(crate and f"{crate}/{name}" in known)
 
+    def counts_as_named(name, crate):
+        """NAME is a file of the repository, or code outside it that the document cites by a relative
+        path (`glib/gmain.c`), whose lines a bare `:N` may follow; an absolute host path
+        (`/usr/bin/x`) is neither."""
+        return names_a_file(name, crate) or not name.startswith("/")
+
     def names_a_gone_file(name):
         """NAME is under a top-level directory of the repository, or is a bare `*.md` name that no
         tracked file ends with: if it resolves to nothing, the file was removed."""
@@ -6994,7 +7000,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                     m = None  # `nixpkgs#cosign`, `.#image`: a flake reference, not a file
             if not m:
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
-                named_any = named_any or bool(FILE_LIKE.search(span.group(1)))
+                named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))
                 continue
             named, spec = m.groups()
             symbol = spec.strip() if m.re is SYMBOL_CITATION else None
@@ -7005,10 +7011,13 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
+                if symbol and named and len(suffixes.get(named, ())) > 1:
+                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{spec}` is ambiguous: "
+                                "several files end with it, give a longer path"))
                 if named is None and not named_any and (symbol or lines_kept is not None):
                     out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
                                 "before it on its line, and the line names none: name its path"))
-                named_any = named_any or named is not None
+                named_any = named_any or (named is not None and counts_as_named(named, crate))
                 continue
             named_any = True
             if (c := CRATE_ROOT.match(path)):

@@ -174,10 +174,6 @@ class Forms(unittest.TestCase):
         self.assertEqual(len(messages("- then `grant` at `:5`.", lines_kept={})), 1)
         self.assertEqual(messages("- then `grant` at `:5`."), [])
 
-    def test_a_bare_citation_after_a_file_outside_the_repository_is_not_checked(self):
-        self.assertEqual(messages("In `glib/gmain.c` the `grant` at `#grant` and `:5`.", lines_kept={}), [])
-        self.assertEqual(messages("`glib/gmain.c:3`, then `#grant` and `:5`.", lines_kept={}), [])
-
     def test_a_colour_is_no_citation(self):
         self.assertEqual(
             messages("`src/x.rs#grant` paints `#e62d42` and `#rrggbb`."), []
@@ -191,6 +187,20 @@ class Forms(unittest.TestCase):
             self.assertEqual(len(out), 1, out)
             self.assertIn("`src/x.rs:2` cites lines", out[0])
             self.assertEqual(messages(f"`src/x.rs` is built by `{other}`, then `grant` at `#grant`."), [])
+
+    def test_a_name_that_several_files_end_with_is_ambiguous_by_symbol_only(self):
+        extra = {"a/lib.rs": "fn grant() {}\n", "b/lib.rs": "fn grant() {}\n"}
+        out = messages("The `grant` is at `lib.rs#grant`.", extra)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`lib.rs#grant` is ambiguous: several files end with it, give a longer path", out[0])
+        self.assertEqual(messages("The `grant` is at `lib.rs:1`.", extra, lines_kept={}), [])
+        self.assertEqual(messages("The `grant` is at `nope.rs#grant`."), [])
+
+    def test_a_host_path_names_no_file_of_its_line(self):
+        out = messages("`/usr/bin/x` runs the `grant` at `#grant`.")
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`#grant` cites the file named before it on its line", out[0])
+        self.assertEqual(messages("`glib/gmain.c:3`, then `#grant` and `:5`.", lines_kept={}), [])
 
     def test_a_file_with_no_symbols_cannot_be_cited_by_name(self):
         out = messages("The `ExecStart` is in `unit.service#Service`.")
