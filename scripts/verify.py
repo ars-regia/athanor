@@ -5731,6 +5731,70 @@ def state_link_problems(units, created):
     ]
 
 
+# The session daemons of doc_session.md SN6 whose units set WatchdogSec= (doc_session_daemons.md
+# SD17, doc_portal.md PT3), and the value the maintainer gave them on 2026-11-22.
+WATCHDOG_UNITS = (
+    "athanor-idle.service",
+    "athanor-sessiond.service",
+    "athanor-shelld.service",
+    "xdg-desktop-portal-athanor.service",
+)
+WATCHDOG_SECONDS = 30
+# A ping in Rust: athanor-unit's helper, its notify call or the datagram itself, never a definition.
+WATCHDOG_SEND = re.compile(r'(?<!fn )\b(?:watchdog::spawn|notify_watchdog)\s*\(|b"WATCHDOG=1"')
+
+
+def watchdog_senders(root):
+    """{binary: whether its crate's src/ sends WATCHDOG=1} for every crate under system/ and
+    forge/specs: its package name, its [[bin]] names and its src/bin/*.rs files."""
+    senders = {}
+    for base in ("system", "forge/specs"):
+        for manifest in walk(root / base, "Cargo.toml"):
+            try:
+                package = tomllib.loads(read(manifest))
+            except tomllib.TOMLDecodeError:
+                continue
+            bins = {package.get("package", {}).get("name")} | {b.get("name") for b in package.get("bin", [])}
+            bins |= {f.stem for f in (manifest.parent / "src" / "bin").glob("*.rs")}
+            bins.discard(None)
+            sends = any(
+                WATCHDOG_SEND.search(line.split("//")[0])
+                for source in walk(manifest.parent / "src", ".rs")
+                for line in read(source).split("\n")
+            )
+            for binary in bins:
+                senders[binary] = senders.get(binary, False) or sends
+    return senders
+
+
+def watchdog_problems(units, senders):
+    """A finding for every daemon of WATCHDOG_UNITS without WatchdogSec= of WATCHDOG_SECONDS, and
+    for every unit with WatchdogSec= whose program sends no WATCHDOG=1 or whose manager would
+    drop the ping: the manager ends a unit whose watchdog is never pinged (doc_session.md SN6)."""
+    problems = []
+    for unit in WATCHDOG_UNITS:
+        have = dict(unit_section(units.get(unit, ""), "Service")).get("WatchdogSec")
+        if have is None or time_span(have) != WATCHDOG_SECONDS:
+            problems.append(f"{unit}: WatchdogSec={have if have is not None else '(unset)'}, doc_session.md SN6 wants {WATCHDOG_SECONDS}s")
+    for unit, text in sorted(units.items()):
+        service = dict(unit_section(text, "Service"))
+        have = service.get("WatchdogSec")
+        if have is None:
+            continue
+        if not time_span(have):
+            problems.append(f"{unit}: WatchdogSec={have} is no positive time span (systemd.time(7))")
+            continue
+        command = service.get("ExecStart", "").split()
+        program = command[0].lstrip("-@:+!").rsplit("/", 1)[-1] if command else "(no ExecStart=)"
+        if program not in senders:
+            problems.append(f"{unit}: sets WatchdogSec= and runs {program}, no binary of a crate under system/ or forge/specs, so no check sees it send WATCHDOG=1")
+        elif not senders[program]:
+            problems.append(f"{unit}: sets WatchdogSec= and the crate of {program} sends no WATCHDOG=1, so the manager ends it at every timeout (athanor_unit::watchdog::spawn)")
+        if service.get("Type", "simple") not in ("notify", "notify-reload") and service.get("NotifyAccess", "none") == "none":
+            problems.append(f"{unit}: sets WatchdogSec= in a Type={service.get('Type', 'simple')} unit without NotifyAccess=, so the manager may drop every WATCHDOG=1 (doc_portal.md PT3)")
+    return problems
+
+
 @check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
@@ -5741,6 +5805,8 @@ def check_session_units():
     for problem in session_exempt_problems(session_unit_problems(units, enabled)):
         r.fail(problem)
     for problem in state_link_problems(units, shipped_user_state_directories(ROOT)):
+        r.fail(problem)
+    for problem in watchdog_problems(units, watchdog_senders(ROOT)):
         r.fail(problem)
     for (unit, finding), why in SESSION_EXEMPT.items():
         r.note(f"exempt: {unit}: {finding}: {why}")
