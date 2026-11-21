@@ -2,7 +2,7 @@
 id: ADR-0076
 title: "Platform scope for 1.0"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0148
 issues: [223]
 areas: [platform, security, build, docs]
 ---

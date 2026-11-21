@@ -84,13 +84,13 @@ pub mod sal {
 }
 
 #[cfg(feature = "gtk")]
-#[allow(clippy::all, warnings)]
+#[allow(clippy::all, deprecated)]
 pub mod accent_engine;
 #[cfg(feature = "gtk")]
-#[allow(clippy::all, warnings)]
+#[allow(clippy::all)]
 pub mod appearance_engine;
 #[cfg(feature = "gtk")]
-#[allow(clippy::all, warnings)]
+#[allow(clippy::all, deprecated)]
 pub mod glass;
 
 #[cfg(feature = "gtk")]

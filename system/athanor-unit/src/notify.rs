@@ -1,6 +1,7 @@
-//! Notifications to the manager (sd_notify(3)): `READY=1` for `Type=notify` units, and
-//! `RESTART_RESET=1` for a guard that has run healthily (doc_session.md, SN6), each one
-//! datagram to `$NOTIFY_SOCKET`. Does nothing outside systemd.
+//! Notifications to the manager (sd_notify(3)): `READY=1` for `Type=notify` units,
+//! `RESTART_RESET=1` for a guard that has run healthily (doc_session.md, SN6), and `WATCHDOG=1`
+//! for a unit with `WatchdogSec=`, each one datagram to `$NOTIFY_SOCKET`. Does nothing outside
+//! systemd.
 
 use std::env;
 use std::ffi::OsStr;
@@ -42,6 +43,31 @@ pub fn spawn_restart_reset(after: Duration) -> io::Result<()> {
         .map(drop)
 }
 
+/// The timeout of the manager's watchdog for this process, from `WATCHDOG_USEC`, as
+/// sd_watchdog_enabled(3) reads it: `None` without `WatchdogSec=`, or when `WATCHDOG_PID` names
+/// another process. A process that pings it sends `WATCHDOG=1` at half of it.
+pub fn watchdog_timeout() -> Option<Duration> {
+    let usec = env::var("WATCHDOG_USEC").ok()?;
+    let pid = env::var("WATCHDOG_PID").ok();
+    watchdog_timeout_of(&usec, pid.as_deref(), std::process::id())
+}
+
+fn watchdog_timeout_of(usec: &str, pid: Option<&str>, own: u32) -> Option<Duration> {
+    if pid.is_some_and(|pid| pid.parse() != Ok(own)) {
+        return None;
+    }
+    let usec: u64 = usec.parse().ok()?;
+    (usec > 0).then(|| Duration::from_micros(usec))
+}
+
+/// Tells the manager's watchdog that the process is alive. Does nothing outside systemd.
+pub fn notify_watchdog() -> io::Result<()> {
+    match env::var_os("NOTIFY_SOCKET") {
+        Some(socket) => notify_to(&socket, b"WATCHDOG=1"),
+        None => Ok(()),
+    }
+}
+
 fn notify_ready_to(socket: &OsStr) -> io::Result<()> {
     notify_to(socket, b"READY=1")
 }
@@ -75,6 +101,18 @@ mod tests {
         notify_ready_to(OsStr::new(&format!("@{name}"))).expect("notify");
         let read = listener.recv(&mut buffer).expect("recv");
         assert_eq!(&buffer[..read], b"READY=1");
+    }
+
+    #[test]
+    fn the_watchdog_timeout_is_for_this_process_only() {
+        let second = Some(Duration::from_secs(1));
+        assert_eq!(watchdog_timeout_of("1000000", None, 7), second);
+        assert_eq!(watchdog_timeout_of("1000000", Some("7"), 7), second);
+        assert_eq!(watchdog_timeout_of("1000000", Some("8"), 7), None);
+        assert_eq!(watchdog_timeout_of("1000000", Some("x"), 7), None);
+        assert_eq!(watchdog_timeout_of("0", None, 7), None);
+        assert_eq!(watchdog_timeout_of("-1", None, 7), None);
+        assert_eq!(watchdog_timeout_of("", None, 7), None);
     }
 
     #[test]

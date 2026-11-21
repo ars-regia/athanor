@@ -5,21 +5,21 @@ use super::*;
 use std::io::{ErrorKind, Read};
 
 /// A client that writes its requests raw, nulls included, as no client library would.
-struct Wire {
-    stream: UnixStream,
+pub(super) struct Wire {
+    pub(super) stream: UnixStream,
     /// The events it got: their object, their opcode and their arguments.
-    events: Vec<(u32, u16, Vec<u8>)>,
+    pub(super) events: Vec<(u32, u16, Vec<u8>)>,
     unread: Vec<u8>,
     closed: bool,
 }
 
 /// The ids the client gives its registry and the callback of its first sync.
-const REGISTRY: u32 = 2;
+pub(super) const REGISTRY: u32 = 2;
 const CALLBACK: u32 = 3;
 
 impl Wire {
     /// Connects outside a security context and lists the globals.
-    fn connect(run: &mut Running) -> Self {
+    pub(super) fn connect(run: &mut Running) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
         let data = run.state.client_state(&server_end, None);
         run.state
@@ -44,7 +44,7 @@ impl Wire {
     }
 
     /// Sends the request `opcode` of `object` with its argument words.
-    fn send(&mut self, object: u32, opcode: u16, args: &[u32]) {
+    pub(super) fn send(&mut self, object: u32, opcode: u16, args: &[u32]) {
         let size = u32::try_from(8 + 4 * args.len()).expect("a short request");
         let bytes: Vec<u8> = [object, size << 16 | u32::from(opcode)]
             .iter()
@@ -55,7 +55,7 @@ impl Wire {
     }
 
     /// The name of the global of `interface`.
-    fn global(&self, interface: &str) -> u32 {
+    pub(super) fn global(&self, interface: &str) -> u32 {
         self.events
             .iter()
             .filter(|(object, opcode, _)| (*object, *opcode) == (REGISTRY, 0))
@@ -65,7 +65,7 @@ impl Wire {
     }
 
     /// Runs the compositor until `done` holds of the client.
-    fn pump(&mut self, run: &mut Running, what: &str, done: impl Fn(&Self) -> bool) {
+    pub(super) fn pump(&mut self, run: &mut Running, what: &str, done: impl Fn(&Self) -> bool) {
         let started = Instant::now();
         while !done(self) {
             assert!(started.elapsed() < TIMEOUT, "{what}: not in time");
@@ -100,7 +100,7 @@ fn word(bytes: &[u8], at: usize) -> Option<u32> {
 }
 
 /// A string argument's words: its length with the NUL, its bytes, the NUL, the padding.
-fn string(text: &str) -> Vec<u32> {
+pub(super) fn string(text: &str) -> Vec<u32> {
     let mut bytes = text.as_bytes().to_vec();
     bytes.push(0);
     bytes.resize(bytes.len().next_multiple_of(4), 0);

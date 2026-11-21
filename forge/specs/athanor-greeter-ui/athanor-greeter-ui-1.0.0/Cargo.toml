@@ -24,7 +24,6 @@ serde_json = { workspace = true }
 # Zeroizing<String> over every copy of the password this process owns.
 zeroize = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # NSS (getpwent) and the locale's collation (newlocale, strcoll) for the account list (LP19).
 libc = { workspace = true }
 # lastlog2, read-only, for the order of the account list (LP19, D20).

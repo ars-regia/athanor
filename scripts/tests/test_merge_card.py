@@ -148,6 +148,16 @@ def run(
             return codeowners
         if "--paginate" in args:
             assert "--slurp" in args, "a paginated read must keep every page"
+            if "/actions/runs?" in path:
+                runs = [
+                    {
+                        "check_suite_id": c.get("workflowName", 0),
+                        "workflow_id": c.get("workflowId", 1),
+                        "event": c.get("event", "pull_request"),
+                    }
+                    for c in checks
+                ]
+                return json.dumps([{"workflow_runs": runs}])
             if path.endswith("/check-runs"):
                 runs = [run_api(c) for c in checks]
                 return json.dumps([{"total_count": len(runs), "check_runs": runs}])
@@ -421,10 +431,47 @@ class Findings(unittest.TestCase):
 
     def test_the_same_job_name_in_two_workflows_hides_nothing(self):
         checks = [
-            check("gate", workflowName=1),
-            check("gate", "FAILURE", workflowName=2),
+            check("gate", workflowName=1, workflowId=1),
+            check("gate", "FAILURE", workflowName=2, workflowId=2),
         ]
         self.assertIn("required check gate is fail", run(checks=checks)[2])
+
+    def test_a_later_run_of_the_same_workflow_supersedes_an_earlier_one(self):
+        early = check(
+            "gate", "FAILURE", workflowName=1, startedAt="2026-01-01T09:00:00Z"
+        )
+        late = check("gate", workflowName=2, startedAt="2026-01-01T10:00:00Z")
+        code, _, err = run(checks=[early, late])
+        self.assertEqual(code, 0, err)
+        self.assertIn(
+            "required check gate is fail",
+            run(checks=[late, {**early, "startedAt": "2026-01-01T11:00:00Z"}])[2],
+        )
+
+    def test_a_tie_in_time_is_decided_by_the_worse_state_in_any_order(self):
+        ok = check("gate", workflowName=1)
+        bad = check("gate", "FAILURE", workflowName=2)
+        for checks in ([ok, bad], [bad, ok]):
+            self.assertIn("required check gate is fail", run(checks=checks)[2])
+
+    def test_a_run_of_another_event_supersedes_nothing(self):
+        early = check("gate", "FAILURE", workflowName=1, startedAt="2026-01-01T09:00:00Z")
+        late = check(
+            "gate",
+            workflowName=2,
+            event="workflow_dispatch",
+            startedAt="2026-01-01T10:00:00Z",
+        )
+        self.assertIn("required check gate is fail", run(checks=[early, late])[2])
+
+    def test_a_suite_missing_from_the_runs_stays_a_separate_entry(self):
+        late = check("gate", workflowName=2, startedAt="2026-01-01T10:00:00Z")
+        early = check("gate", "FAILURE", workflowName=1, startedAt="2026-01-01T09:00:00Z")
+        # the suite 1 is listed under workflow 1, suite 2 is absent from the listing
+        keys = merge_card.latest_checks(
+            [{**early, "workflowName": "1/pull_request"}, {**late, "workflowName": "2"}]
+        )
+        self.assertEqual(len(keys), 2)
 
     def test_a_queued_rerun_is_pending_not_hidden_by_an_older_pass(self):
         queued = {

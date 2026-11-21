@@ -26,6 +26,7 @@ const SCHEMA: &str = "org.athanor.desktop.background";
 const INTERFACE: &str = "org.gnome.desktop.interface";
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)

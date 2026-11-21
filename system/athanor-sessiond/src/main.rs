@@ -40,6 +40,7 @@ async fn serve() {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     let grants = match confine::daemon(|name| env::var_os(name), None) {
         Ok(grants) => grants,
