@@ -391,6 +391,9 @@ class Moved(unittest.TestCase):
         hunks = {"notes.md": [(1, 1, 1)]}
         self.assertEqual(self.found(text, hunks, extra=notes, before=before), [])
         self.assertEqual(len(self.found(text, hunks, extra=notes)), 1)
+        short = {"notes.md": "a `note` at `src/x.rs:124`, `:9`\nnext\n"}
+        before_short = {"notes.md": "a `note` at `src/x.rs:120`, `:7`\nnext\n"}
+        self.assertEqual(self.found(text, hunks, extra=short, before=before_short), [])
         reworded = {"notes.md": "a `note` at `src/x.rs:120` there\nnext\n"}
         out = self.found(text, hunks, extra=notes, before=reworded)
         self.assertIn("edited or removed: place it again", out[0])
@@ -400,6 +403,9 @@ class Moved(unittest.TestCase):
         for name, now, was in (
             ("notes.md", "a `note` of fedora:44\n", "a `note` of fedora:43\n"),
             ("notes.md", "a `note` at `x:9090` there\n", "a `note` at `x:8080` there\n"),
+            ("notes.md", "a `note` at `registry.example:5001`\n", "a `note` at `registry.example:5000`\n"),
+            ("notes.md", "a `note` at `quay.io:444` and `:9090`\n", "a `note` at `quay.io:443` and `:8080`\n"),
+            ("notes.md", "a `note` at `:9090`\n", "a `note` at `:8080`\n"),
             ("notes.rs", 'const `note`: &str = "127.0.0.1:9090";\n', 'const `note`: &str = "127.0.0.1:8080";\n'),
             ("notes.rs", "a `note` at `src/x.rs:124` here\n", "a `note` at `src/x.rs:120` here\n"),
         ):

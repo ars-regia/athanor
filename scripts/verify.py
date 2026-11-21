@@ -6709,9 +6709,25 @@ def diff_hunks(root, base):
     return out
 
 
-# The numbers of a citation inside a line: a whole backtick span, `path.ext:120`, `path.ext:3, 9-12` or
-# the short `:120`. Any other `:N` (`fedora:43`, `127.0.0.1:8080`) is text.
-CITATION_NUMBERS = re.compile(r"(`[^`\s]*\.[A-Za-z]\w*|`):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*(?=`)")
+# A backtick span that may cite lines: `path:120`, `path:3, 9-12`, or the short `:120`.
+CITATION_SPAN = re.compile(r"`([^`\s]*):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*`")
+
+
+def without_citation_numbers(line, tracked):
+    """LINE with the numbers of its citations blanked: a span whose path is a tracked file, and a short
+    `:N` that follows such a span on the line. Any other `:N` (`fedora:43`, `quay.io:443`) is text."""
+    cited = False
+
+    def blank(m):
+        nonlocal cited
+        if m[1] and not any(f == m[1] or f.endswith("/" + m[1]) for f in tracked):
+            return m[0]
+        if not m[1] and not cited:
+            return m[0]
+        cited = True
+        return f"`{m[1]}:N`"
+
+    return CITATION_SPAN.sub(blank, line)
 
 
 def moved_ranges(ranges, hunks, same=None):
@@ -7207,8 +7223,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 before = base_file(path).split("\n") if base_file else []
                 new = moved_ranges(ranges, hunks[path], lambda old, now: path.endswith(".md")
                                    and old <= len(before) and now <= len(rows)
-                                   and CITATION_NUMBERS.sub(r"\1:N", before[old - 1])
-                                   == CITATION_NUMBERS.sub(r"\1:N", rows[now - 1]))
+                                   and without_citation_numbers(before[old - 1], tracked)
+                                   == without_citation_numbers(rows[now - 1], tracked))
                 if new is None:
                     out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
                                 "that this change edited or removed: place it again"))
