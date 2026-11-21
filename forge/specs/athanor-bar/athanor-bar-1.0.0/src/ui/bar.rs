@@ -842,6 +842,16 @@ impl Bar {
             .popover
             .as_ref()
             .is_some_and(|p| matches!(p.open, Open::Module(m) if m == module));
+        // What the popover reopened asked to announce and the driver has not published yet, as
+        // a failure in the turn that reopens it, or before its first configure: it goes with its
+        // Ui (#1264, #1267).
+        let pending = self
+            .popover
+            .as_ref()
+            .filter(|_| reopening)
+            .and_then(|p| shell.ui(p.popup))
+            .and_then(Ui::announcement)
+            .map(|(text, priority)| (text.to_owned(), priority));
         let replaced = !reopening
             && self
                 .popover
@@ -868,7 +878,10 @@ impl Bar {
             _ => None,
         };
         match built {
-            Some(ui) => self.show_popover(shell, surface, button, ui, Open::Module(module)),
+            Some(mut ui) => {
+                carry(pending, &mut ui);
+                self.show_popover(shell, surface, button, ui, Open::Module(module));
+            }
             // The bar no longer holds the popover it replaced: its popup closes too, rather
             // than stay mapped with no one to close it.
             None if replaced => shell.close_popup(),
@@ -1312,10 +1325,41 @@ impl Application for Bar {
     }
 }
 
+/// Asks `ui`, the popover that replaces one reopened, for the announcement `pending` on the one
+/// it replaces, unless it asks for one of its own: a page built again announces its failure
+/// itself, and a later announcement replaces an earlier one ([`Ui::announce`]).
+fn carry(pending: Option<(String, Priority)>, ui: &mut Ui) {
+    if let (Some((text, priority)), None) = (pending, ui.announcement()) {
+        ui.announce(&text, priority);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use athanor_sal::{Kind, Theme};
+
+    /// A popover reopened in the turn that announced on it, as the battery's is when a failure
+    /// comes with the power modes or the brightness showing or hiding, or rebuilt before its
+    /// first configure, speaks what the one it replaces had not published; the page built again
+    /// keeps an announcement of its own (#1264, #1267).
+    #[test]
+    fn a_reopened_popover_speaks_what_the_one_it_replaces_had_not_published() {
+        let failed = || Some(("The action did not complete.".to_owned(), Priority::Polite));
+        let mut reopened = Ui::new("Battery", Theme::default(), false);
+        carry(failed(), &mut reopened);
+        let expected = Some(("The action did not complete.", Priority::Polite));
+        assert_eq!(reopened.announcement(), expected);
+
+        let mut own = Ui::new("Network", Theme::default(), false);
+        own.announce("Wi-Fi is off.", Priority::Assertive);
+        carry(failed(), &mut own);
+        assert_eq!(own.announcement(), Some(("Wi-Fi is off.", Priority::Assertive)));
+
+        let mut quiet = Ui::new("Battery", Theme::default(), false);
+        carry(None, &mut quiet);
+        assert_eq!(quiet.announcement(), None);
+    }
 
     #[test]
     fn a_rebuilt_bar_keeps_the_focus_on_the_control_of_the_same_action() {

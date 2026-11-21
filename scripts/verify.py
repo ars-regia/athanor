@@ -6609,7 +6609,295 @@ def moved_ranges(ranges, hunks):
     return [(shifted(start), shifted(last)) for start, last in ranges]
 
 
-def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
+# What a backtick span cites by name: `path#symbol`, or `#symbol` for the path named last. A colour
+# (`#e62d42`, the placeholder `#rrggbb`) is no citation.
+SYMBOL_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?#([A-Za-z_][^`]*)")
+SCHEME = re.compile(r"[A-Za-z][\w+.-]*:")
+COLOUR = re.compile(r"#(?:[0-9A-Fa-f]{3,8}|r+g+b+a*)")
+# The files whose citations stay `path:N`, each with its reason: a file with no symbol to name (a
+# data file, a generated list). An entry that no `path:N` citation names fails, so the list only shrinks.
+CITATION_LINES_KEPT = {}
+# Whether the documents cite by symbol (#1278). Until the migration sets it, `line-citations` checks
+# every `path:N` and symbol-citations only the `path#symbol` form; once set, symbol-citations also
+# checks `path:N`, which only a file of CITATION_LINES_KEPT may take.
+CITATION_LINES_RETIRED = False
+
+RUST_ITEM = re.compile(r"(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|async|unsafe|default|extern(?:\s+\"[^\"]*\")?)\s+)*"
+                       r"(fn|struct|enum|union|trait|type|const|static|mod|macro_rules!)\s+(?:mut\s+)?(?:r#)?([A-Za-z_]\w*)")
+RUST_IMPL = re.compile(r"(\s*)(?:unsafe\s+)?impl\b(.*)")
+SHELL_FUNCTION = re.compile(r"(\s*)(?:function\s+([\w:.-]+)\s*(?:\(\s*\))?|([\w:.-]+)\s*\(\s*\))\s*\{?\s*(?:#.*)?$")
+TOML_KEY = r"(?:[\w-]+|\"[^\"]*\"|'[^']*')(?:\s*\.\s*(?:[\w-]+|\"[^\"]*\"|'[^']*'))*"
+TOML_HEADER = re.compile(rf"\[\[?\s*({TOML_KEY})\s*\]\]?\s*(?:#.*)?")
+TOML_ASSIGN = re.compile(rf"({TOML_KEY})\s*=(.*)")
+MARKDOWN_SECTION = re.compile(r"\*\*([A-Z]{1,4}\d+[a-z]?)\.")
+MARKDOWN_HEADING = re.compile(r"(#{1,6})\s+(.*?)\s*#*\s*")
+
+
+def qualified(chain, name, sep):
+    """The spellings that select `name` nested in the containers `chain`: `name`, then each longer
+    suffix of `chain::name`."""
+    return {sep.join([*chain[k:], name]) for k in range(len(chain) + 1)}
+
+
+def indent_of(row):
+    return len(row) - len(row.lstrip())
+
+
+def rust_definitions(rows):
+    """The items of a Rust file, each ({spellings}, first line, last line). An item (`fn`, `struct`,
+    `enum`, `union`, `trait`, `type`, `const`, `static`, `mod`, `macro_rules!`) is spelled by its
+    name, or qualified by the `mod`, `trait` and `impl` blocks around it (`Lock::new`, an impl being
+    named by its type); an impl block is spelled as its header, without the impl's own parameters
+    (`impl Lock`, `impl Drop for Lock`, `impl Dispatch<WlSurface, ()> for Client`).
+    An item starts at the attributes and comments right above it and ends on its line when that line
+    ends with `;` or `}`, else at the next line of its indent that starts with `}`, `)` or `]` and
+    opens no block. Limit: rustfmt's layout is assumed, and an item-like line inside a string
+    (a raw-string fixture) counts as an item."""
+    found = []
+    for i, row in enumerate(rows):
+        if (m := RUST_ITEM.match(row)):
+            kind, name = m.group(2), m.group(3)
+        elif (m := RUST_IMPL.match(row)):
+            head = re.split(r"\{|\bwhere\b", m.group(2))[0].strip()
+            depth = 0
+            for k, char in enumerate(head if head.startswith("<") else ""):
+                depth += {"<": 1, ">": -1}.get(char, 0)
+                if depth == 0:
+                    head = head[k + 1:]
+                    break
+            kind, name = "impl", " ".join(head.split())
+            if not name:
+                continue
+        else:
+            continue
+        indent = len(m.group(1))
+        first = i
+        while first > 0 and indent_of(rows[first - 1]) == indent:
+            above = rows[first - 1].strip()
+            if above.startswith(("#[", "//")) and not above.startswith("//!"):
+                first -= 1
+            elif above in (")]", "]"):
+                opener = next((k for k in range(first - 2, -1, -1) if indent_of(rows[k]) == indent
+                               and rows[k].strip().startswith("#[")), None)
+                if opener is None:
+                    break
+                first = opener
+            else:
+                break
+        last = i
+        if not row.rstrip().endswith((";", "}")):
+            for j in range(i + 1, len(rows)):
+                text = rows[j].strip()
+                if not text:
+                    continue
+                if indent_of(rows[j]) < indent and text[0] in "})]":
+                    break
+                if indent_of(rows[j]) == indent:
+                    if text[0] in "})]" and not text.endswith("{"):
+                        last = j
+                        break
+                    if not text.startswith(("where", "{", ")", "]", "->")):
+                        break
+                last = j
+        found.append((kind, name, indent, first + 1, i + 1, last + 1))
+    out = []
+    for kind, name, indent, first, line, last in found:
+        chain = [(re.sub(r"<.*", "", target.rsplit(" for ", 1)[-1]).split("::")[-1].strip("&* ") if k == "impl" else target)
+                 for k, target, _, _, start, end in found
+                 if k in ("impl", "trait", "mod") and start < line <= end]
+        out.append(({f"impl {name}"} if kind == "impl" else qualified(chain, name, "::"), first, last))
+    return out
+
+
+def python_definitions(body):
+    """The functions and classes of a Python file, spelled by their name or qualified by the classes
+    and functions around them (`Result.fail`), with their decorators; and the names a module-level
+    assignment binds. Raises ValueError when the file does not parse."""
+    try:
+        tree = ast.parse(body)
+    except SyntaxError as e:
+        raise ValueError(f"does not parse as Python (line {e.lineno})") from e
+    out = []
+
+    def walk(nodes, chain):
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+                out.append((qualified(chain, node.name, "."), first, node.end_lineno))
+                walk(node.body, [*chain, node.name])
+            elif not chain and isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                    if isinstance(target, ast.Name):
+                        out.append(({target.id}, node.lineno, node.end_lineno))
+
+    walk(tree.body, [])
+    return out
+
+
+def shell_definitions(rows):
+    """The functions of a shell script (`name() {`, `function name {`), from the comments right above
+    one to the next line of its indent that starts with `}`."""
+    out = []
+    for i, row in enumerate(rows):
+        if not (m := SHELL_FUNCTION.match(row)) or row.lstrip().startswith("#"):
+            continue
+        indent = len(m.group(1))
+        first = i
+        while first > 1 and indent_of(rows[first - 1]) == indent and rows[first - 1].lstrip().startswith("#"):
+            first -= 1
+        last = i if row.rstrip().endswith("}") else next(
+            (j for j in range(i + 1, len(rows)) if indent_of(rows[j]) == indent
+             and rows[j].strip().startswith("}")), len(rows) - 1)
+        out.append(({m.group(2) or m.group(3)}, first + 1, last + 1))
+    return out
+
+
+def toml_definitions(rows):
+    """The tables and keys of a TOML file, spelled by their full dotted path (`workspace.members`):
+    a table from its header to the line before the next header, a key from its line to the end of
+    its value."""
+    def path(raw):
+        return ".".join(p.strip().strip("\"'") for p in re.findall(r"\"[^\"]*\"|'[^']*'|[^.]+", raw))
+
+    out, table, depth, quote, key = [], "", 0, None, None
+    for n, row in enumerate(rows, 1):
+        text = row.strip()
+        resumed = bool(quote)
+        if quote:
+            if quote not in text:
+                continue
+            text, quote = text.split(quote, 1)[1], None  # what follows the closing quotes counts as brackets
+        if depth == 0 and not resumed:
+            if (m := TOML_HEADER.fullmatch(text)):
+                table = path(m.group(1))
+                out.append([{table}, n, n])
+                continue
+            if not (m := TOML_ASSIGN.match(text)) or text.startswith("#"):
+                continue
+            key = [{f"{table}.{path(m.group(1))}" if table else path(m.group(1))}, n, n]
+            out.append(key)
+            text = m.group(2)
+        bare = re.sub(r"\"\"\"|'''", "\0", text)
+        bare = re.sub(r"\"(?:\\.|[^\"\\])*\"|'[^']*'", "", bare)
+        bare = bare.split("#", 1)[0]
+        if bare.count("\0") % 2:
+            quote = '"""' if '"""' in text else "'''"
+        depth += bare.count("[") + bare.count("{") - bare.count("]") - bare.count("}")
+        if key and depth == 0 and not quote:
+            key[2], key = n, None
+    headers = [first for names, first, last in out if first == last and TOML_HEADER.fullmatch(rows[first - 1].strip())]
+    for entry in out:
+        if entry[1] in headers:
+            end = next((h - 1 for h in headers if h > entry[1]), len(rows))
+            while end > entry[1] and not rows[end - 1].strip():
+                end -= 1
+            entry[2] = end
+    return [tuple(entry) for entry in out]
+
+
+def yaml_definitions(body):
+    """The keys of a YAML file, spelled by their dotted path (`jobs.build`), an item of a list that
+    has a `name` spelled by it (`jobs.build.steps[name=Sign]`), each from its line to the end of its
+    value. Raises ValueError without PyYAML or when the file does not parse."""
+    if yaml is None:
+        raise ValueError("needs PyYAML to read the symbols of a YAML file")
+    try:
+        root = yaml.compose(body)
+    except yaml.YAMLError as e:
+        raise ValueError(f"does not parse as YAML: {e}") from e
+    out, rows = [], body.split("\n")
+
+    def end(node, first):
+        # A block value ends where the next token starts: on the line before it when only blanks
+        # precede that token on its line; trailing blank and comment lines are left out.
+        mark = node.end_mark
+        last = mark.line if mark.line >= len(rows) or not rows[mark.line][:mark.column].strip() else mark.line + 1
+        while last > first and rows[last - 1].strip()[:1] in ("", "#"):
+            last -= 1
+        return last
+
+    def walk(node, prefix):
+        if isinstance(node, yaml.MappingNode):
+            for key, value in node.value:
+                if isinstance(key, yaml.ScalarNode):
+                    name = f"{prefix}.{key.value}" if prefix else key.value
+                    out.append(({name}, key.start_mark.line + 1, end(value, key.start_mark.line + 1)))
+                    walk(value, name)
+        elif isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                titles = [v.value for k, v in item.value if k.value == "name" and isinstance(v, yaml.ScalarNode)
+                          ] if isinstance(item, yaml.MappingNode) else []
+                if titles:
+                    name = f"{prefix}[name={titles[0]}]"
+                    out.append(({name}, item.start_mark.line + 1, end(item, item.start_mark.line + 1)))
+                    walk(item, name)
+
+    walk(root, "")
+    return out
+
+
+def markdown_slug(heading):
+    """The anchor GitHub gives a heading: lower case, punctuation dropped, spaces as hyphens."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def markdown_definitions(rows):
+    """The sections of a markdown document: a `**SH3.` section, to the next such line or heading of
+    level 1 to 3 (as section_lines reads it), spelled by its id; and a heading, to the next heading
+    of its level or above, spelled by its GitHub anchor and by the id it starts with (`CT3.`). Lines
+    in a fenced block are no heading."""
+    heads, fenced = [], False
+    for n, row in enumerate(rows, 1):
+        if row.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and (m := MARKDOWN_HEADING.fullmatch(row)):
+            heads.append((n, len(m.group(1)), m.group(2)))
+    out = []
+    for i, (n, level, title) in enumerate(heads):
+        end = next((h - 1 for h, lv, _ in heads[i + 1:] if lv <= level), len(rows))
+        names = {markdown_slug(title)}
+        if (m := re.match(r"([A-Z]{1,4}\d+[a-z]?)\.", title)):
+            names.add(m.group(1))
+        out.append((names, n, end))
+    starts = [n for n, row in enumerate(rows, 1) if SECTION_START.match(row)]
+    for n, row in enumerate(rows, 1):
+        if (m := MARKDOWN_SECTION.match(row)):
+            out.append(({m.group(1)}, n, next((s - 1 for s in starts if s > n), len(rows))))
+    trimmed = []
+    for names, first, last in out:
+        while last > first and not rows[last - 1].strip():
+            last -= 1
+        trimmed.append((names, first, last))
+    return trimmed
+
+
+def symbol_definitions(path, body):
+    """The definitions a `path#symbol` citation may name, as [({spellings}, first line, last line)],
+    by the kind of the file: Rust, Python, shell (by extension or `#!` line), TOML, YAML and
+    markdown. None for a file of another kind, which has no symbol to name. Raises ValueError when
+    the file cannot be read as its kind."""
+    rows = body.split("\n")
+    head = rows[0] if rows else ""
+    if path.endswith(".rs"):
+        return rust_definitions(rows)
+    if path.endswith(".py") or re.match(r"#!.*python", head):
+        return python_definitions(body)
+    if path.endswith((".sh", ".bash")) or re.match(r"#!.*\b(?:ba|da|k|z)?sh\b|# shellcheck shell=", head):
+        return shell_definitions(rows)
+    if path.endswith(".toml"):
+        try:
+            tomllib.loads(body)
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"does not parse as TOML: {e}") from e
+        return toml_definitions(rows)
+    if path.endswith((".yml", ".yaml")):
+        return yaml_definitions(body)
+    if path.endswith(".md"):
+        return markdown_definitions(rows)
+    return None
+
+
+def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -6656,7 +6944,24 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch."""
+    the limit: every citation on an edited line is skipped, also one the edit did not touch.
+
+    A citation by name is `path#symbol`, or `#symbol` for the file named last (a colour, `#e62d42`, is
+    none unless the last file defines the symbol, `#add`; an `x#y` whose `x` is no file, a flake
+    reference or a URL, is none and leaves the file named last as it was); its spec in a finding starts with `#`. The symbol must spell exactly one of the
+    definitions that symbol_definitions reads in the file: none means it was renamed or removed,
+    several that it must be qualified (`Lock::new`), and a file of a kind with no symbols cannot be
+    cited so. The definition's lines are then read as cited lines, for the token and the sections
+    of the sentence; a symbol does not move, so the hunks are not read for it, and its lines may
+    span LINE_RANGE_LIMIT or more: a long definition holds more words, and proves less. A `#symbol`
+    on a line that names no file before it is a finding; after a name that resolves to no file (code
+    outside the repository), it is not checked. A `path#symbol` whose path is the end of several tracked
+    files is a finding ("ambiguous"); a `path:N` of one is not. Trade-off: an upstream crate's
+    `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`.
+
+    With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
+    is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
+    `path:N`."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
@@ -6673,41 +6978,105 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
         found = suffixes.get(name, [])
         return found[0] if len(found) == 1 else None
 
+    def names_a_file(name, crate):
+        """NAME is a tracked file or the end of some tracked files' paths."""
+        return name in suffixes or bool(crate and f"{crate}/{name}" in known)
+
+    def defines(path, symbol):
+        """The file PATH holds a definition spelled SYMBOL."""
+        try:
+            return path is not None and any(symbol in names for names, _, _ in symbol_definitions(
+                path, read_file(path)) or ())
+        except ValueError:
+            return False
+
+    def counts_as_named(name, crate):
+        """NAME is a file of the repository, or code outside it that the document cites by a relative
+        path (`glib/gmain.c`), whose lines a bare `:N` may follow; an absolute host path
+        (`/usr/bin/x`) is neither."""
+        return names_a_file(name, crate) or not name.startswith("/")
+
+    def names_a_gone_file(name):
+        """NAME is under a top-level directory of the repository, or is a bare `*.md` name that no
+        tracked file ends with: if it resolves to nothing, the file was removed."""
+        return name.startswith(prefixes) or (
+            name.endswith(".md") and "/" not in name and not any(t.endswith("/" + name) for t in known))
+
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
+        named_any = False
         line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m:
+                m = SYMBOL_CITATION.fullmatch(span.group(1))
+                if m and (not (names_a_file(m[1], crate) or names_a_gone_file(m[1])) if m[1] else
+                          COLOUR.fullmatch(span.group(1)) and not defines(last, m[2].strip())):
+                    m = None  # a flake reference, or a colour that its file does not define
+            if not m:
+                head = span.group(1).partition("#")[0]
+                if SCHEME.match(span.group(1)) or (
+                        "#" in span.group(1) and not (names_a_file(head, crate) or names_a_gone_file(head))):
+                    continue  # a URL or a flake reference, which is no file of the repository
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
+                named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))
                 continue
             named, spec = m.groups()
+            symbol = spec.strip() if m.re is SYMBOL_CITATION else None
+            spec, sep = (f"#{symbol}", "") if symbol else (spec, ":")
             path = last if named is None else resolve(named, crate)
-            if path is None and named and (named.startswith(prefixes) or (
-                    named.endswith(".md") and "/" not in named
-                    and not any(t.endswith("/" + named) for t in known))):
+            if path is None and named and names_a_gone_file(named):
                 out.append((number, named, spec, None,
-                            f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
+                            f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
+                if symbol and named and len(suffixes.get(named, ())) > 1:
+                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{spec}` is ambiguous: "
+                                "several files end with it, give a longer path"))
+                if named is None and not named_any and (symbol or lines_kept is not None):
+                    out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
+                                "before it on its line, and the line names none: name its path"))
+                named_any = named_any or (named is not None and counts_as_named(named, crate))
                 continue
-            body = read_file(path)
+            named_any = True
             if (c := CRATE_ROOT.match(path)):
                 crate = c.group(1)
-            ranges = []
-            for part in re.split(r",\s*", spec):
-                first, _, end = part.partition("-")
-                ranges.append((int(first), int(end or first)))
+            if not symbol and cited is not None:
+                cited.add(path)
+            if not symbol and lines_kept is not None and path not in lines_kept:
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites lines: cite a "
+                            f"symbol, `{path}#name`, or keep a file with no symbol in CITATION_LINES_KEPT"))
+                continue
+            body = read_file(path)
+            if symbol:
+                try:
+                    defs = symbol_definitions(path, body)
+                except ValueError as e:
+                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}{spec}`: the file {e}"))
+                    continue
+                ranges = [(f, e) for names, f, e in defs or () if symbol in names]
+                problem = ("cites a file with no symbols: cite its lines, and keep the file in CITATION_LINES_KEPT"
+                           if defs is None else "names no definition of its file: the symbol was renamed or removed"
+                           if not ranges else f"names {len(ranges)} definitions: qualify it (`Type::name`)"
+                           if len(ranges) > 1 else None)
+                if problem:
+                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}{spec}` {problem}"))
+                    continue
+            else:
+                ranges = []
+                for part in re.split(r",\s*", spec):
+                    first, _, end = part.partition("-")
+                    ranges.append((int(first), int(end or first)))
             rows = body.split("\n")
             if rows[-1] == "":
                 rows.pop()
-            if any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
+            if not symbol and any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
                 out.append((number, path, spec, None,
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
-            if line in unchanged and path in hunks:
+            if not symbol and line in unchanged and path in hunks:
                 new = moved_ranges(ranges, hunks[path])
                 if new is None:
                     out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
@@ -6719,7 +7088,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                     out.append((number, path, spec, "moved", f"{doc}:{number}: `{path}:{spec}` is moved by "
                                 f"this change: it should name `{path}:{named}`"))
                     continue
-            if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
+            if not symbol and path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
                 out.append((number, path, spec, None,
                             f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved"))
                 continue
@@ -6741,7 +7110,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                     if any(not (low <= f and e <= high or any(holds_token("\n".join(rows[f - 1:e]), i)
                                                                for i in spans)) for f, e in ranges):
                         named = ", ".join(spans)
-                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
+                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}{sep}{spec}` is not in "
                                     f"the section of {named}, which its sentence names: the lines moved"))
                         continue
             quoted = path.endswith(".json")
@@ -6785,11 +7154,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                 tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
             if listed and not tokens:
-                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` names no token "
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
                             "that the file holds: put the entry's name in backticks, or hyphenated, "
                             "in its sentence"))
             elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
-                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}:{spec}` does not hold "
+                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}{sep}{spec}` does not hold "
                             f"`{missing}`, which its sentence names: the lines moved"))
     return out
 
@@ -6829,12 +7198,58 @@ def check_line_citations():
         counted = {}
         for _, path, spec, token, problem in citation_findings(
                 doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else ""):
+            if spec.startswith("#"):
+                continue  # a citation by name, which symbol-citations checks
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
             seen.add((doc.name, path, spec, token, n))
             if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    return r
+
+
+@check("symbol-citations", "A path#symbol citation of an architecture document names one definition, which holds the code its sentence names")
+def check_symbol_citations():
+    r = Result()
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = {f for f in listed.stdout.split("\0") if f}
+
+    def read_file(path):
+        try:
+            return read(ROOT / path)
+        except OSError:
+            return ""
+
+    hunks = None
+    if not CITATION_LINES_RETIRED:
+        r.note("the documents still cite lines (CITATION_LINES_RETIRED): line-citations checks `path:N`")
+    elif BASE_REF is None:
+        r.note("no base revision (--known-red-base REF): the citations that the change moved were not checked")
+    else:
+        try:
+            hunks = diff_hunks(ROOT, BASE_REF)
+        except ValueError as e:
+            r.fail(str(e))
+
+    def base_text(doc):
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{doc.relative_to(ROOT).as_posix()}"],
+                               capture_output=True, text=True)
+        return shown.stdout if shown.returncode == 0 else ""  # a document the change adds has no base text
+
+    cited = set()
+    kept = CITATION_LINES_KEPT if CITATION_LINES_RETIRED else None
+    for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
+                       ROOT / "docs/architecture/shell-features.md"]):
+        for _, _, spec, _, problem in citation_findings(
+                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else "", kept, cited):
+            if CITATION_LINES_RETIRED or spec.startswith("#"):
+                r.fail(problem)
+    for path in sorted(set(CITATION_LINES_KEPT) - cited):
+        r.fail(f"CITATION_LINES_KEPT names {path}, which no `path:N` citation cites: remove the entry")
     return r
 
 

@@ -319,9 +319,10 @@ renaming or removing a file fails; beneath a `write` root everything succeeds.
 
 **Proposed:** a directory model on GIO (`gio::File::enumerate_children` off the drawing path,
 batched into the view), sorting by name with natural order, size, type and modification time,
-folders first, hidden files following `org.gtk.gtk4.Settings.FileChooser show-hidden`; a
-monitor that applies changes; the list and grid views and the path bar on Sal's items; names
-shown with visible escapes for control and bidirectional characters, non-UTF-8 bytes escaped
+folders first, hidden files following `org.athanor.desktop.files show-hidden`, a schema that
+`athanor-system-config` ships (`doc_files.md` FM18, decided on 2026-11-21); a monitor that
+applies changes; the list and grid views and the path bar on Sal's items; names shown
+with visible escapes for control and bidirectional characters, non-UTF-8 bytes escaped
 (FM18). The crate holds no operation, launch or archive code, and no writing of any file
 (FM17); a filter callback lets the host hide items.
 
@@ -395,7 +396,8 @@ access; the TM3 rule of Decision D3 on canonical paths (existing target: its can
 target: canonical parent plus name; a dangling link refused for writing; any canonicalisation error refusing the write, never a
 fallback; the canonical TM3 list;
 `writable` false for a folder that is, lies beneath or contains a TM3 path); the results map,
-which carries the checked canonical URI.
+which carries the checked canonical URI. New Folder's name rule: one component, not `.` or `..`,
+no `/` or NUL, and the parent with the name not itself a TM3 path (`doc_portal.md` PT7).
 
 **Verification:** `cargo test -p athanor-portal file_chooser`,
 `python3 scripts/verify.py panics zbus-replies`.
@@ -404,18 +406,21 @@ which carries the checked canonical URI.
 (the two tests PT7 asks for); if the maintainer takes D3, a save into `~/.bashrc`, into `~/.config/autostart/` or through a
 link that resolves into a TM3 path (also `/var/home/...` for `/home/...`) is refused, a picked
 `~`, `~/.config` or `~/.local/share` with `directory` true answers `writable` false, and the
-answer holds the canonical URI that was checked; 10,000 filters are refused, not parsed.
+answer holds the canonical URI that was checked; 10,000 filters are refused, not parsed; a New
+Folder named `a/b`, `.` or `..`, or `autostart` in `~/.config`, is refused.
 
 ### Task 6: the backend draws with Sal (PT2, PT3)
 
 **Files:** the backend's `Cargo.toml`, `src/main.rs`, `xdg-desktop-portal-athanor.service`,
-the spec's `%files` if anything new ships; `components.toml:402` description. Depends on 0a, 1.
+the spec's `%files` with `/usr/lib/tmpfiles.d/xdg-desktop-portal-athanor.conf` (D6); `components.toml:402` description. Depends on 0a, 1.
 
 **Proposed:** per Decision D1, the main thread runs a resident Sal run with `GlibSource`, the
 zbus thread stays as it is, and the two talk through a channel woken in calloop. `confine()`
 keeps `ensure_single_threaded` first and calls `restrict_writes_and_mkdir` with the dconf
 runtime directory and `/tmp` as full writes and `$HOME` and `/run/media` as make-directory
-roots, then `deny_tcp`, all before the zbus thread starts. The unit gains one line,
+roots, then `deny_tcp`, all before the zbus thread starts. Before `restrict_writes_and_mkdir` the
+backend checks itself that `/run/media` exists, not through `dirs::existing`; when it is absent
+it logs at err priority with the path and confines without that root (Decision D6). The unit gains one line,
 `ReadWritePaths=%h -/run/media` (Decision D6 for `/run/media`); it has no `CacheDirectory=` and no
 `RuntimeDirectory=xdg-desktop-portal-athanor` and gains none, since nothing in the chooser writes
 there: thumbnails are held in memory (D8, PT7), and the unit's own runtime and cache directories
@@ -426,14 +431,15 @@ safe direction, for user-writable paths the namespace holds read-only: `/var/mnt
 
 **Verification:** `cargo test -p xdg-desktop-portal-athanor`; `python3 scripts/verify.py
 services landlock-fd landlock-proc own panics`; the PT16 sandbox test in the VM: a write
-beneath `$HOME` fails, a `mkdir` succeeds, a `mkdir` on a mounted stick succeeds; `access(W_OK)`
+beneath `$HOME` fails, a `mkdir` succeeds, a `mkdir` on a stick mounted after the unit started succeeds (Decision D6); `access(W_OK)`
 is true beneath `$HOME` and `/run/media` and false (or the path absent) in `/var/mnt/<label>`,
 `/mnt`, `/tmp` and `/var/tmp`, recorded as the limit above.
 
 **Acceptance:** Settings still answers as before (its tests unchanged), with no compositor
 reachable as well: the Wayland connection is made at the first chooser request, and its
 failure answers that request with an error instead of ending the process; with a compositor,
-the process holds at most one Wayland connection and no window at rest; its PSS at rest stays within PT17's 64 MB.
+the process holds at most one Wayland connection and no window at rest; its PSS at rest stays within PT17's 64 MB. Started with `/run/media` absent, the backend logs one
+err line naming the path, Settings answers, and a `mkdir` beneath `/run/media` is refused.
 
 ### Task 7: OpenFile, SaveFile and SaveFiles (PT4, PT7, PT15, PT16)
 
@@ -449,6 +455,12 @@ boxes or drop-downs, the name field for SaveFile, New Folder, the accept button 
 `accept_label` or the default; the requesting application's name from its desktop file, "An
 application" for an empty id (PT4); "Replace" with Cancel the default for an existing name.
 The chooser mounts nothing (Decision D5); nothing is formatted, ejected, renamed or deleted.
+New Folder opens the parent with `openat2` from an `O_PATH | O_DIRECTORY` descriptor of `/`
+(`RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_BENEATH`), checks that descriptor's path,
+read once through `/proc/self/fd/<n>`, against TM3, and calls `mkdirat` on it (`doc_portal.md`
+PT7). Ctrl+H writes `show-hidden` only after looking up the schema and the key as the view does;
+a missing schema or key, or a failed write, changes only the open dialog and is logged, never a
+panic (FM18).
 
 **Verification:** `cargo test -p xdg-desktop-portal-athanor file_chooser`; the PT16 frontend
 test on a private bus with the SH13 rig; the four surface variants of PT16; a test that injected
@@ -456,7 +468,10 @@ input through an EIS context reaches no chooser surface (`backend_surface`, `eis
 
 **Acceptance:** a `Close` on the Request while the dialog is shown closes it and answers 1, as PT4 says; a
 second request from another application opens a second dialog while the first stays; a Flatpak
-application's SaveFile on a new name returns one URI that the document store grants write to.
+application's SaveFile on a new name returns one URI that the document store grants write to. A New Folder whose canonical parent has a
+component replaced by a symbolic link between canonicalisation and the open is refused; with the `org.athanor.desktop.files` schema removed, and with
+`show-hidden` locked by dconf's lockdown, Ctrl+H toggles hidden files in the open dialog, writes
+nothing, and the backend stays up.
 
 ### Task 8: the switch (PT1, PT18 step 3)
 
@@ -464,7 +479,8 @@ application's SaveFile on a new name returns one URI that the document store gra
 (`FileChooser=athanor`), the spec's Release. Depends on 7; Task 4 lands first or the maintainer
 accepts icons only for the first release (Decision D8).
 
-**Verification:** `python3 scripts/verify.py allow-list boundary shipped`; doc_portal acceptance
+**Verification:** `python3 scripts/verify.py allow-list boundary shipped`; first, the gate of PT7 on the reference
+laptop: with `athanor-sessiond`'s automount (`doc_session_daemons.md` SD11, built at SD22 step 5 on the `udisks` module of `doc_disks.md` DK3), a stick inserted while no window of the file manager is open is mounted under `/run/media/<user>/` and shows in the chooser's sidebar; then doc_portal acceptance
 4 on the reference laptop: Papers opens a PDF from the home and from a mounted USB stick, and a text
 editor saves a new file and replaces an existing one after the question; PT17: first frame
 within 200 ms on 1,000 files, 64 MB PSS at rest; the maintainer's judgement.
@@ -494,12 +510,14 @@ control center does, the zbus thread unchanged; GLib's default context (dconf, G
 the view's enumeration) then stays on one thread. The alternative is PT2's text, a Sal thread of
 its own beside the main loop, which needs a second GLib context and gains nothing now that no
 GTK runs.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 14).*
 
 D2. **How a resident backend opens its windows.** Recommended: Task 0a, the part of SR9 that a
 resident process needs, pulled before the view (decision 39 places SR9 before the window). The
 alternative, one Sal run and one Wayland connection per request on a new thread, works with
 today's Sal, at the cost of a thread, a Wayland connection and a font load per dialog, and of
 dialogs that cannot share state such as the last folder without a lock.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 15).*
 
 D3. **The persistence paths of TM3.** Recommended: every comparison is on canonical paths, and
 TM3's list is canonicalised the same way (`/home` is a link to `/var/home`). A target's canonical
@@ -518,10 +536,12 @@ outside what the backend can check. The list becomes one constant that `verify.p
 `doc_threat_model.md` TM3 (a new check, per the audit rule). The
 alternative is to allow it, since the user picks the file; a deceptive application can still
 suggest `~/.bashrc` as `current_file`, and the document store's write grant outlives the dialog.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 16).*
 
 D4. **Recent in the chooser.** Recommended: hidden, as PT15 says, and read only in the window;
 the view shows Recent only when its host asks. The alternative, FM12's full sidebar in the
 chooser, needs PT15 amended and Recent read through `glib::BookmarkFile`.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 17).*
 
 D5. **Drives in the chooser.** Recommended, following decision 14 (a) of `doc_files.md` revision
 3 and DK3 of `doc_disks.md`: the chooser writes no udisks model, since `doc_disks.md` owns the
@@ -532,36 +552,50 @@ may read its state. This is a regression against the gtk chooser: switching the 
 removes its gvfs mount, so a stick that is not yet mounted is unreachable from the chooser until
 FM21 step 4 and LP18's agent, and doc_portal acceptance 4 ("from a USB stick") is met only for a
 mounted stick. Whether a stick reaches `/run/media` without the file manager's window
-(the session's automount, FM21 S7) is checked on the reference laptop before Task 8, and that check is the gate. The
+(the session's automount, FM21 S7) is checked on the reference laptop before Task 8, and that check is the gate (stated since as
+athanor-sessiond's automount check of PT7, SD11, which S7 does not test; see Task 8). The
 alternative reverses decision 14 (a): a mount action in the chooser through that module, limited
 to `Filesystem.Mount`, with a user outside `wheel` refused and the refusal named until LP18's
 agent or DK20 A, as decision 14 (b) does; it needs the module written first, and the
 maintainer's word.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 18).*
 
 D6. **`/run/media` at start.** Recommended: the image ships a tmpfiles.d line creating
 `/run/media` (root, 0755), so Landlock's make-directory root and `ReadWritePaths=-/run/media`
 always have their anchor; a stick mounted later lies beneath it. Whether a mount made after the
 unit started is writable inside its namespace is unverified; Task 6's VM test decides. The
 alternative is no New Folder on removable drives.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision
+19). Proposed with the amendment: the line is
+`/usr/lib/tmpfiles.d/xdg-desktop-portal-athanor.conf`, in the backend's package; udisks2's
+identical line is applied again without a message. Also proposed: when `/run/media` is absent
+at start, the backend logs at err priority with the path and confines without that root.*
 
 D7. **Tabs and drops in the chooser.** Recommended: neither in this plan; tabs (SR5, FM19) and
 drag and drop (SR13, decision 40) belong to the file manager's window, as decision 39 orders
 them. The alternative pulls SR5, SR13 and decision 40 before the chooser, so that a file can be
 dropped onto it from the window.
+*Settled on 2026-11-21 as recommended, by the order of `doc_own_stack.md` decision 39, proposed
+with `doc_files.md` revision 3 (`doc_portal.md` section 6).*
 
 D8. **Thumbnails at the switch.** Recommended: Task 4 lands before Task 8, the backend calling
 `athanor-preview`'s out-of-process render and holding results in memory. The alternative
 switches with type icons only and adds thumbnails after; PT7 binds thumbnails, so it needs the
 maintainer's word.
+*Settled on 2026-11-21 as recommended, by text proposed for approval: PT7's thumbnails
+(`doc_portal.md` section 6).*
 
 D9. **The chooser's accelerators.** Recommended: Ctrl+L (location), Ctrl+H (hidden files),
 Alt+Up (parent), Alt+Left and Alt+Right (history), Ctrl+Shift+N (New Folder), Enter, Escape,
 F6 (cycle sidebar, path bar, view); no search (PT15) and no rename. The alternative is decision
 39's full SR11 set before the chooser.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 15).*
 
 D10. **Whether the chooser waits for the file manager's own engine.** Recommended: no; the
 chooser writes nothing but New Folder, which is one `mkdir` in the backend, and FM21 step 1 runs
 beside it. The alternative waits for the engine for one code path.
+*Settled on 2026-11-21 as recommended, by text proposed for approval: `doc_files.md` revision 3,
+decision 3 (`doc_portal.md` section 6).*
 
 D11. **How the access dialog (PT6) and the screen-sharing picker (PT9) leave GTK and
 libadwaita.** Decision 8 of `doc_files.md` revision 3 and the amendment of 2026-11-18 leave both
@@ -571,6 +605,7 @@ steps 2 and 5), and Task 0 limited to the chooser. The alternatives: extend Task
 PT6 and PT9 now, which asks the maintainer to approve a design for two dialogs this plan does not
 build; or leave both on the gtk backend, as the table of `athanor-portals.conf` already does
 (`Access=gtk`, `ScreenCast=none`), until their steps, with no document revision.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 20).*
 
 ## Changes owed
 
@@ -594,8 +629,9 @@ build; or leave both on the gtk backend, as the table of `athanor-portals.conf` 
 - `doc_portal.md` section 4, spike S3: rerun on Sulphur with GTK4, Qt 6 and Chromium handles;
   Sulphur's `fixture/parented.rs` covers the compositor half.
 - `doc_threat_model.md:95`: the owed TM3 clause for the FileChooser, closed by PT7's amendment.
-- `doc_files.md` FM18: the schema `org.gtk.gtk4.Settings.FileChooser` ships with GTK 4; once GTK
-  leaves the image (ADR-0141), the text names who ships it, or an Athanor key replaces it.
+- `doc_files.md` FM18: hidden files follow Athanor's own key, `org.athanor.desktop.files
+  show-hidden`, shipped by `athanor-system-config` (maintainer decision, 2026-11-21), and FM3
+  grants the window `$XDG_RUNTIME_DIR/dconf` for its write.
 - `components.toml`: the `athanor-files-view` entry (Task 2); the backend entry at `:402` names
   FileChooser after Task 8.
 
