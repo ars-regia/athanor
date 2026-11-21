@@ -12,7 +12,7 @@ use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, Wrap
 use athanor_settings_core::registry::{Group, Page, Registry};
 use athanor_settings_core::target::{self, Target};
 use athanor_settings_core::window_state;
-use athanor_trust_state::Badge;
+use athanor_trust_state::{ReadError, Reason, State};
 
 use crate::i18n::tr;
 use crate::info::{self, Hardware, Info};
@@ -291,7 +291,7 @@ impl Settings {
                 tr("System"),
                 vec![
                     (tr("System"), self.system.clone()),
-                    (tr("Updates"), Some(trust_text(info.badge()))),
+                    (tr("System integrity"), Some(trust_text(info.trust.as_ref()))),
                 ],
             ),
         ];
@@ -371,12 +371,27 @@ impl Settings {
     }
 }
 
-/// The update trust state as About words it (SH12's badge). One not yet read is not verified.
-fn trust_text(badge: Option<Badge>) -> String {
-    match badge {
-        Some(Badge::Check) => tr("Verified"),
-        Some(Badge::Cross) => tr("The last update was refused by the policy"),
-        Some(Badge::Attention) | None => tr("Not verified"),
+/// The trust state as About words it (SE22): "Verified" only for a state that the update
+/// service answered, root sent, and says is verified; every other read is "Not verified", with
+/// the reason the bar's sheet gives when the state names one. The image's update state is
+/// never shown here (SW16).
+fn trust_text(read: Option<&Result<State, ReadError>>) -> String {
+    let Some(Ok(state)) = read else {
+        return tr("Not verified");
+    };
+    if state.verified.value {
+        return tr("Verified");
+    }
+    match state.verified.reason {
+        Reason::Media => tr("Not verified: installed from media"),
+        Reason::NoSignature => tr("Not verified: no signature"),
+        Reason::KeyNotInPolicy => tr("Not verified: its key is not in the policy"),
+        Reason::PolicyNotInForce => tr("Not verified: fetched under a permissive policy"),
+        Reason::ReferenceOutOfScope => tr("Not verified: the image is outside the policy's scope"),
+        Reason::LocalChanges => tr("Not verified: the system was changed on this machine"),
+        Reason::ChannelAbsent => tr("Not verified: waiting for the stable channel to be published"),
+        Reason::OriginNotEnforcing => tr("Not verified: this machine does not verify its updates"),
+        Reason::Signature | Reason::PinnedBuild => tr("Not verified"),
     }
 }
 
@@ -448,6 +463,9 @@ impl Application for Settings {
 mod tests {
     use super::*;
     use athanor_style::appearance::Appearance;
+    use athanor_trust_state::{
+        state_reply, Deployment, ErrorCode, Policy, SecureBoot, UpdateState, Verified, SCHEMA,
+    };
 
     fn settings(first: Target) -> Settings {
         Settings::new(
@@ -620,9 +638,65 @@ mod tests {
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 
+    fn state(verified: Verified) -> State {
+        let booted = Deployment {
+            image: "registry.example/athanor-system:stable".into(),
+            digest: format!("sha256:{}", "1".repeat(64)),
+            version: "43.20260915.2".into(),
+            build_time: 1,
+        };
+        State {
+            schema: SCHEMA,
+            booted,
+            downloaded: None,
+            previous: None,
+            verified,
+            update: UpdateState::Refused,
+            policy: Policy {
+                path: "/etc/containers/policy.json".into(),
+                sha256: "ab".repeat(32),
+                shipped: true,
+            },
+            secure_boot: SecureBoot {
+                secure_boot: Some(1),
+                setup_mode: Some(0),
+                mok_sb_state: None,
+                lockdown: Some("integrity".into()),
+            },
+            newest_booted_build_time: 1,
+            last_successful_check: Some(1),
+            last_error: ErrorCode::None,
+            last_error_host: None,
+            automatic_security_updates: true,
+            postpone: None,
+        }
+    }
+
     #[test]
-    fn a_trust_state_not_read_is_not_verified() {
-        assert_eq!(trust_text(None), trust_text(Some(Badge::Attention)));
-        assert_ne!(trust_text(Some(Badge::Check)), trust_text(None));
+    fn only_a_verified_state_from_root_reads_verified() {
+        let json = serde_json::to_string(&state(Reason::Signature.into())).expect("serialises");
+        let not_verified = tr("Not verified");
+        let read = state_reply(Ok(&json), Some(0));
+        assert_eq!(trust_text(Some(&read)), tr("Verified"));
+        // A refused update is the shield's to say, not About's.
+        assert_ne!(trust_text(Some(&read)), tr("The last update was refused by the policy"));
+        for read in [
+            state_reply(Ok(&json), Some(1000)),
+            state_reply(Ok(&json), None),
+            state_reply(Err(None), Some(0)),
+            state_reply(Err(Some("os.athanor.Update1.Error.NoState")), Some(0)),
+            state_reply(Err(Some("os.athanor.Update1.Error.Untrusted")), Some(0)),
+            state_reply(Err(Some("os.athanor.Update1.Error.Unreadable")), Some(0)),
+            state_reply(Ok("{"), Some(0)),
+        ] {
+            assert_eq!(trust_text(Some(&read)), not_verified, "{read:?}");
+        }
+        assert_eq!(trust_text(None), not_verified, "not yet read");
+    }
+
+    #[test]
+    fn a_state_that_is_not_verified_gives_its_reason() {
+        let read = Ok(state(Reason::Media.into()));
+        assert_eq!(trust_text(Some(&read)), tr("Not verified: installed from media"));
     }
 }

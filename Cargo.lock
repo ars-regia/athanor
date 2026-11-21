@@ -766,6 +766,7 @@ dependencies = [
  "gio",
  "glib",
  "nix 0.32.0",
+ "serde_json",
  "tracing",
 ]
 

@@ -1,6 +1,6 @@
 //! What the landing page and About show (doc_settings.md SE3, SE22), all of it read without
 //! privilege: the user's full name and picture from AccountsService, the device's names from
-//! hostnamed, the trust state from the root-owned state file (SE22), and the system's own files. The bus
+//! hostnamed, the trust state from the update service, and the system's own files. The bus
 //! replies arrive on GLib's main context and land in [`Info`]; the window draws them in its
 //! next turn.
 
@@ -9,10 +9,11 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use athanor_settings_core::about;
-use athanor_trust_state::{Badge, ReadError, State};
+use athanor_trust_state::{
+    state_reply, ReadError, State, STATE_METHOD, UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH,
+};
 use gio::prelude::*;
 
 /// How long each service gets to answer, as the bar gives the update service.
@@ -30,7 +31,7 @@ pub struct Info {
     pub hostname: Option<String>,
     pub vendor: Option<String>,
     pub model: Option<String>,
-    /// The trust state file as read, or why it backs nothing.
+    /// The trust state the update service read, or why it backs nothing.
     pub trust: Option<Result<State, ReadError>>,
     /// Set by each answer, cleared by the window once it has drawn it.
     pub changed: bool,
@@ -44,22 +45,6 @@ impl Info {
             .filter(|name| !name.is_empty())
             .or(self.hostname.as_deref())
     }
-
-    /// The trust badge of SH12: a state not yet read, or not trusted, backs nothing.
-    pub fn badge(&self) -> Option<Badge> {
-        let read = self.trust.as_ref()?;
-        Some(read.as_ref().map_or(Badge::Attention, |state| {
-            athanor_trust_state::badge(state, now())
-        }))
-    }
-}
-
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
-        })
 }
 
 /// A string property of an `a{sv}`, when it is one and not empty.
@@ -95,29 +80,15 @@ fn get_all(
     );
 }
 
-/// Reads the trust state file, then asks hostnamed and AccountsService on the system bus.
-///
-/// The file is the shield's (BR6), and Settings' unit has no user namespace, so its owner reads
-/// as root and `athanor_trust_state::read` checks it itself. A missing or refused file shows
-/// "Not verified"; the update service is not asked, since the image's update state lives in
-/// the shield (SE22, SW16).
+/// Asks hostnamed, AccountsService and the update service on the system bus.
 pub fn fetch(info: &Rc<RefCell<Info>>) {
-    let read = athanor_trust_state::read();
-    match &read {
-        Ok(_) | Err(ReadError::Missing) => {}
-        Err(error) => tracing::warn!(?error, "the trust state file is not trusted"),
-    }
-    {
-        let mut info = info.borrow_mut();
-        info.trust = Some(read);
-        info.changed = true;
-    }
     let info = info.clone();
     gio::bus_get(gio::BusType::System, gio::Cancellable::NONE, move |bus| {
         let bus = match bus {
             Ok(bus) => bus,
             Err(error) => {
                 tracing::warn!(%error, "no system bus; the pages show what the files say");
+                mark_untrusted(&info);
                 return;
             }
         };
@@ -137,7 +108,14 @@ pub fn fetch(info: &Rc<RefCell<Info>>) {
             },
         );
         user(&bus, &info);
+        trust(&bus, &info);
     });
+}
+
+fn mark_untrusted(info: &Rc<RefCell<Info>>) {
+    let mut info = info.borrow_mut();
+    info.trust = Some(state_reply(Err(None), None));
+    info.changed = true;
 }
 
 fn user(bus: &gio::DBusConnection, info: &Rc<RefCell<Info>>) {
@@ -177,6 +155,73 @@ fn user(bus: &gio::DBusConnection, info: &Rc<RefCell<Info>>) {
                     let mut info = info.borrow_mut();
                     info.real_name = text(&dict, "RealName").or_else(|| text(&dict, "UserName"));
                     info.picture = text(&dict, "IconFile").map(PathBuf::from);
+                    info.changed = true;
+                },
+            );
+        },
+    );
+}
+
+/// The trust state, as the bar's shield reads it (`doc_update_trust.md:108`): from the update
+/// service, trusted only when the bus says root sent the reply
+/// (`athanor_trust_state::state_reply`). Settings' unit is sandboxed (`ProtectSystem=strict`
+/// and the other `Protect*=` settings turn on `PrivateUsers=` implicitly), so root shows as
+/// the overflow uid and the state file's owner cannot be checked here; neither accepting that
+/// uid nor loosening the sandbox is allowed.
+fn trust(bus: &gio::DBusConnection, info: &Rc<RefCell<Info>>) {
+    let message = gio::DBusMessage::new_method_call(
+        Some(UPDATE_NAME),
+        UPDATE_PATH,
+        Some(UPDATE_INTERFACE),
+        STATE_METHOD,
+    );
+    let (info, ask) = (info.clone(), bus.clone());
+    ask.clone().send_message_with_reply(
+        &message,
+        gio::DBusSendMessageFlags::NONE,
+        ANSWER_WITHIN_MS,
+        gio::Cancellable::NONE,
+        move |reply| {
+            let reply = match reply {
+                Ok(reply) => reply,
+                Err(error) => {
+                    tracing::warn!(%error, "the update service did not answer State");
+                    mark_untrusted(&info);
+                    return;
+                }
+            };
+            let Some(sender) = reply.sender() else {
+                mark_untrusted(&info);
+                return;
+            };
+            let answer: Result<String, Option<String>> = match reply.message_type() {
+                gio::DBusMessageType::Error => Err(reply.error_name().map(|name| name.to_string())),
+                _ => Ok(reply
+                    .body()
+                    .and_then(|body| body.child_value(0).str().map(str::to_owned))
+                    .unwrap_or_default()),
+            };
+            ask.call(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetConnectionUnixUser",
+                Some(&(sender.as_str(),).to_variant()),
+                Some(glib::VariantTy::new("(u)").unwrap_or(glib::VariantTy::ANY)),
+                gio::DBusCallFlags::NONE,
+                ANSWER_WITHIN_MS,
+                gio::Cancellable::NONE,
+                move |uid| {
+                    let uid = uid.ok().and_then(|uid| uid.child_value(0).get::<u32>());
+                    let read = match &answer {
+                        Ok(json) => state_reply(Ok(json), uid),
+                        Err(name) => state_reply(Err(name.as_deref()), uid),
+                    };
+                    if let Err(error) = &read {
+                        tracing::warn!(?error, ?uid, "the trust state is not trusted");
+                    }
+                    let mut info = info.borrow_mut();
+                    info.trust = Some(read);
                     info.changed = true;
                 },
             );

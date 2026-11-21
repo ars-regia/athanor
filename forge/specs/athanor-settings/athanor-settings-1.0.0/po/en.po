@@ -12,7 +12,7 @@ msgid "Connections"
 msgstr "Connections"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:34
-#: src/window.rs:250
+#: src/window.rs:283
 msgid "Device"
 msgstr "Device"
 
@@ -21,7 +21,7 @@ msgid "Personalisation"
 msgstr "Personalisation"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:37
-#: src/window.rs:258 src/window.rs:260
+#: src/window.rs:291 src/window.rs:293
 msgid "System"
 msgstr "System"
 
@@ -178,7 +178,7 @@ msgid "firmware;bios;uefi;fwupd;device updates;"
 msgstr "firmware;bios;uefi;fwupd;device updates;"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:149
-#: src/window.rs:247
+#: src/window.rs:280
 msgid "About"
 msgstr "About"
 
@@ -234,74 +234,109 @@ msgstr "Blank and suspend"
 msgid "blank screen;screen off;suspend;sleep;idle;"
 msgstr "blank screen;screen off;suspend;sleep;idle;"
 
-#: src/window.rs:85 src/window.rs:198
+#: src/window.rs:103 src/window.rs:231
 msgid "Settings"
 msgstr "Settings"
 
-#: src/window.rs:92
+#: src/window.rs:110
 msgid "Search settings"
 msgstr "Search settings"
 
-#: src/window.rs:93
+#: src/window.rs:111
 msgid "Pages"
 msgstr "Pages"
 
-#: src/window.rs:201 src/window.rs:202
+#: src/window.rs:234 src/window.rs:235
 msgid "Your account"
 msgstr "Your account"
 
-#: src/window.rs:208 src/window.rs:209 src/window.rs:213
+#: src/window.rs:241 src/window.rs:242 src/window.rs:246
 msgid "This device"
 msgstr "This device"
 
-#: src/window.rs:226
+#: src/window.rs:259
 msgid "Groups"
 msgstr "Groups"
 
-#: src/window.rs:252
+#: src/window.rs:285
 msgid "Device name"
 msgstr "Device name"
 
-#: src/window.rs:253
+#: src/window.rs:286
 msgid "Manufacturer"
 msgstr "Manufacturer"
 
-#: src/window.rs:254
+#: src/window.rs:287
 msgid "Model"
 msgstr "Model"
 
-#: src/window.rs:261
-msgid "Updates"
-msgstr "Updates"
+#: src/window.rs:294
+msgid "System integrity"
+msgstr "System integrity"
 
-#: src/window.rs:266
+#: src/window.rs:299
 msgid "Processor"
 msgstr "Processor"
 
-#: src/window.rs:267
+#: src/window.rs:300
 msgid "Memory"
 msgstr "Memory"
 
-#: src/window.rs:273
+#: src/window.rs:306
 msgid "Graphics"
 msgstr "Graphics"
 
-#: src/window.rs:275
+#: src/window.rs:308
 msgid "Disk capacity"
 msgstr "Disk capacity"
 
-#: src/window.rs:276
+#: src/window.rs:309
 msgid "Hardware"
 msgstr "Hardware"
 
-#: src/window.rs:315
+#: src/window.rs:380 src/window.rs:394 src/window.rs:678
+msgid "Not verified"
+msgstr "Not verified"
+
+#: src/window.rs:383 src/window.rs:680
 msgid "Verified"
 msgstr "Verified"
 
-#: src/window.rs:316
+#: src/window.rs:386 src/window.rs:700
+msgid "Not verified: installed from media"
+msgstr "Not verified: installed from media"
+
+#: src/window.rs:387
+msgid "Not verified: no signature"
+msgstr "Not verified: no signature"
+
+#: src/window.rs:388
+msgid "Not verified: its key is not in the policy"
+msgstr "Not verified: its key is not in the policy"
+
+#: src/window.rs:389
+msgid "Not verified: fetched under a permissive policy"
+msgstr "Not verified: fetched under a permissive policy"
+
+#: src/window.rs:390
+msgid "Not verified: the image is outside the policy's scope"
+msgstr "Not verified: the image is outside the policy's scope"
+
+#: src/window.rs:391
+msgid "Not verified: the system was changed on this machine"
+msgstr "Not verified: the system was changed on this machine"
+
+#: src/window.rs:392
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr "Not verified: waiting for the stable channel to be published"
+
+#: src/window.rs:393
+msgid "Not verified: this machine does not verify its updates"
+msgstr "Not verified: this machine does not verify its updates"
+
+#: src/window.rs:682
 msgid "The last update was refused by the policy"
 msgstr "The last update was refused by the policy"
 
-#: src/window.rs:317
-msgid "Not verified"
-msgstr "Not verified"
+#~ msgid "Updates"
+#~ msgstr "Updates"

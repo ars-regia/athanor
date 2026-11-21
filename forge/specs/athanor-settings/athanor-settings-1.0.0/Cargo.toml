@@ -21,3 +21,6 @@ gio = { workspace = true }
 glib = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
