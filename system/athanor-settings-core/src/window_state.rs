@@ -62,15 +62,18 @@ pub fn load(registry: &Registry, dir: &Path) -> io::Result<Option<Target>> {
 mod tests {
     use super::*;
 
+    /// A new directory of this test alone: `create_dir` refuses a path that already exists, a
+    /// directory or a link another run left, and the clock's nanoseconds keep runs apart.
     fn dir(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "athanor-settings-core-{name}-{}",
+            "athanor-settings-core-{name}-{}-{nanos}",
             std::process::id()
         ));
-        if dir.exists() {
-            fs::remove_dir_all(&dir).expect("remove the old test directory");
-        }
-        fs::create_dir_all(&dir).expect("create the test directory");
+        fs::create_dir(&dir).expect("create the test directory");
         dir
     }
 
@@ -110,5 +113,6 @@ mod tests {
         assert_eq!(load(&registry, &dir).expect("no file"), None);
         fs::write(dir.join(FILE), "x".repeat(4096)).expect("write");
         assert_eq!(load(&registry, &dir).expect("too long"), None);
+        fs::remove_dir_all(&dir).expect("cleaned up");
     }
 }
