@@ -339,12 +339,18 @@ class Moved(unittest.TestCase):
     HEAD = {"src/x.rs": "p\nq\nr\n" + FILES["src/x.rs"]}
     TEXT = "The line `grant` is at `src/x.rs:1-4`."
 
-    def found(self, text, hunks, base=None, extra=None):
+    def found(self, text, hunks, base=None, extra=None, before=None):
         files = {**FILES, **(self.HEAD if extra is None else extra)}
         return [
             f[-1]
             for f in verify.citation_findings(
-                "doc.md", text, set(files), files.__getitem__, hunks, text if base is None else base
+                "doc.md",
+                text,
+                set(files),
+                files.__getitem__,
+                hunks,
+                text if base is None else base,
+                base_file=None if before is None else before.__getitem__,
             )
         ]
 
@@ -377,6 +383,23 @@ class Moved(unittest.TestCase):
                 out = self.found(self.TEXT, {"src/x.rs": [hunk]}, extra={})
                 self.assertEqual(len(out), 1)
                 self.assertIn("edited or removed: place it again", out[0])
+
+    def test_a_cited_line_that_only_renumbers_its_citations_is_not_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        notes = {"notes.md": "a `note` at `src/x.rs:124` here\nnext\n"}
+        before = {"notes.md": "a `note` at `src/x.rs:120` here\nnext\n"}
+        hunks = {"notes.md": [(1, 1, 1)]}
+        self.assertEqual(self.found(text, hunks, extra=notes, before=before), [])
+        self.assertEqual(len(self.found(text, hunks, extra=notes)), 1)
+        reworded = {"notes.md": "a `note` at `src/x.rs:120` there\nnext\n"}
+        out = self.found(text, hunks, extra=notes, before=reworded)
+        self.assertIn("edited or removed: place it again", out[0])
+
+    def test_moved_ranges_reads_a_same_line_edit_through_the_predicate(self):
+        hunks = [(2, 2, 2)]
+        self.assertEqual(verify.moved_ranges([(1, 3)], hunks, lambda old, new: True), [(1, 3)])
+        self.assertIsNone(verify.moved_ranges([(1, 3)], hunks, lambda old, new: old != 3))
+        self.assertIsNone(verify.moved_ranges([(1, 3)], [(2, 2, 3)], lambda old, new: True))
 
     def test_moved_ranges_counts_every_hunk_before_a_line(self):
         hunks = [(1, 1, 3), (10, 2, 0)]

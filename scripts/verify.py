@@ -6709,15 +6709,24 @@ def diff_hunks(root, base):
     return out
 
 
-def moved_ranges(ranges, hunks):
+# The numbers of a citation (`:120`, `:11301-11307`, `:3, 9`) inside a line.
+CITATION_NUMBERS = re.compile(r"(?<=[\w`]):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*")
+
+
+def moved_ranges(ranges, hunks, same=None):
     """The ranges (first, last) of a citation, as the lines of the file are numbered after the
     HUNKS of `diff_hunks`; None when a hunk edited or removed one of the cited lines, which a reader
-    must place again."""
+    must place again. `same(old, new)`, given the number of a cited line before and after, says that
+    an edit that kept the line count left the line as it was: a line that only renumbers citations."""
     def shifted(n):
         return n + sum(new - old for first, old, new in hunks if (first + old - 1 if old else first) < n)
 
-    if any(old and first <= last and first + old - 1 >= start for start, last in ranges
-           for first, old, _ in hunks):
+    def placed(first, old, new, start, last):
+        return bool(same) and old == new and all(
+            same(n, shifted(n)) for n in range(max(start, first), min(last, first + old - 1) + 1))
+
+    if any(old and first <= last and first + old - 1 >= start and not placed(first, old, new, start, last)
+           for start, last in ranges for first, old, new in hunks):
         return None
     return [(shifted(start), shifted(last)) for start, last in ranges]
 
@@ -7010,7 +7019,8 @@ def symbol_definitions(path, body):
     return None
 
 
-def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None):
+def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None,
+                      base_file=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -7057,7 +7067,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch.
+    the limit: every citation on an edited line is skipped, also one the edit did not touch. A cited
+    line that the change edited without adding or removing lines, and whose only difference from the
+    revision is the numbers of its own citations (`base_file(path)` is the file there), is not an edit.
 
     A citation by name is `path#symbol`, or `#symbol` for the file named last (a colour, `#e62d42`, is
     none unless the last file defines the symbol, `#add`; an `x#y` whose `x` is no file, a flake
@@ -7190,7 +7202,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
             if not symbol and line in unchanged and path in hunks:
-                new = moved_ranges(ranges, hunks[path])
+                before = base_file(path).split("\n") if base_file else []
+                new = moved_ranges(ranges, hunks[path], lambda old, now: old <= len(before) and now <= len(rows)
+                                   and CITATION_NUMBERS.sub(":N", before[old - 1]) == CITATION_NUMBERS.sub(":N", rows[now - 1]))
                 if new is None:
                     out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
                                 "that this change edited or removed: place it again"))
@@ -7305,12 +7319,17 @@ def check_line_citations():
                                capture_output=True, text=True)
         return shown.stdout if shown.returncode == 0 else ""  # a document the change adds has no base text
 
+    def base_file(path):
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{path}"], capture_output=True, text=True)
+        return shown.stdout if shown.returncode == 0 else ""  # a file the change adds has no base text
+
     seen = set()
     for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
                        ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
         for _, path, spec, token, problem in citation_findings(
-                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else ""):
+                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else "",
+                base_file=base_file):
             if spec.startswith("#"):
                 continue  # a citation by name, which symbol-citations checks
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
