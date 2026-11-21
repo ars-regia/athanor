@@ -12,6 +12,10 @@ use crate::target::{self, Target};
 
 /// The file's name in Settings' runtime directory.
 pub const FILE: &str = "state";
+/// The one-shot marker of a reopened page being drawn: written once the compositor answered
+/// and just before the reopened page is built, removed once its first frame is drawn. A start
+/// that finds it skips the reopen, so a page that aborts while it draws is reopened once.
+pub const MARKER: &str = "reopening";
 const OPEN: &str = "open ";
 /// More than any target the registry holds; a longer file is not Settings'.
 const MAX_BYTES: u64 = 256;
@@ -42,6 +46,32 @@ pub fn clear(dir: &Path) -> io::Result<()> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
+}
+
+/// Marks the reopened page as being drawn ([`MARKER`]).
+pub fn mark(dir: &Path) -> io::Result<()> {
+    fs::write(dir.join(MARKER), "")
+}
+
+/// Removes the marker once the reopened page has drawn. A marker already gone is no error.
+pub fn unmark(dir: &Path) -> io::Result<()> {
+    match fs::remove_file(dir.join(MARKER)) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// What a start reopens (SE5): the state's target; or, when the last start died drawing its
+/// reopened page, the landing page, written as the state so that the page is not tried again.
+/// A start that failed before it drew, the compositor restarting say, left no marker, and
+/// the next start reopens the target still.
+pub fn reopen(registry: &Registry, dir: &Path) -> io::Result<Option<Target>> {
+    if !dir.join(MARKER).exists() {
+        return load(registry, dir);
+    }
+    save(dir, Target::Landing)?;
+    unmark(dir)?;
+    Ok(Some(Target::Landing))
 }
 
 /// The target a window was open at when Settings last stopped, if the file says one was.
@@ -113,6 +143,37 @@ mod tests {
         assert_eq!(load(&registry, &dir).expect("no file"), None);
         fs::write(dir.join(FILE), "x".repeat(4096)).expect("write");
         assert_eq!(load(&registry, &dir).expect("too long"), None);
+        fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[test]
+    fn a_start_that_failed_before_drawing_reopens_the_target_again() {
+        let registry = Registry::new();
+        let dir = dir("connect");
+        save(&dir, Target::Page("about")).expect("save");
+        assert_eq!(reopen(&registry, &dir).expect("reopen"), Some(Target::Page("about")));
+        // The compositor did not answer: no marker was written.
+        assert_eq!(reopen(&registry, &dir).expect("reopen"), Some(Target::Page("about")));
+        fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[test]
+    fn a_page_that_aborts_while_it_draws_is_reopened_once() {
+        let registry = Registry::new();
+        let dir = dir("abort");
+        save(&dir, Target::Page("about")).expect("save");
+        assert_eq!(reopen(&registry, &dir).expect("reopen"), Some(Target::Page("about")));
+        mark(&dir).expect("mark");
+        // The page aborted before its first frame: the marker stays.
+        assert_eq!(reopen(&registry, &dir).expect("skip"), Some(Target::Landing));
+        assert!(!dir.join(MARKER).exists(), "the marker is one-shot");
+        // Even if that start fails before it draws, the page is not tried again.
+        assert_eq!(reopen(&registry, &dir).expect("reopen"), Some(Target::Landing));
+        // A reopened page that drew removes the marker.
+        save(&dir, Target::Page("about")).expect("save");
+        mark(&dir).expect("mark");
+        unmark(&dir).expect("drawn");
+        assert_eq!(reopen(&registry, &dir).expect("reopen"), Some(Target::Page("about")));
         fs::remove_dir_all(&dir).expect("cleaned up");
     }
 }

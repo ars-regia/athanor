@@ -4,7 +4,7 @@
 
 use std::process::ExitCode;
 
-use athanor_settings::window::Settings;
+use athanor_settings::window::{First, Settings};
 use athanor_settings::{i18n, look};
 use athanor_settings_core::registry::Registry;
 use athanor_settings_core::target::Target;
@@ -16,7 +16,7 @@ fn main() -> ExitCode {
         Registry::new(),
         look::look(&Appearance::read()),
         i18n::is_rtl(),
-        Target::Landing,
+        First::Show(Target::Landing),
         Default::default(),
         Default::default(),
         None,

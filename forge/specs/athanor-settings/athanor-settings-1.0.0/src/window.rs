@@ -47,6 +47,16 @@ fn listed(page: &Page) -> bool {
     BUILT.contains(&page.id)
 }
 
+/// The first page the window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum First {
+    /// The target of the `Show` that started the run, built at once.
+    Show(Target),
+    /// The target a crashed run left (SE5), built only once the compositor has answered, with
+    /// window_state's one-shot marker around its first frame.
+    Reopen(Target),
+}
+
 /// Settings' window and what it shows.
 pub struct Settings {
     registry: Registry,
@@ -70,6 +80,8 @@ pub struct Settings {
     shows: Rc<RefCell<VecDeque<String>>>,
     /// Where the current target is written (SE5); `None` writes nothing.
     state_dir: Option<PathBuf>,
+    /// The reopened page has not drawn its first frame yet.
+    reopening: bool,
 }
 
 impl Settings {
@@ -77,7 +89,7 @@ impl Settings {
         registry: Registry,
         look: Look,
         rtl: bool,
-        first: Target,
+        first: First,
         info: Rc<RefCell<Info>>,
         shows: Rc<RefCell<VecDeque<String>>>,
         state_dir: Option<PathBuf>,
@@ -102,15 +114,22 @@ impl Settings {
             nav_rows: Vec::new(),
             page,
             page_links: Vec::new(),
-            current: first,
+            current: Target::Landing,
             info,
             system: info::system(),
             hardware: None,
             shows,
             state_dir,
+            reopening: false,
         };
         settings.fill_nav(&mut ui, "");
-        settings.navigate(&mut ui, first);
+        match first {
+            First::Show(target) => settings.navigate(&mut ui, target),
+            First::Reopen(target) => {
+                settings.current = target;
+                settings.reopening = true;
+            }
+        }
         settings.ui = Some(ui);
         settings
     }
@@ -302,6 +321,32 @@ impl Settings {
         }
     }
 
+    /// Builds the reopened page, called once the compositor has answered: the marker first, so
+    /// that a page that aborts while it draws is not reopened by the next start (SE5).
+    fn begin_reopen(&mut self, ui: &mut Ui) {
+        if !self.reopening {
+            return;
+        }
+        if let Some(dir) = &self.state_dir {
+            if let Err(error) = window_state::mark(dir) {
+                tracing::warn!(%error, "cannot mark the reopened page; a crash drawing it reopens it again");
+            }
+        }
+        self.navigate(ui, self.current);
+    }
+
+    /// The reopened page drew its first frame: the marker goes.
+    fn end_reopen(&mut self) {
+        if !std::mem::take(&mut self.reopening) {
+            return;
+        }
+        if let Some(dir) = &self.state_dir {
+            if let Err(error) = window_state::unmark(dir) {
+                tracing::warn!(%error, "cannot remove the reopen marker; the next start opens the landing page");
+            }
+        }
+    }
+
     /// The target the sidebar's row or the page's button `id` leads to.
     fn link(&self, id: WidgetId) -> Option<Target> {
         self.nav_rows
@@ -332,11 +377,16 @@ impl Application for Settings {
         let role = Role::Window {
             app_id: APP_ID.into(),
         };
-        self.ui.take().map(|ui| (ui, role)).into_iter().collect()
+        let Some(mut ui) = self.ui.take() else {
+            return Vec::new();
+        };
+        self.begin_reopen(&mut ui);
+        vec![(ui, role)]
     }
 
     fn drawn(&mut self, _: &mut Shell, surface: SurfaceId) {
         self.window.get_or_insert(surface);
+        self.end_reopen();
     }
 
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
@@ -396,7 +446,7 @@ mod tests {
             Registry::new(),
             crate::look::look(&Appearance::default()),
             false,
-            first,
+            First::Show(first),
             Rc::default(),
             Rc::default(),
             None,
@@ -511,6 +561,46 @@ mod tests {
         let (width, _) = ui.layout();
         settings.navigate(&mut ui, Target::Page("about"));
         assert_eq!(ui.layout().0, width, "the window keeps its width");
+    }
+
+    #[test]
+    fn a_reopened_page_is_built_after_the_connection_inside_the_marker() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "athanor-settings-reopen-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).expect("a scratch directory");
+        let registry = Registry::new();
+        window_state::save(&dir, Target::Page("about")).expect("a crashed run's state");
+        let mut settings = Settings::new(
+            Registry::new(),
+            crate::look::look(&Appearance::default()),
+            false,
+            First::Reopen(Target::Page("about")),
+            Rc::default(),
+            Rc::default(),
+            Some(dir.clone()),
+        );
+        let marker = dir.join(window_state::MARKER);
+        // Before the compositor answers, nothing is built and the state is kept.
+        assert!(!marker.exists());
+        assert!(settings.page_links.is_empty());
+        assert_eq!(
+            window_state::load(&registry, &dir).expect("readable"),
+            Some(Target::Page("about"))
+        );
+        let mut started = settings.start();
+        assert_eq!(started.len(), 1);
+        assert!(marker.exists(), "the reopened page is drawn inside the marker");
+        let (ui, _) = started.first_mut().expect("the window");
+        assert!(ui.selected(settings.nav).is_some(), "About is built and selected");
+        settings.end_reopen();
+        assert!(!marker.exists(), "its first frame removes the marker");
+        std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 
     #[test]

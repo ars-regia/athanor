@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use athanor_sal::driver;
-use athanor_settings::window::{self, Settings};
+use athanor_settings::window::{self, First, Settings};
 use athanor_settings::{i18n, info, look};
 use athanor_settings_core::registry::Registry;
 use athanor_settings_core::target;
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
     let registry = Registry::new();
     let state_dir = dirs.unit_runtime.clone();
     // A run that ended with its window open reopens it (SE5).
-    let reopen = window_state::load(&registry, &state_dir).unwrap_or_else(|error| {
+    let reopen = window_state::reopen(&registry, &state_dir).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read the window state; nothing is reopened");
         None
     });
@@ -111,23 +111,16 @@ fn main() -> ExitCode {
             tracing::warn!(error = %err, "cannot tell systemd Settings is ready");
         }
     });
-    // The page is written again once it has drawn: a page that aborts while it draws ends
-    // here, and is not reopened at every restart.
-    if reopen.is_some() {
-        if let Err(error) = window_state::clear(&state_dir) {
-            tracing::warn!(%error, "cannot clear the window state before reopening it");
-        }
-    }
     let first = match reopen {
         // A page a later build no longer draws opens the landing page, as a Show of it would.
-        Some(target) => window::resolve(&registry, &target.to_string()),
-        None => loop {
+        Some(target) => First::Reopen(window::resolve(&registry, &target.to_string())),
+        None => First::Show(loop {
             let next = shows.borrow_mut().pop_front();
             if let Some(text) = next {
                 break window::resolve(&registry, &text);
             }
             glib::MainContext::default().iteration(true);
-        },
+        }),
     };
 
     let glib = match GlibSource::new() {
