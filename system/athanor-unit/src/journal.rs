@@ -1,5 +1,5 @@
 //! Log lines for the journal. Each line starts with `<N>`, its syslog priority, which
-//! journald reads from a service's stderr (SyslogLevelPrefix=, on by default), so
+//! journald reads from a service's stdout and stderr (SyslogLevelPrefix=, on by default), so
 //! `journalctl --user -u <unit> -p err` finds what went wrong.
 
 use std::fmt;
@@ -41,19 +41,34 @@ fn priority(level: Level) -> u8 {
     }
 }
 
+/// Logs to stderr what `RUST_LOG` names, info when it names nothing.
 pub fn init() {
     subscriber(io::stderr).init();
 }
 
-/// The journal subscriber, writing to `writer`.
+/// `init` for a program that logs to stdout.
+pub fn init_stdout() {
+    subscriber(io::stdout).init();
+}
+
+/// The journal subscriber of `init`, writing to `writer`.
 pub(crate) fn subscriber<W>(writer: W) -> impl Subscriber + Send + Sync + 'static
 where
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
 {
+    with_filter(
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        writer,
+    )
+}
+
+/// The journal subscriber, logging what `filter` lets through to `writer`.
+pub fn with_filter<W>(filter: EnvFilter, writer: W) -> impl Subscriber + Send + Sync + 'static
+where
+    W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
+{
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+        .with_env_filter(filter)
         .with_writer(writer)
         // journald stores the bytes as they come: colour codes would land in the log.
         .with_ansi(false)

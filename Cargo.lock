@@ -543,7 +543,6 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
- "tracing-subscriber",
  "zbus 6.2.1",
  "zeroize",
 ]
@@ -612,7 +611,6 @@ dependencies = [
  "athanor-style",
  "athanor-unit",
  "tracing",
- "tracing-subscriber",
  "zbus 5.19.0",
 ]
 
@@ -888,7 +886,6 @@ dependencies = [
  "jiff 1.0.1",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "zbus 6.2.1",
 ]
 

@@ -7,7 +7,6 @@ mod look;
 mod sandbox;
 mod ui;
 
-use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 
 use athanor_layout::loader::Paths;
@@ -31,15 +30,7 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        // Launched from the desktop, stderr goes to the journal, which stores colour codes
-        // as they come: colour only a terminal.
-        .with_ansi(io::stderr().is_terminal())
-        .init();
+    athanor_unit::journal::init_stdout();
     i18n::init();
 
     // Held until the window closes: the bus releases the name with the connection.
