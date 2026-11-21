@@ -5,6 +5,7 @@
 use super::devices::show_lock_surface;
 use super::marks::{at, frame, BLACK, WHITE};
 use super::touch::{down, motion, park_the_fixture, up};
+use super::wave2b::layer;
 use super::*;
 use std::io::Read;
 use wayland_client::protocol::{
@@ -851,6 +852,35 @@ fn an_icon_off_every_output_at_its_top_left_is_sent_its_frames() {
         .pump(&mut run, "the icon's frame callback", |client, _| {
             client.frame_done
         });
+    release(&mut run);
+    run.stop();
+}
+
+/// Decision 40's amendment: the icon is drawn above the overlay layers too.
+#[test]
+fn the_icon_is_drawn_above_an_overlay_layer() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let _overlay = layer(&mut run, zwlr_layer_shell_v1::Layer::Overlay);
+    let serial = from.press(&mut run);
+    let icon = from.icon(&mut run);
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state
+        .pointer_to((630.0, 390.0).into(), InputTime::now());
+    from.local.roundtrip(&mut run);
+    let shown = frame(&mut run);
+    assert_eq!(
+        at(&shown, 620, 380),
+        BLACK,
+        "the overlay layer beside the icon"
+    );
+    assert_eq!(
+        at(&shown, 640, 400),
+        RED,
+        "the icon above the overlay layer"
+    );
     release(&mut run);
     run.stop();
 }
