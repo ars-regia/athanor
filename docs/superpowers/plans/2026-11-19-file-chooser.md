@@ -319,9 +319,10 @@ renaming or removing a file fails; beneath a `write` root everything succeeds.
 
 **Proposed:** a directory model on GIO (`gio::File::enumerate_children` off the drawing path,
 batched into the view), sorting by name with natural order, size, type and modification time,
-folders first, hidden files following `org.gtk.gtk4.Settings.FileChooser show-hidden`; a
-monitor that applies changes; the list and grid views and the path bar on Sal's items; names
-shown with visible escapes for control and bidirectional characters, non-UTF-8 bytes escaped
+folders first, hidden files following `org.athanor.desktop.files show-hidden`, a schema that
+`athanor-system-config` ships (`doc_files.md` FM18, decided on 2026-11-21); a monitor that
+applies changes; the list and grid views and the path bar on Sal's items; names shown
+with visible escapes for control and bidirectional characters, non-UTF-8 bytes escaped
 (FM18). The crate holds no operation, launch or archive code, and no writing of any file
 (FM17); a filter callback lets the host hide items.
 
@@ -494,12 +495,14 @@ control center does, the zbus thread unchanged; GLib's default context (dconf, G
 the view's enumeration) then stays on one thread. The alternative is PT2's text, a Sal thread of
 its own beside the main loop, which needs a second GLib context and gains nothing now that no
 GTK runs.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 14).*
 
 D2. **How a resident backend opens its windows.** Recommended: Task 0a, the part of SR9 that a
 resident process needs, pulled before the view (decision 39 places SR9 before the window). The
 alternative, one Sal run and one Wayland connection per request on a new thread, works with
 today's Sal, at the cost of a thread, a Wayland connection and a font load per dialog, and of
 dialogs that cannot share state such as the last folder without a lock.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 15).*
 
 D3. **The persistence paths of TM3.** Recommended: every comparison is on canonical paths, and
 TM3's list is canonicalised the same way (`/home` is a link to `/var/home`). A target's canonical
@@ -518,10 +521,12 @@ outside what the backend can check. The list becomes one constant that `verify.p
 `doc_threat_model.md` TM3 (a new check, per the audit rule). The
 alternative is to allow it, since the user picks the file; a deceptive application can still
 suggest `~/.bashrc` as `current_file`, and the document store's write grant outlives the dialog.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 16).*
 
 D4. **Recent in the chooser.** Recommended: hidden, as PT15 says, and read only in the window;
 the view shows Recent only when its host asks. The alternative, FM12's full sidebar in the
 chooser, needs PT15 amended and Recent read through `glib::BookmarkFile`.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 17).*
 
 D5. **Drives in the chooser.** Recommended, following decision 14 (a) of `doc_files.md` revision
 3 and DK3 of `doc_disks.md`: the chooser writes no udisks model, since `doc_disks.md` owns the
@@ -537,31 +542,40 @@ alternative reverses decision 14 (a): a mount action in the chooser through that
 to `Filesystem.Mount`, with a user outside `wheel` refused and the refusal named until LP18's
 agent or DK20 A, as decision 14 (b) does; it needs the module written first, and the
 maintainer's word.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 18).*
 
 D6. **`/run/media` at start.** Recommended: the image ships a tmpfiles.d line creating
 `/run/media` (root, 0755), so Landlock's make-directory root and `ReadWritePaths=-/run/media`
 always have their anchor; a stick mounted later lies beneath it. Whether a mount made after the
 unit started is writable inside its namespace is unverified; Task 6's VM test decides. The
 alternative is no New Folder on removable drives.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 19).*
 
 D7. **Tabs and drops in the chooser.** Recommended: neither in this plan; tabs (SR5, FM19) and
 drag and drop (SR13, decision 40) belong to the file manager's window, as decision 39 orders
 them. The alternative pulls SR5, SR13 and decision 40 before the chooser, so that a file can be
 dropped onto it from the window.
+*Settled on 2026-11-21 as recommended, by texts already decided: `doc_files.md` revision 3,
+decisions 7 and 12, with the order of `doc_own_stack.md` decision 39 (`doc_portal.md` section 6).*
 
 D8. **Thumbnails at the switch.** Recommended: Task 4 lands before Task 8, the backend calling
 `athanor-preview`'s out-of-process render and holding results in memory. The alternative
 switches with type icons only and adds thumbnails after; PT7 binds thumbnails, so it needs the
 maintainer's word.
+*Settled on 2026-11-21 as recommended, by text already decided: PT7's thumbnails
+(`doc_portal.md` section 6).*
 
 D9. **The chooser's accelerators.** Recommended: Ctrl+L (location), Ctrl+H (hidden files),
 Alt+Up (parent), Alt+Left and Alt+Right (history), Ctrl+Shift+N (New Folder), Enter, Escape,
 F6 (cycle sidebar, path bar, view); no search (PT15) and no rename. The alternative is decision
 39's full SR11 set before the chooser.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 15).*
 
 D10. **Whether the chooser waits for the file manager's own engine.** Recommended: no; the
 chooser writes nothing but New Folder, which is one `mkdir` in the backend, and FM21 step 1 runs
 beside it. The alternative waits for the engine for one code path.
+*Settled on 2026-11-21 as recommended, by text already decided: `doc_files.md` revision 3,
+decision 3 (`doc_portal.md` section 6).*
 
 D11. **How the access dialog (PT6) and the screen-sharing picker (PT9) leave GTK and
 libadwaita.** Decision 8 of `doc_files.md` revision 3 and the amendment of 2026-11-18 leave both
@@ -571,6 +585,7 @@ steps 2 and 5), and Task 0 limited to the chooser. The alternatives: extend Task
 PT6 and PT9 now, which asks the maintainer to approve a design for two dialogs this plan does not
 build; or leave both on the gtk backend, as the table of `athanor-portals.conf` already does
 (`Access=gtk`, `ScreenCast=none`), until their steps, with no document revision.
+*Decided by the maintainer on 2026-11-21: as recommended (`doc_portal.md` section 6, decision 20).*
 
 ## Changes owed
 
@@ -594,8 +609,9 @@ build; or leave both on the gtk backend, as the table of `athanor-portals.conf` 
 - `doc_portal.md` section 4, spike S3: rerun on Sulphur with GTK4, Qt 6 and Chromium handles;
   Sulphur's `fixture/parented.rs` covers the compositor half.
 - `doc_threat_model.md:95`: the owed TM3 clause for the FileChooser, closed by PT7's amendment.
-- `doc_files.md` FM18: the schema `org.gtk.gtk4.Settings.FileChooser` ships with GTK 4; once GTK
-  leaves the image (ADR-0141), the text names who ships it, or an Athanor key replaces it.
+- `doc_files.md` FM18: hidden files follow Athanor's own key, `org.athanor.desktop.files
+  show-hidden`, shipped by `athanor-system-config` (maintainer decision, 2026-11-21), and FM3
+  grants the window `$XDG_RUNTIME_DIR/dconf` for its write.
 - `components.toml`: the `athanor-files-view` entry (Task 2); the backend entry at `:402` names
   FileChooser after Task 8.
 
