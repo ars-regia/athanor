@@ -388,7 +388,7 @@ Applied with the approval of this document.
 - **Owed to revision 3** (the window switcher, section 8), each proposed in revision 3, in the pull request of OV28 step 1 unless it says otherwise:
   - `docs/operations/release-1.0.md`: amended by ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) itself (row 12, section 3); nothing more is owed here.
   - `doc_own_stack.md`: the 1.1 placement of the window switcher at the lines ADR-0138 lists (about 423, 666, 778, 917 to 920, 940 and 1205), and OS13's list of default bindings, which gains Alt+Tab and Alt+Shift+Tab.
-  - `doc_session.md` SN16, gap 8 (`:229`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
+  - `doc_session.md` SN16, gap 8 (`:231`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
   - `doc_launcher.md` LA12 (`:173`) and "Left for plan 3c" (`:254`): the switcher of this document exists in release 1.0, and the switch, with `athanor-launcher` rewritten in Sal and `athanor-library` (decisions 13 and 14), removes cosmic-launcher, pop-launcher and cosmic-app-library once OV28 steps 4, 5 and 6 have merged and section 8's acceptance holds.
   - `doc_shell.md` SH3, the row of cosmic-launcher (`:70`): its condition is met by OV28 step 7.
   - `shell-features.md` F-overview-10 (`:399`): owned by this document, not by "the launcher's plan 3c"; its source becomes `athanor-switcher` at OV28 step 7.
