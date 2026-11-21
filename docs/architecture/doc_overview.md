@@ -505,7 +505,7 @@ Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the
 - **Sal today** (`system/athanor-sal`).
   - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:150-183`).
   - Surfaces open at start or one per output (`Application::start` and `output`, `:220-232`). When revision 3 was written, `Shell::open` and `close` were private, so no layer surface opened on a chosen output at run time; #1022 (2026-11-06) added the public `Shell::open_layer` (`:893`) and made `Shell::close` (`:914`) public.
-  - The keyboard handler (`src/driver.rs:3348-3444`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
+  - The keyboard handler (`src/driver.rs:3405-3501`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
   - `sync_window_focus` (`src/driver.rs:2733`) gives AccessKit window focus to the surface that holds the keys.
   - `Kind::List` is a list of rows of text, one Tab stop; Up on its first row and Down on its last leave it, as Shift+Tab and Tab do (`src/widget.rs:156-171`). `Image` carries a description for AT-SPI, and `IconTheme` resolves icons with a fallback (`src/icon.rs`). The toolkit dock is the Sal client in the tree (`forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/`).
 - **Not verified.** The rule of OV4, that cosmic-comp drops a client that destroys a mapped layer surface, was observed with gtk4-layer-shell 1.3 and cosmic-comp 1.8.0; whether it holds for a Sal client is not known (OV27, item 1).
