@@ -381,9 +381,6 @@ fn trust_text(read: Option<&Result<State, ReadError>>, now: i64) -> String {
         return tr("Not verified");
     };
     match athanor_trust_state::badge(state, now) {
-        Badge::Check if state.verified.reason == Reason::PinnedBuild => {
-            tr("Signed, but pinned to one build: it receives no updates")
-        }
         Badge::Check => tr("Verified"),
         Badge::Cross => tr("Not verified"),
         Badge::Attention if state.verified.value => tr("Not verified yet"),
@@ -402,7 +399,8 @@ fn trust_text(read: Option<&Result<State, ReadError>>, now: i64) -> String {
             Reason::OriginNotEnforcing => {
                 tr("Not verified: this machine does not verify its updates")
             }
-            Reason::Signature | Reason::PinnedBuild => tr("Not verified"),
+            Reason::PinnedBuild => tr("Signed, but pinned to one build: it receives no updates"),
+            Reason::Signature => tr("Not verified"),
         },
     }
 }
@@ -723,11 +721,10 @@ mod tests {
         let mut older = state(Reason::Signature.into());
         older.newest_booted_build_time = NOW;
         assert_eq!(words(older), tr("Not verified yet"));
+        // Through the parser, as a real read goes: it refuses a pair that disagrees.
+        let json = serde_json::to_string(&state(Reason::PinnedBuild.into())).expect("serialises");
         assert_eq!(
-            words(state(Verified {
-                value: true,
-                reason: Reason::PinnedBuild
-            })),
+            trust_text(Some(&state_reply(Ok(&json), Some(0))), NOW),
             tr("Signed, but pinned to one build: it receives no updates")
         );
         // The update verdict is the shield's, not About's.
