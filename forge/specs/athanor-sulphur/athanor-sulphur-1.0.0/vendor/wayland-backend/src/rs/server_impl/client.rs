@@ -346,6 +346,7 @@ impl<D> Client<D> {
     #[allow(clippy::type_complexity)]
     pub(crate) fn next_request(
         &mut self,
+        may_read: &mut bool,
     ) -> std::io::Result<(Message<u32, OwnedFd>, Object<Data<D>>)> {
         if self.killed {
             return Err(rustix::io::Errno::PIPE.into());
@@ -359,6 +360,11 @@ impl<D> Client<D> {
             }) {
                 Ok(msg) => msg,
                 Err(MessageParseError::MissingData) | Err(MessageParseError::MissingFD) => {
+                    // One read per pass: what the socket still holds waits for the next pass,
+                    // which its readiness brings, once the other clients have had theirs.
+                    if !std::mem::take(may_read) {
+                        return Err(rustix::io::Errno::AGAIN.into());
+                    }
                     // need to read more data
                     if let Err(e) = self.socket.fill_incoming_buffers() {
                         if e.kind() != std::io::ErrorKind::WouldBlock {
