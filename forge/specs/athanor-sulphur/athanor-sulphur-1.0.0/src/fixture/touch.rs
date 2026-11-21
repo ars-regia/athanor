@@ -62,24 +62,24 @@ fn slot(id: u32) -> TouchSlot {
 /// The device the helpers below touch with (`Device::id`, as libinput's sysname).
 const SCREEN: &str = "event10";
 
-fn down(run: &mut Running, id: u32, at: Point<f64, Logical>) {
+pub(super) fn down(run: &mut Running, id: u32, at: Point<f64, Logical>) {
     run.state.touch_down(SCREEN, slot(id), at, InputTime::now());
     run.state.touch_frame();
 }
 
-fn motion(run: &mut Running, id: u32, at: Point<f64, Logical>) {
+pub(super) fn motion(run: &mut Running, id: u32, at: Point<f64, Logical>) {
     run.state
         .touch_motion(SCREEN, slot(id), at, InputTime::now());
     run.state.touch_frame();
 }
 
-fn up(run: &mut Running, id: u32) {
+pub(super) fn up(run: &mut Running, id: u32) {
     run.state.touch_up(SCREEN, slot(id), InputTime::now());
     run.state.touch_frame();
 }
 
 /// Moves the fixture's own window out of the way, to the bottom left of the first output.
-fn park_the_fixture(run: &mut Running) {
+pub(super) fn park_the_fixture(run: &mut Running) {
     let (window, _) = fixture_window(run);
     run.state.space.map_element(window, (40, 600), false);
 }
