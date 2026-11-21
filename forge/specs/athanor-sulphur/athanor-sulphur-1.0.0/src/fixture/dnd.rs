@@ -629,3 +629,64 @@ fn two_drags_keep_their_own_icons() {
     release(&mut run);
     run.stop();
 }
+
+/// The icon is drawn above the windows, the focused one included.
+#[test]
+fn the_icon_is_drawn_above_the_windows() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let _to = party(&mut run, (500, 100), None);
+    let serial = from.press(&mut run);
+    let shown = frame(&mut run);
+    for (x, y) in [(560, 160), (160, 160)] {
+        let window = at(&shown, x, y);
+        assert!(window != RED && !background(&window), "a window at {x},{y}");
+    }
+    let icon = from.icon(&mut run);
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state
+        .pointer_to((550.0, 150.0).into(), InputTime::now());
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 560, 160), RED, "above a window");
+    run.state
+        .pointer_to((150.0, 150.0).into(), InputTime::now());
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 160, 160), RED, "above the focused window");
+    release(&mut run);
+    run.stop();
+}
+
+/// The limit is in logical pixels: an icon of 512 buffer pixels a side at buffer scale 2 is 256
+/// logical pixels a side and is drawn; one of 514 is 257 and is not.
+#[test]
+fn the_icon_limit_is_in_logical_pixels() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let serial = from.press(&mut run);
+    let icon = from.icon(&mut run);
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    let shm: wl_shm::WlShm = from.local.bind(1);
+    let paint = |from: &mut Party, run: &mut Running, side: i32| {
+        let (buffer, _) = from.local.buffer(&shm, side, side, [0, 0, 255, 255]);
+        icon.set_buffer_scale(2);
+        icon.attach(Some(&buffer), 0, 0);
+        icon.damage(0, 0, side, side);
+        icon.commit();
+        from.local.roundtrip(run);
+    };
+    paint(&mut from, &mut run, 512);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 710, 510), RED, "256 logical pixels");
+    assert_eq!(at(&shown, 955, 755), RED, "its far corner");
+    assert!(background(&at(&shown, 957, 757)), "and no further");
+
+    paint(&mut from, &mut run, 514);
+    let shown = frame(&mut run);
+    assert!(background(&at(&shown, 710, 510)), "257 logical pixels");
+    release(&mut run);
+    run.stop();
+}
