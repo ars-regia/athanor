@@ -421,6 +421,12 @@ class Moved(unittest.TestCase):
         out = self.found(text, hunks, extra=notes, before=reworded)
         self.assertIn("edited or removed: place it again", out[0])
 
+    def test_a_short_number_after_a_cited_file_counts_as_its_citation_number(self):
+        text = "The `note` is at `notes.md:1`."
+        now = {"notes.md": "see `src/x.rs:120`, listens on `:9090`\nnext\n"}
+        was = {"notes.md": "see `src/x.rs:120`, listens on `:8080`\nnext\n"}
+        self.assertEqual(self.found(text, {"notes.md": [(1, 1, 1)]}, extra=now, before=was), [])
+
     def test_a_number_after_a_colon_that_is_no_citation_is_an_edit(self):
         text = "The `note` is at `notes.md:1`."
         for name, now, was in (

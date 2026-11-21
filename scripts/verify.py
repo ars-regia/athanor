@@ -6713,7 +6713,9 @@ CITATION_SPAN = re.compile(r"`([^`\s]*):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*`")
 
 def without_citation_numbers(line, tracked):
     """LINE with the numbers of its citations blanked: a span whose path is a tracked file, and a short
-    `:N` that follows such a span on the line. Any other `:N` (`fedora:43`, `quay.io:443`) is text."""
+    `:N` that follows such a span on the line. Any other `:N` (`fedora:43`, `quay.io:443`) is text.
+    A `:N` after a tracked file is read as that file's citation, as the grammar says, so a change of
+    such a span alone (a port after `src/x.rs:120`) is not an edit."""
     cited = False
 
     def blank(m):
