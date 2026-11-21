@@ -2174,7 +2174,7 @@ compositor and that the own compositor did not yet offer:
 40. **Drag and drop between clients, and the drag icon** (OS4, OS17; decisions 30, 31 and 37;
     `doc_files.md` revision 3, decision 12; proposed on 2026-11-18, approved by the maintainer on 2026-11-21
     with the pull request that records it). The compositor cancels every drag and drop today, through the
-    default of Smithay's handler (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:104-169`),
+    default of Smithay's handler,
     and decision 37's toplevel drag runs on that same grab.
     *Amended 2026-11-21: the compositor now runs Smithay's drag and drop grab
     (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:104-169`); the cancelling default is gone, and
