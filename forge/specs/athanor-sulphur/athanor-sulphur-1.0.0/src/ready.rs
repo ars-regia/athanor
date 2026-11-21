@@ -4,7 +4,10 @@
 //! Outside a notify unit (in a window, headless, a test) nothing is sent: the compositor never
 //! writes the environment of a manager that did not start it.
 
+use crate::state::State;
 use crate::Error;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+use smithay::reexports::calloop::LoopHandle;
 use std::ffi::OsStr;
 use std::time::Duration;
 
@@ -44,5 +47,27 @@ pub fn announce(socket: &OsStr, x11: Option<u32>) -> Result<(), Error> {
     })?;
     athanor_unit::notify::notify_ready()?;
     tracing::info!(socket = name, ?x11, "ready");
+    Ok(())
+}
+
+/// Sends `WATCHDOG=1` at half the manager's watchdog timeout, from a timer of the event loop, so
+/// that a ping proves the loop still turns: a callback that blocks it stops the pings, and the
+/// manager ends the compositor once the timeout has passed. Without `WatchdogSec=` in the unit
+/// nothing is sent. The loop turns while the session is paused, on another VT, so the pings go on
+/// there; across a suspend the manager's clock and the timer's, both monotonic, stop together.
+pub fn watchdog(handle: &LoopHandle<'static, State>) -> Result<(), Error> {
+    let Some(timeout) = athanor_unit::notify::watchdog_timeout() else {
+        return Ok(());
+    };
+    let every = timeout / 2;
+    handle
+        .insert_source(Timer::from_duration(every), move |_, _, _| {
+            if let Err(error) = athanor_unit::notify::notify_watchdog() {
+                tracing::warn!(%error, "cannot send WATCHDOG=1");
+            }
+            TimeoutAction::ToDuration(every)
+        })
+        .map_err(|e| e.error)?;
+    tracing::info!(?timeout, "the manager's watchdog is pinged");
     Ok(())
 }
