@@ -594,8 +594,9 @@ filtered buses of `athanor-greeter-client`.
   has a stage of the development VM's acceptance (below). Its precondition is open: the compositor
   runs outside any user manager (above), and how it then finds the `greetd` user's session bus, on
   which the keyboard monitor answers and `athanor-a11y` runs (AX13), is verified on the development
-  VM and written into this item before the change that serves these keys and aids at the greeter.
-  Until that change, the screen reader's key, the magnifier and the keyboard aids are known limits
+  VM and written into this item before the change that takes cosmic-comp's session off the
+  greeter, which serves these keys and aids at the greeter (ADR-0141 decision 3; `doc_session.md`
+  section 6, item 15). Until that change, the screen reader's key, the magnifier and the keyboard aids are known limits
   at the greeter, as AX13 lists the last two today.
 - **When it cannot start.** A failure before the program runs (no seat, no output drawn, no socket,
   the program not started) ends the compositor with status 1 and its cause in the journal under
@@ -613,7 +614,7 @@ filtered buses of `athanor-greeter-client`.
   - A stage of the development VM's acceptance in which greetd's greeter session starts the
     compositor and `athanor-greeter-client`, a password typed with the dead keys of US-International
     signs in, and `pgrep -x cosmic-comp` finds nothing from boot to the desktop (#1356); and, in the
-    change that serves them, stages in which, before anyone signs in, Super+Alt+S makes Orca speak
+    change that takes cosmic-comp's session off the greeter, stages in which, before anyone signs in, Super+Alt+S makes Orca speak
     the password field and stops it, Orca's own commands reach it through the keyboard monitor, and
     the magnifier and the keyboard aids act.
   - In the change that moves the greeter, its entry in `OUTSIDE_THE_LIST` of `verify.py allow-list`
@@ -2212,7 +2213,8 @@ compositor and that the own compositor did not yet offer:
       follows greetd's failure;
     - before login the mode serves the greeter's aids, the magnifier and the keyboard aids, with
       Orca's keyboard monitor and Super+Alt+S (`doc_accessibility.md` AX13), each with a stage of
-      the development VM's acceptance, once it has been verified how the compositor, outside any
+      the development VM's acceptance, in the change that takes cosmic-comp's session off the
+      greeter, once it has been verified how the compositor, outside any
       user manager, finds the `greetd` user's session bus (OS21).
 
     Not taken now, each left to the revision that the greeter's port brings:
