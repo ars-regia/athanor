@@ -7295,7 +7295,8 @@ def judge_known_red(entries, base, results, today):
 # not a scan of the sources, decides what hides a hit. `--cap-lints` still caps them, and a
 # clippy.toml can relax them, so implicit_panic_configs reads the tracked configurations, the
 # measuring run drops from its environment what implicit_panic_env does, and implicit_panic_counts
-# refuses a build script that sets it back.
+# refuses a build script that sets it back. Code that clippy does not compile is not measured:
+# implicit_panic_cfgs refuses a `cfg` on `clippy` or on `debug_assertions`.
 IMPLICIT_PANIC_LINTS = ("clippy::arithmetic_side_effects", "clippy::indexing_slicing", "clippy::string_slice")
 IMPLICIT_PANIC_BUDGET = "scripts/ci/implicit-panics.txt"
 # Two runs, as in security-audit.sh: athanor-preview-render needs zbus on async-io. No test target:
@@ -7493,6 +7494,32 @@ def implicit_panic_configs(root, tracked):
     return found
 
 
+# `clippy` or `debug_assertions` as a name, not as the head of a `clippy::` lint path.
+IMPLICIT_PANIC_CFG_NAME = re.compile(r"\b(clippy|debug_assertions)\b(?!\s*::)")
+
+
+def implicit_panic_cfgs(root, tracked, members):
+    """The tracked .rs files of the workspace members (directories relative to `root`), vendored
+    crates aside as in implicit_panic_counts, that name
+    `clippy` or `debug_assertions` outside a `clippy::` path. Under `cfg(not(clippy))` code is
+    hidden from clippy, and under `cfg(not(debug_assertions))` from the dev profile clippy builds,
+    while the release build compiles it. The whole file is read, not only the `cfg(` and
+    `cfg_attr(` attributes: a macro can take the predicate as an argument."""
+    found = []
+    for path in sorted(tracked):
+        if not path.endswith(".rs") or "/vendor/" in path or not any(path.startswith(f"{m}/") for m in members):
+            continue
+        try:
+            text = read(root / path)
+        except OSError as e:
+            found.append(f"{path}: cannot be read: {e}")
+            continue
+        for n, line in enumerate(text.split("\n"), 1):
+            found += [f"{path}:{n}: names `{m.group(1)}`, which a `cfg` can hide code from clippy with"
+                      for m in IMPLICIT_PANIC_CFG_NAME.finditer(line)]
+    return found
+
+
 def workspace_crates(root=None):
     """{package name: directory} of the members of the root workspace."""
     root = root or ROOT
@@ -7512,16 +7539,18 @@ def check_implicit_panics():
     r = Result()
     try:
         budget = implicit_panic_budget(read(ROOT / IMPLICIT_PANIC_BUDGET))
-        members = set(workspace_crates())
+        crates = workspace_crates()
     except (OSError, ValueError, KeyError) as e:
         r.fail(str(e))
         return r
+    members = set(crates)
     listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
     if listed.returncode:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
     tracked = [f for f in listed.stdout.split("\0") if f]
-    for problem in implicit_panic_configs(ROOT, tracked):
+    member_dirs = [d.relative_to(ROOT).as_posix() for d in crates.values()]
+    for problem in implicit_panic_configs(ROOT, tracked) + implicit_panic_cfgs(ROOT, tracked, member_dirs):
         r.fail(problem)
     for problem in implicit_panic_unlisted(budget, members):
         r.fail(problem)

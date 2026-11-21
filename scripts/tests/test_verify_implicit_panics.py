@@ -1,8 +1,9 @@
 """Unit tests of the implicit-panics check of `verify.py`: clippy's JSON is counted per crate once
 per place and lint, a run that did not finish counts nothing, the budget only goes down and, without
 clippy, fails closed on a dropped line, a member without one and a configuration that hides a
-budget lint; clippy runs with the lints forced and without RUSTFLAGS, and a build script may not
-set them back (python3 -B -m unittest discover -s scripts/tests -v)."""
+budget lint; clippy runs with the lints forced and without RUSTFLAGS, a build script may not set
+them back, and no member names `clippy` or `debug_assertions` for a `cfg`
+(python3 -B -m unittest discover -s scripts/tests -v)."""
 
 import importlib.util
 import json
@@ -164,6 +165,24 @@ class ConfigTest(unittest.TestCase):
             "bad/clippy.toml", "clippy.toml", "inc/.cargo/config.toml",
             "sub/.cargo/config", "wrap/.cargo/config.toml", "wrap/.cargo/config.toml", "x/.clippy.toml",
         ])
+
+    def test_a_cfg_on_clippy_or_debug_assertions_in_a_member_is_found(self):
+        files = {
+            "m/src/a.rs": "#[cfg(not(clippy))]\nfn f() {}\n",
+            "m/src/b.rs": "#[cfg_attr(not(debug_assertions), path = \"x.rs\")]\nmod x;\n",
+            "m/src/c.rs": "macro_rules! hide { ($c:meta) => { #[cfg($c)] fn g() {} } }\nhide!(not(r#clippy));\n",
+            "m/src/ok.rs": "#[allow(clippy::indexing_slicing, clippy :: string_slice)]\nfn h() {}\n",
+            "m/vendor/v/src/lib.rs": "#[cfg(not(clippy))]\nfn v() {}\n",
+            "m/build.toml": "clippy = 1\n",
+            "other/src/lib.rs": "#[cfg(not(clippy))]\nfn o() {}\n",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for path, text in files.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text)
+            found = verify.implicit_panic_cfgs(root, list(files), ["m"])
+        self.assertEqual([f.rsplit(":", 1)[0] for f in found], ["m/src/a.rs:1", "m/src/b.rs:1", "m/src/c.rs:2"])
 
     def test_a_pruned_name_under_src_is_walked(self):
         with tempfile.TemporaryDirectory() as tmp:
