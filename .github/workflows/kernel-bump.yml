@@ -23,7 +23,7 @@ name: Kernel Bump
 # whatever happened before, the system job mirrors the RPMs of both NVIDIA locks to
 # $KERNEL_REGISTRY/athanor-nvidia-rpms (system/nvidia/mirror.sh, doc_system_image.md S7), so an
 # image build outlives the vendor repositories; the kernel job mirrors a lock it regenerated.
-# The two groups may pin fedora:43 at different digests until both PRs merge. A rare
+# The two groups may pin fedora:<N> at different digests until both PRs merge. A rare
 # overlap is accepted: an NVIDIA pin move in an open kernel PR and a republished lock of the
 # old version in the system group edit the same lock, and the second PR to merge conflicts
 # on it, visibly. `schedule` only works from

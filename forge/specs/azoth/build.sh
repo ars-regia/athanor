@@ -56,10 +56,10 @@ fi
 NVR=$(bash "$HERE/nvr.sh")     # also rejects a FEDORA_KERNEL_NVR of the wrong shape
 # %dist of the build is the Fedora release of the pinned SRPM (the .fcNN of
 # FEDORA_KERNEL_NVR), not the builder's: kernel.spec's release is 300%{?buildid}%{?dist},
-# and with the builder's %dist a fedora:43 builder turns an fc45 source into ...fc43
-# while nvr.sh and the publish jobs expect ...fc45. %fedora is not redefined: the spec's
-# `%if 0%{?fedora}` conditionals follow the builder that actually compiles, which stays
-# fedora:43 until task 12 of docs/superpowers/plans/2026-10-18-fedora-45-rebase.md.
+# and with the builder's %dist a builder of another release turns an fc43 source into
+# ...fc45 while nvr.sh and the publish jobs expect ...fc43. %fedora is not redefined: the
+# spec's `%if 0%{?fedora}` conditionals follow the release of the builder that actually
+# compiles, the base of builder/Containerfile.
 [[ ${FEDORA_KERNEL_NVR#*-} =~ \.fc[0-9]+ ]] || die "FEDORA_KERNEL_NVR without a Fedora dist tag: $FEDORA_KERNEL_NVR"
 DIST=${BASH_REMATCH[0]}
 SRPM=kernel-$FEDORA_KERNEL_NVR.src.rpm
@@ -69,7 +69,7 @@ KOJI=https://kojipkgs.fedoraproject.org/packages/kernel/${FEDORA_KERNEL_NVR%%-*}
 # the signed file back.
 SRPM_URL=$KOJI/src/$SRPM
 SRPM_SIG_URL=$KOJI/data/sigcache/${FEDORA_KEY_FPR: -8}/src/$SRPM.sig
-FEDORA_KEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-${FEDORA_KERNEL_NVR##*.fc}-primary
+FEDORA_KEY=/usr/share/pki/rpm-gpg/RPM-GPG-KEY-fedora-${FEDORA_KERNEL_NVR##*.fc}-primary
 KVER=${CACHYOS_RELEASE#cachyos-}; KVER=${KVER%-*}     # cachyos-7.1.8-1 -> 7.1.8
 SERIES=$(cut -d. -f1,2 <<< "$KVER")                     # 7.1
 CACHY_TAR=$CACHYOS_RELEASE.tar.gz
