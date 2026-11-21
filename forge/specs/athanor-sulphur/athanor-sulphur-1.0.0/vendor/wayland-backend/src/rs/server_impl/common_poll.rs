@@ -84,24 +84,21 @@ impl<D> InnerBackend<D> {
         let poll_fd = self.poll_fd();
         let mut dispatched = 0;
         let mut events = Vec::<epoll::Event>::with_capacity(32);
-        loop {
-            let buffer = rustix::buffer::spare_capacity(&mut events);
-            epoll::wait(poll_fd.as_fd(), buffer, Some(&Timespec::default()))?;
+        // One pass, then back to the event loop: the clients still readable wake it again, at
+        // the tail of the level-triggered ready list, so that one flooding client neither keeps
+        // the loop here nor goes ahead of the others.
+        let buffer = rustix::buffer::spare_capacity(&mut events);
+        epoll::wait(poll_fd.as_fd(), buffer, Some(&Timespec::default()))?;
 
-            if events.is_empty() {
-                break;
+        for event in events.drain(..) {
+            let id = InnerClientId::from_u64(event.data.u64());
+            // remove the cb while we call it, to gracefully handle reentrancy
+            if let Ok(count) = self.dispatch_events_for(data, id) {
+                dispatched += count;
             }
-
-            for event in events.drain(..) {
-                let id = InnerClientId::from_u64(event.data.u64());
-                // remove the cb while we call it, to gracefully handle reentrancy
-                if let Ok(count) = self.dispatch_events_for(data, id) {
-                    dispatched += count;
-                }
-            }
-            let cleanup = self.state.lock().unwrap().cleanup();
-            cleanup(&self.handle(), data);
         }
+        let cleanup = self.state.lock().unwrap().cleanup();
+        cleanup(&self.handle(), data);
 
         Ok(dispatched)
     }
@@ -119,24 +116,19 @@ impl<D> InnerBackend<D> {
         let poll_fd = self.poll_fd();
         let mut dispatched = 0;
         let mut events = Vec::<Event>::with_capacity(32);
-        loop {
-            let buffer = rustix::buffer::spare_capacity(&mut events);
-            let nevents = unsafe { kevent(&poll_fd, &[], buffer, Some(Duration::ZERO))? };
+        // One pass, as on Linux above.
+        let buffer = rustix::buffer::spare_capacity(&mut events);
+        unsafe { kevent(&poll_fd, &[], buffer, Some(Duration::ZERO))? };
 
-            if nevents == 0 {
-                break;
+        for event in events.drain(..) {
+            let id = InnerClientId::from_u64(event.udata() as u64);
+            // remove the cb while we call it, to gracefully handle reentrancy
+            if let Ok(count) = self.dispatch_events_for(data, id) {
+                dispatched += count;
             }
-
-            for event in events.drain(..) {
-                let id = InnerClientId::from_u64(event.udata() as u64);
-                // remove the cb while we call it, to gracefully handle reentrancy
-                if let Ok(count) = self.dispatch_events_for(data, id) {
-                    dispatched += count;
-                }
-            }
-            let cleanup = self.state.lock().unwrap().cleanup();
-            cleanup(&self.handle(), data);
         }
+        let cleanup = self.state.lock().unwrap().cleanup();
+        cleanup(&self.handle(), data);
 
         Ok(dispatched)
     }
@@ -147,13 +139,15 @@ impl<D> InnerBackend<D> {
         client_id: InnerClientId,
     ) -> std::io::Result<usize> {
         let mut dispatched = 0;
+        // The one read from the client's socket this pass allows.
+        let mut may_read = true;
         let handle = self.handle();
         let mut state = self.state.lock().unwrap();
         loop {
             let action = {
                 let state = &mut *state;
                 if let Ok(client) = state.clients.get_client_mut(client_id.clone()) {
-                    let (message, object) = match client.next_request() {
+                    let (message, object) = match client.next_request(&mut may_read) {
                         Ok(v) => v,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             if dispatched > 0 {
