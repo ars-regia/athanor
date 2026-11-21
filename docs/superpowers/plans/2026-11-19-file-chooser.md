@@ -468,8 +468,8 @@ input through an EIS context reaches no chooser surface (`backend_surface`, `eis
 
 **Acceptance:** a `Close` on the Request while the dialog is shown closes it and answers 1, as PT4 says; a
 second request from another application opens a second dialog while the first stays; a Flatpak
-application's SaveFile on a new name returns one URI that the document store grants write to. A New Folder whose parent path holds a
-symbolic link is refused; with the `org.athanor.desktop.files` schema removed, and with
+application's SaveFile on a new name returns one URI that the document store grants write to. A New Folder whose canonical parent has a
+component replaced by a symbolic link between canonicalisation and the open is refused; with the `org.athanor.desktop.files` schema removed, and with
 `show-hidden` locked by dconf's lockdown, Ctrl+H toggles hidden files in the open dialog, writes
 nothing, and the backend stays up.
 
@@ -552,7 +552,8 @@ may read its state. This is a regression against the gtk chooser: switching the 
 removes its gvfs mount, so a stick that is not yet mounted is unreachable from the chooser until
 FM21 step 4 and LP18's agent, and doc_portal acceptance 4 ("from a USB stick") is met only for a
 mounted stick. Whether a stick reaches `/run/media` without the file manager's window
-(the session's automount, FM21 S7) is checked on the reference laptop before Task 8, and that check is the gate. The
+(the session's automount, FM21 S7) is checked on the reference laptop before Task 8, and that check is the gate (stated since as
+athanor-sessiond's automount check of PT7, SD11, which S7 does not test; see Task 8). The
 alternative reverses decision 14 (a): a mount action in the chooser through that module, limited
 to `Filesystem.Mount`, with a user outside `wheel` refused and the refusal named until LP18's
 agent or DK20 A, as decision 14 (b) does; it needs the module written first, and the
