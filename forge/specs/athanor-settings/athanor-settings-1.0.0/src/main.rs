@@ -68,6 +68,7 @@ fn forward() -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     // Before any toolkit or Wayland connection: the window runs only in its unit (SE4).
     match fs::read_to_string("/proc/self/cgroup") {
