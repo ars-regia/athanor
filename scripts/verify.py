@@ -6664,9 +6664,6 @@ LINE_CITATIONS_KEPT = {
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
     ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
-    ("doc_overview.md", "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/fixture.rs", "11320",
-     "the_unnamed_cosmic_keys_reach_the_client", 1):
-        "the citation names the test's row of Alt+Tab; the test's name is at the citation before it, `:11314`",
 }
 # Another project's file that a document cites by a path a tracked file also ends with, each
 # (document, path as written) with the project it belongs to: the path resolves to no file, sets no

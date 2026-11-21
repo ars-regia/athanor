@@ -510,7 +510,7 @@ class DiffHunks(unittest.TestCase):
 
 class Kept(unittest.TestCase):
     def test_the_kept_list_only_shrinks(self):
-        self.assertLessEqual(len(verify.LINE_CITATIONS_KEPT), 3)
+        self.assertLessEqual(len(verify.LINE_CITATIONS_KEPT), 2)
 
     def test_a_kept_entry_covers_one_citation_only(self):
         for key, why in verify.LINE_CITATIONS_KEPT.items():
