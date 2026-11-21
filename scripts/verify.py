@@ -6761,13 +6761,12 @@ def toml_definitions(rows):
     out, table, depth, quote, key = [], "", 0, None, None
     for n, row in enumerate(rows, 1):
         text = row.strip()
+        resumed = bool(quote)
         if quote:
-            if quote in text:
-                quote = None
-                if key and depth == 0:
-                    key[2], key = n, None
-            continue
-        if depth == 0:
+            if quote not in text:
+                continue
+            text, quote = text.split(quote, 1)[1], None  # what follows the closing quotes counts as brackets
+        if depth == 0 and not resumed:
             if (m := TOML_HEADER.fullmatch(text)):
                 table = path(m.group(1))
                 out.append([{table}, n, n])

@@ -261,6 +261,13 @@ class Kinds(unittest.TestCase):
         self.assertEqual(len(out), 1, out)
         self.assertIn("`bad.toml#a`: the file does not parse as TOML", out[0])
 
+    def test_a_multiline_string_closing_inside_an_array_keeps_the_depth(self):
+        extra = {"t.toml": '[a]\nk = ["""x\ny"""]\n[b]\nz = 1\n'}
+        self.assertEqual(lines("t.toml", "a", extra), [(1, 3)])
+        self.assertEqual(lines("t.toml", "a.k", extra), [(2, 3)])
+        self.assertEqual(lines("t.toml", "b", extra), [(4, 5)])
+        self.assertEqual(lines("t.toml", "b.z", extra), [(5, 5)])
+
     def test_yaml_jobs_and_named_steps(self):
         path = ".github/workflows/ci.yml"
         self.assertEqual(lines(path, "jobs.build"), [(4, 12)])
