@@ -22,11 +22,19 @@ LABEL = "ci-alert"
 FAILED = ("failure", "cancelled")
 
 
-def title(workflow: str, job: str) -> str:
-    return f"{workflow} / {job}: scheduled run failed"
+def kind(event: str, ref: str) -> str:
+    """How the run is named: a scheduled run keeps the wording its open issues were titled with,
+    so a change of wording never orphans them (the title is the key of the issue)."""
+    return "scheduled run" if event == "schedule" else f"run on {ref} ({event})"
 
 
-def alert(needs: dict, workflow: str, run_url: str, gh) -> list[str]:
+def title(workflow: str, job: str, what: str = "scheduled run") -> str:
+    return f"{workflow} / {job}: {what} failed"
+
+
+def alert(
+    needs: dict, workflow: str, run_url: str, gh, what: str = "scheduled run"
+) -> list[str]:
     """Opens, updates or closes one issue per job in NEEDS; GH runs one `gh` command. Returns the
     jobs whose issue could not be updated, each reported on stderr."""
     listed = json.loads(
@@ -48,7 +56,7 @@ def alert(needs: dict, workflow: str, run_url: str, gh) -> list[str]:
     unraised = []
     for job, state in sorted(needs.items()):
         result = state["result"]
-        name = title(workflow, job)
+        name = title(workflow, job, what)
         number = open_issues.get(name)
         try:
             if result in FAILED and number is not None:
@@ -69,7 +77,7 @@ def alert(needs: dict, workflow: str, run_url: str, gh) -> list[str]:
                         "--color",
                         "B60205",
                         "--description",
-                        "A scheduled workflow job failed (PL51)",
+                        "A scheduled or post-merge workflow job failed (PL51)",
                     )
                     label_ready = True
                 gh(
@@ -80,9 +88,9 @@ def alert(needs: dict, workflow: str, run_url: str, gh) -> list[str]:
                     "--label",
                     LABEL,
                     "--body",
-                    f"The scheduled run {run_url} ended with `{result}` for job `{job}` of "
-                    f"`{workflow}`.\n\nEvery failed scheduled run of the job comments here, and the "
-                    "next successful one closes the issue (PL51, docs/architecture/doc_pipeline.md).",
+                    f"The {what} {run_url} ended with `{result}` for job `{job}` of "
+                    f"`{workflow}`.\n\nEvery failed {what} of the job comments here, and the "
+                    f"next successful one closes the issue (PL51, docs/architecture/doc_pipeline.md).",
                 )
             elif result == "success" and number is not None:
                 gh(
@@ -111,7 +119,10 @@ def main() -> int:
             ["gh", *args, "-R", repository], check=True, stdout=subprocess.PIPE, text=True
         ).stdout
 
-    unraised = alert(json.loads(os.environ["NEEDS"]), os.environ["GITHUB_WORKFLOW"], run_url, gh)
+    what = kind(os.environ["GITHUB_EVENT_NAME"], os.environ["GITHUB_REF_NAME"])
+    unraised = alert(
+        json.loads(os.environ["NEEDS"]), os.environ["GITHUB_WORKFLOW"], run_url, gh, what
+    )
     return 1 if unraised else 0
 
 

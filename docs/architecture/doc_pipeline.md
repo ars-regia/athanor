@@ -58,10 +58,14 @@
   `kernel-weekly.yml` and `maintenance.yml`, without waiting for PB2; the Orchestrator's follows
   in a separate pull request and is a named exception in `verify.py workflows`, which checks
   the rest.
-  Also amended 2026-11-21 (#1353, [ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)),
+  Also amended 2026-11-21 (#1353, [ADR-0146](../decisions/0146-merge-queue-builds-the-specs-only.md)),
   approved by the maintainer with the pull request that makes the change: the `merge_group` run
   builds the specs a change selects, and not the kernel or the shell (a shell entry costs about 45-50 minutes of wall clock and about 240 runner minutes; the push run of `shell-surfaces.yml` covers it after the merge and alerts on failure); PL44, M3, the `pr.yml`
-  row of section 3.5 and the `changes.json` row of section 3.3 follow.
+  row of section 3.5 and the `changes.json` row of section 3.3 follow. PL51's alert job also ends
+  `shell-surfaces.yml` on a push to `iso-v0`, and every alert job runs only when its run was not
+  cancelled (`always() && !cancelled() && github.event_name == '<event>'`, which `verify.py workflows`
+  requires exactly), since a superseded run is not a failure; the issue of a push run says "run on
+  `iso-v0` (push)" where a scheduled one keeps "scheduled run", so open issues keep their title.
   Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
   change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
   root `Cargo.toml` or `Cargo.lock` that only adds workspace members does not select `shell`.
@@ -237,7 +241,7 @@ Composite actions carry the repeated steps, never logic:
 - `.github/actions/attest`: provenance and SBOM attestations for a digest file;
 - `.github/actions/verify-input`: verifies a consumed digest against its expected signer
   identity and writes the verified digest file;
-- `.github/actions/alert`: opens or updates the alert issue when a scheduled run fails (PL51;
+- `.github/actions/alert`: opens or updates the alert issue when a scheduled run or a push run on `iso-v0` fails (PL51;
   exists, used by `kernel-weekly.yml`);
 - `.github/actions/kvm`: KVM access for the runner user on hosted runners, for the boot and
   acceptance jobs (exists).
@@ -249,7 +253,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`, except a root `Cargo.toml` that only adds workspace members and a root `Cargo.lock` that only adds packages of the workspace (no `source`): a new crate that no surface uses yet, while a surface that starts using it changes its own `Cargo.toml` (2026-11-07). On `merge_group` the kernel and the shell are not selected and the specs are (PL44, ADR-0137). Known gap: `deny.toml` belongs to no area yet (follow-up) |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`, except a root `Cargo.toml` that only adds workspace members and a root `Cargo.lock` that only adds packages of the workspace (no `source`): a new crate that no surface uses yet, while a surface that starts using it changes its own `Cargo.toml` (2026-11-07). On `merge_group` the kernel and the shell are not selected and the specs are (PL44, ADR-0146). Known gap: `deny.toml` belongs to no area yet (follow-up) |
 | `plan.json`                   | `build.yml` `plan`        | every build stage               | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |
@@ -1134,7 +1138,7 @@ decides; Kernel Build no longer runs on unrelated pull requests.
 
 **PL44. The release path does not repeat what the merge queue proved, and an artifact is
 built at most twice.** The pull-request run builds what the change selects; the
-`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it and alerts on failure, ADR-0137); `build.yml`
+`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it and alerts on failure, ADR-0146); `build.yml`
 starts from the plan and builds once, and that build is the one signed, accepted on its own
 digests (UD17) and promoted, so what is released is what was tested. Building the release
 candidates in the `merge_group` run instead is not adopted now: the queue's ref is not a
@@ -1146,7 +1150,7 @@ are merged: the push to `iso-v0`
 publishes the RPMs of the merged pull request's `pr.yml` kernel build when the four
 conditions of `doc_kernel_build.md` section 7 hold, and builds otherwise. On `merge_group`,
 `scripts/ci/changes.py` selects the specs as on a pull request, and neither the kernel nor the
-shell (`QUEUE_SKIPS`, ADR-0110, ADR-0137), so `pr.yml` builds those on `pull_request` only (PB11).
+shell (`QUEUE_SKIPS`, ADR-0110, ADR-0146), so `pr.yml` builds those on `pull_request` only (PB11).
 
 **PL45. The bar is built once per run** and its output passed to the jobs that test it.
 
@@ -1205,7 +1209,7 @@ it on the next success. No scheduled failure stays silent. Every scheduled workf
 that job but `athanor-forge-orchestrator.yml`, whose alert job lands in a separate pull request
 (`ALERT_EXEMPT` in `verify.py`, which names the exception and fails once it is stale), and
 `shell-surfaces.yml` ends with the same job on a push to `iso-v0`, since the merge queue does not
-build the shell (ADR-0137; `QUEUE_COVERED_BY` in `verify.py` holds it), and
+build the shell (ADR-0146; `QUEUE_COVERED_BY` in `verify.py` holds it), and
 `verify.py workflows` fails when another does not: a workflow with an `on.schedule`
 trigger needs an `always()` job on a hosted runner that uses the action and, with the other
 such jobs, needs every other job (#1353).

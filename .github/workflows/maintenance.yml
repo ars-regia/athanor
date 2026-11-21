@@ -216,7 +216,7 @@ jobs:
     # success closes it. A job of its own on a GitHub runner, after every job but `mutants`, which
     # `alert-mutants` reports, whatever their result.
     needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql]
-    if: ${{ always() && github.event_name == 'schedule' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -236,7 +236,7 @@ jobs:
   # never open or close each other's issues.
   alert-mutants:
     needs: [mutants]
-    if: ${{ always() && github.event_name == 'schedule' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

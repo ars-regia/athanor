@@ -464,7 +464,14 @@ def scheduled_alert_problems(root):
     action on a GitHub-hosted runner, run with `always()`, and between them need every other job,
     so a scheduled failure, a lost runner or a timeout opens a ci-alert issue."""
     problems = []
-    for wf in sorted((Path(root) / ".github/workflows").glob("*.y*ml")):
+    workflows = Path(root) / ".github/workflows"
+    for name in sorted(ALERT_EXEMPT):
+        path = workflows / name
+        doc = yaml.safe_load(read(path)) if path.is_file() else None
+        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
+            problems.append(f"ALERT_EXEMPT names {name}, which does not exist or has no schedule: "
+                            "remove the entry (PL51)")
+    for wf in sorted(workflows.glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
         if not isinstance(doc, dict) or "schedule" not in triggers(doc):
             continue
@@ -486,19 +493,19 @@ def alert_jobs(jobs):
 
 def alert_job_problems(name, jobs, event):
     """What keeps the alert jobs of workflow NAME from reporting every job of a run of EVENT: none
-    uses the action, one has no always() or no test of the event, one is not on a hosted runner,
-    or a job is needed by none of them."""
+    uses the action, one has an `if` other than `always() && !cancelled() && github.event_name ==
+    '<event>'` (a superseded run is cancelled and is not a failure), one is not on a hosted
+    runner, or a job is needed by none of them."""
     alerts = alert_jobs(jobs)
     if not alerts:
         return [f"{name}: no job uses {ALERT_ACTION}, which a run on {event} needs (PL51)"]
     problems = []
     covered = set(alerts)
     for job_id, job in alerts.items():
-        condition = str(job.get("if", ""))
-        if "always()" not in condition:
-            problems.append(f"{name}: alert job {job_id} has no always() in its if (PL51)")
-        if f"github.event_name == '{event}'" not in condition:
-            problems.append(f"{name}: alert job {job_id} does not run on {event} only (PL51)")
+        condition = re.sub(r"\s+", " ", re.sub(r"^\s*\$\{\{(.*)\}\}\s*$", r"\1", str(job.get("if", "")))).strip()
+        allowed = f"always() && !cancelled() && github.event_name == '{event}'"
+        if condition != allowed:
+            problems.append(f"{name}: alert job {job_id} has the if {condition!r}, not {allowed!r} (PL51)")
         if not GITHUB_HOSTED.match(str(job.get("runs-on", ""))):
             problems.append(f"{name}: alert job {job_id} is not on a GitHub-hosted runner (PL51)")
         needed = job.get("needs") or []
@@ -506,7 +513,7 @@ def alert_job_problems(name, jobs, event):
     return problems + [f"{name}: no alert job needs {job_id} (PL51)" for job_id in jobs if job_id not in covered]
 
 
-# ADR-0137: each build the merge queue skips (QUEUE_SKIPS of scripts/ci/changes.py) names the
+# ADR-0146: each build the merge queue skips (QUEUE_SKIPS of scripts/ci/changes.py) names the
 # workflow whose push run on iso-v0 covers it and alerts on failure, or None with the reason.
 QUEUE_COVERED_BY = {
     "kernel": (None, "built once at the pull request head and published from that build on the "
@@ -516,7 +523,7 @@ QUEUE_COVERED_BY = {
 
 
 def queue_skip_problems(root):
-    """ADR-0137: a build the queue skips is covered after the merge by a workflow that runs on a
+    """ADR-0146: a build the queue skips is covered after the merge by a workflow that runs on a
     push and ends with an alert job for that push, or has a stated reason why none does."""
     root = Path(root)
     spec = importlib.util.spec_from_file_location("changes", root / "scripts/ci/changes.py")

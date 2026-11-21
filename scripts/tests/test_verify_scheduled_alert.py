@@ -5,6 +5,8 @@ import pathlib
 import tempfile
 import unittest
 
+import yaml
+
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify.py"
 spec = importlib.util.spec_from_file_location("verify", SCRIPT)
 verify = importlib.util.module_from_spec(spec)
@@ -14,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 ALERT = """
   alert:
     needs: [{needs}]
-    if: ${{{{ always() && github.event_name == '{event}' }}}}
+    if: ${{{{ always() && !cancelled() && github.event_name == '{event}' }}}}
     runs-on: {runner}
     steps:
       - uses: ./.github/actions/alert
@@ -26,6 +28,9 @@ def problems(text, name="w.yml"):
     root = pathlib.Path(tempfile.mkdtemp())
     (root / ".github/workflows").mkdir(parents=True)
     (root / ".github/workflows" / name).write_text(text)
+    for exempt in verify.ALERT_EXEMPT:
+        if exempt != name:
+            (root / ".github/workflows" / exempt).write_text(HEAD)
     return verify.scheduled_alert_problems(root)
 
 
@@ -55,6 +60,38 @@ class ScheduledAlertTest(unittest.TestCase):
         self.assertIn("no longer exempt", found[0])
         self.assertEqual(1, len(problems(HEAD)))
 
+    def test_the_exempt_set_is_pinned(self):
+        # Adding an entry means editing this test, so the maintainer sees it in the diff.
+        self.assertEqual({"athanor-forge-orchestrator.yml"}, set(verify.ALERT_EXEMPT))
+
+    def test_an_exemption_of_a_missing_or_unscheduled_workflow_fails(self):
+        root = pathlib.Path(tempfile.mkdtemp())
+        (root / ".github/workflows").mkdir(parents=True)
+        found = verify.scheduled_alert_problems(root)
+        self.assertEqual(1, len(found))
+        self.assertIn("athanor-forge-orchestrator.yml", found[0])
+        (root / ".github/workflows/athanor-forge-orchestrator.yml").write_text(
+            "on:\n  push:\njobs:\n  a:\n    runs-on: x\n")
+        self.assertEqual(1, len(verify.scheduled_alert_problems(root)))
+
+    def test_an_if_other_than_the_one_allowed_fails(self):
+        good = ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule")
+        for bad in ("&& !cancelled() && github.event_name == 'schedule'",
+                    "&& !cancelled() && github.event_name == 'schedule' || true",
+                    "&& !cancelled() && github.event_name == 'schedule' || github.event_name == 'pull_request'",
+                    "&& github.event_name == 'schedule'"):
+            text = good.replace("&& !cancelled() && github.event_name == 'schedule'", bad)
+            if bad == "&& !cancelled() && github.event_name == 'schedule'":
+                self.assertEqual([], problems(HEAD + text))
+            else:
+                self.assertEqual(1, len(problems(HEAD + text)), bad)
+
+    def test_the_if_may_drop_the_expression_braces_and_spread_over_lines(self):
+        text = ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule").replace(
+            "${{ always() && !cancelled() && github.event_name == 'schedule' }}",
+            "always() &&\n      !cancelled() &&   github.event_name == 'schedule'")
+        self.assertEqual([], problems(HEAD + text))
+
     def test_a_workflow_without_a_schedule_needs_no_alert(self):
         self.assertEqual([], problems("on:\n  push:\njobs:\n  a:\n    runs-on: x\n"))
 
@@ -79,6 +116,18 @@ def queue_problems(workflow, covered_by=None):
     finally:
         verify.QUEUE_COVERED_BY.clear()
         verify.QUEUE_COVERED_BY.update(saved)
+
+
+class ShellSurfacesPermissionsTest(unittest.TestCase):
+    """The push alert of shell-surfaces.yml alone holds issues: write."""
+
+    def test_only_the_alert_job_can_write_issues(self):
+        doc = yaml.safe_load((ROOT / ".github/workflows/shell-surfaces.yml").read_text())
+        self.assertEqual({"contents": "read"}, doc["permissions"])
+        self.assertEqual({"contents": "read", "issues": "write"}, doc["jobs"]["alert"]["permissions"])
+        for job_id, job in doc["jobs"].items():
+            if job_id != "alert":
+                self.assertIn(job.get("permissions", {"contents": "read"}), ({"contents": "read"}, {}), job_id)
 
 
 class QueueSkipTest(unittest.TestCase):

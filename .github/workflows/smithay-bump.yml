@@ -69,7 +69,7 @@ jobs:
     # success closes it. A job of its own on a GitHub runner, after every other job whatever
     # their result, so a lost runner or a timeout is seen as well.
     needs: [bump]
-    if: ${{ always() && github.event_name == 'schedule' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

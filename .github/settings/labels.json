@@ -31,7 +31,7 @@
   },
   {
     "color": "B60205",
-    "description": "A scheduled workflow job failed (PL51)",
+    "description": "A scheduled or post-merge workflow job failed (PL51)",
     "name": "ci-alert"
   },
   {
