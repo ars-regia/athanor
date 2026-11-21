@@ -87,6 +87,8 @@ fn serve(
             .build()
             .await?;
         tracing::info!("serving {BUS_NAME}");
+        // On the connection that owns the name, from this runtime's one thread (PT3, SN6).
+        athanor_unit::watchdog::spawn(&conn);
         let portal = conn
             .object_server()
             .interface::<_, settings::Portal>(PATH)

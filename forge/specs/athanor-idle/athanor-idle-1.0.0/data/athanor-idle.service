@@ -10,7 +10,7 @@ StartLimitIntervalSec=0
 
 [Service]
 # Ready once it owns org.freedesktop.ScreenSaver (SN4). NotifyAccess=main lets the program
-# send RESTART_RESET=1 after a healthy run, as SN6 asks of every guard.
+# send RESTART_RESET=1 after a healthy run, as SN6 asks of every guard, and WATCHDOG=1.
 Type=dbus
 BusName=org.freedesktop.ScreenSaver
 NotifyAccess=main
@@ -21,6 +21,9 @@ Restart=always
 RestartSec=100ms
 RestartSteps=5
 RestartMaxDelaySec=30s
+# The daemon pings the watchdog every 15 s, each time after a roundtrip on its own bus
+# connection, so a loop or a connection that hangs ends it, and Restart= restarts it (doc_session.md, SN6).
+WatchdogSec=30s
 Slice=session.slice
 
 # inhibitors.json survives a restart (SN7), so the directory outlives the stop and leaves with

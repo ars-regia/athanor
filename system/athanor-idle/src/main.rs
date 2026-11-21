@@ -386,6 +386,8 @@ async fn daemon(
     )
     .await?;
     let system = bus::System::new(system_query);
+    // On the connection that owns the names, from this runtime's one thread (doc_session.md SN6).
+    athanor_unit::watchdog::spawn(&session);
 
     let mut changes = bus::upower_changes(&system_watch).await?;
     let mut owners = bus::upower_owners(&system_watch).await?;

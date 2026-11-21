@@ -9,6 +9,11 @@ Type=dbus
 BusName=org.freedesktop.impl.portal.desktop.athanor
 ExecStart=/usr/libexec/xdg-desktop-portal-athanor
 Restart=on-failure
+# The backend pings the watchdog every 15 s, each time after a roundtrip on its own bus
+# connection; NotifyAccess=main lets the manager take the ping from a Type=dbus unit
+# (doc_portal.md, PT3; doc_session.md, SN6).
+NotifyAccess=main
+WatchdogSec=30s
 Slice=session.slice
 
 # GSettings maps dconf's shared-memory flag beneath $XDG_RUNTIME_DIR/dconf read-write to
