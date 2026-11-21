@@ -6,9 +6,10 @@
 //! full, with each frame's address, and with the address `install` runs at, which places the
 //! position-independent binary's load address for a symbolizer that has its debuginfo.
 //!
-//! Every line goes to the journal at err priority, and the message and the place come again
-//! last: a reader that keeps only the tail, the 50 journal lines of a crash report (SN8) or the
-//! last 4096 bytes of the preview helper's stderr (`athanor-preview`), still has them.
+//! Under a unit every line goes to the journal at err priority, and the message and the place
+//! come again last: a reader that keeps only the tail, the 50 journal lines of a crash report
+//! (SN8) or the last 4096 bytes of the preview helper's stderr (`athanor-preview`), still has
+//! them.
 
 use std::backtrace::Backtrace;
 use std::panic::{self, PanicHookInfo};
@@ -23,20 +24,22 @@ pub fn install() {
     }));
 }
 
-/// Writes `report` a line at a time, each at err priority: one tracing event per line, or each
-/// line after `<3>` on stderr, the prefix journald reads as the priority (SyslogLevelPrefix=).
+/// Writes `report` a line at a time, each at err priority: one tracing event per line, or on
+/// stderr, each line after `<3>`, the prefix journald reads as the priority (SyslogLevelPrefix=),
+/// when stderr is the journal, and as it is otherwise.
 fn emit(report: &str) {
     if through_tracing() {
         for line in report.lines() {
             tracing::error!("{line}");
         }
     } else {
-        eprint!("{}", for_stderr(report));
+        eprint!("{}", for_stderr(report, crate::journal::is_journal(std::io::stderr())));
     }
 }
 
-fn for_stderr(report: &str) -> String {
-    report.lines().map(|line| format!("<3>{line}\n")).collect()
+fn for_stderr(report: &str, journal: bool) -> String {
+    let prefix = if journal { "<3>" } else { "" };
+    report.lines().map(|line| format!("{prefix}{line}\n")).collect()
 }
 
 fn through_tracing() -> bool {
@@ -100,7 +103,8 @@ mod tests {
     #[test]
     fn every_line_of_the_report_is_at_err_priority() {
         let report = "thread main panicked at a.rs:1:2: no\n   0: 0x1 - <unknown>\nthread main panicked at a.rs:1:2: no";
-        let text = for_stderr(report);
+        assert_eq!(for_stderr(report, false), format!("{report}\n"));
+        let text = for_stderr(report, true);
         assert_eq!(text.lines().count(), 3);
         assert!(text.lines().all(|line| line.starts_with("<3>")), "{text}");
 

@@ -7575,8 +7575,8 @@ PANIC_HOOK_AFTER = {
 # hook and removes this entry. The set only shrinks.
 PANIC_HOOK_PENDING = {"athanor-lock"}
 # What a hooked program may take from tracing_subscriber: a filter, and the trait that installs
-# the subscriber athanor_unit::journal builds. Any other subscriber writes the hook's report
-# without the `<3>` that sets its journal priority, and with colour codes.
+# the subscriber athanor_unit::journal builds. Any other subscriber writes the hook's report to
+# the journal without the `<3>` that sets its priority, and with colour codes.
 PANIC_HOOK_SUBSCRIBER = re.compile(r"\btracing_subscriber\b(?:\s*::\s*(\{[^}]*\}|[\w\s:]+))?")
 PANIC_HOOK_SUBSCRIBER_ITEM = re.compile(r"EnvFilter\b.*|util::SubscriberInitExt|util::\{SubscriberInitExt\}")
 

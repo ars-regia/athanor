@@ -1,9 +1,12 @@
-//! Log lines for the journal. Each line starts with `<N>`, its syslog priority, which
-//! journald reads from a service's stdout and stderr (SyslogLevelPrefix=, on by default), so
-//! `journalctl --user -u <unit> -p err` finds what went wrong.
+//! Log lines for the journal. On a stream systemd connected to the journal each line starts
+//! with `<N>`, its syslog priority, which journald reads (SyslogLevelPrefix=, on by default), so
+//! `journalctl --user -u <unit> -p err` finds what went wrong. On any other stream, a terminal, a
+//! pipe or a file, the lines are tracing's own, coloured only on a terminal.
 
+use std::ffi::OsStr;
 use std::fmt;
-use std::io;
+use std::io::{self, IsTerminal};
+use std::os::fd::AsFd;
 
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::fmt::format::Writer;
@@ -41,39 +44,80 @@ fn priority(level: Level) -> u8 {
     }
 }
 
+/// The stream a program logs to.
+#[derive(Clone, Copy, Debug)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+}
+
 /// Logs to stderr what `RUST_LOG` names, info when it names nothing.
 pub fn init() {
-    subscriber(io::stderr).init();
+    with_filter(default_filter(), Stream::Stderr).init();
 }
 
 /// `init` for a program that logs to stdout.
 pub fn init_stdout() {
-    subscriber(io::stdout).init();
+    with_filter(default_filter(), Stream::Stdout).init();
 }
 
-/// The journal subscriber of `init`, writing to `writer`.
-pub(crate) fn subscriber<W>(writer: W) -> impl Subscriber + Send + Sync + 'static
+fn default_filter() -> EnvFilter {
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+}
+
+/// The subscriber that logs what `filter` lets through to `stream`: with the priority prefix
+/// when the stream is the journal, tracing's own lines otherwise.
+pub fn with_filter(filter: EnvFilter, stream: Stream) -> Box<dyn Subscriber + Send + Sync> {
+    match stream {
+        Stream::Stdout => {
+            let out = io::stdout();
+            build(filter, io::stdout, is_journal(&out), out.is_terminal())
+        }
+        Stream::Stderr => {
+            let err = io::stderr();
+            build(filter, io::stderr, is_journal(&err), err.is_terminal())
+        }
+    }
+}
+
+/// The journal subscriber with the default filter, writing to `writer`.
+#[cfg(test)]
+pub(crate) fn subscriber<W>(writer: W) -> Box<dyn Subscriber + Send + Sync>
 where
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
 {
-    with_filter(
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        writer,
-    )
+    build(default_filter(), writer, true, false)
 }
 
-/// The journal subscriber, logging what `filter` lets through to `writer`.
-pub fn with_filter<W>(filter: EnvFilter, writer: W) -> impl Subscriber + Send + Sync + 'static
+fn build<W>(filter: EnvFilter, writer: W, journal: bool, ansi: bool) -> Box<dyn Subscriber + Send + Sync>
 where
     W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
 {
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(writer)
+    let fmt = tracing_subscriber::fmt().with_env_filter(filter).with_writer(writer);
+    if journal {
         // journald stores the bytes as they come: colour codes would land in the log.
-        .with_ansi(false)
-        .event_format(SyslogPrefix)
-        .finish()
+        Box::new(fmt.with_ansi(false).event_format(SyslogPrefix).finish())
+    } else {
+        Box::new(fmt.with_ansi(ansi).finish())
+    }
+}
+
+/// Whether `stream` is the one systemd connected to the journal: `JOURNAL_STREAM` holds its
+/// `device:inode` (systemd.exec(5)), compared with the descriptor's own, as sd-daemon advises.
+/// A descriptor the program inherited from a parent with the journal counts as well; under
+/// systemd-cat the variable names stderr only.
+pub fn is_journal(stream: impl AsFd) -> bool {
+    names_stream(std::env::var_os("JOURNAL_STREAM").as_deref(), stream)
+}
+
+fn names_stream(value: Option<&OsStr>, stream: impl AsFd) -> bool {
+    let Some((device, inode)) = value.and_then(OsStr::to_str).and_then(|v| v.split_once(':')) else {
+        return false;
+    };
+    let Ok(stat) = nix::sys::stat::fstat(stream) else {
+        return false;
+    };
+    device.parse() == Ok(stat.st_dev) && inode.parse() == Ok(stat.st_ino)
 }
 
 #[cfg(test)]
@@ -105,6 +149,41 @@ mod tests {
         });
         let text = String::from_utf8(buffer.lock().expect("lock").clone()).expect("utf-8");
         assert_eq!(text, "<6>default layout picked preset=\"float\"\n");
+    }
+
+    #[test]
+    fn a_stream_that_is_not_the_journal_gets_tracing_lines() {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&buffer);
+        let make = move || Sink(Arc::clone(&sink));
+        tracing::subscriber::with_default(build(EnvFilter::new("info"), make, false, false), || {
+            tracing::warn!("default layout picked");
+        });
+        let text = String::from_utf8(buffer.lock().expect("lock").clone()).expect("utf-8");
+        assert!(!text.starts_with('<'), "{text}");
+        assert!(!text.contains('\u{1b}'), "{text}");
+        assert!(text.contains(" WARN ") && text.ends_with("default layout picked\n"), "{text}");
+    }
+
+    #[test]
+    fn journal_stream_names_the_descriptor_by_device_and_inode() {
+        let dir = std::env::temp_dir();
+        let one = tempfile_in(&dir, "one");
+        let two = tempfile_in(&dir, "two");
+        let stat = nix::sys::stat::fstat(&one).expect("fstat");
+        let value = format!("{}:{}", stat.st_dev, stat.st_ino);
+        assert!(names_stream(Some(OsStr::new(&value)), &one));
+        assert!(!names_stream(Some(OsStr::new(&value)), &two));
+        assert!(!names_stream(None, &one));
+        assert!(!names_stream(Some(OsStr::new("garbage")), &one));
+        assert!(!names_stream(Some(OsStr::new(&format!("{}:x", stat.st_dev))), &one));
+    }
+
+    fn tempfile_in(dir: &std::path::Path, name: &str) -> std::fs::File {
+        let path = dir.join(format!("athanor-unit-journal-{}-{name}", std::process::id()));
+        let file = std::fs::File::create(&path).expect("create");
+        std::fs::remove_file(&path).expect("remove");
+        file
     }
 
     #[test]

@@ -24,7 +24,7 @@ fn main() -> ExitCode {
         Ok(filter) => (filter, None),
         Err(error) => (tracing_subscriber::EnvFilter::new("info"), Some(error)),
     };
-    if let Err(error) = athanor_unit::journal::with_filter(filter, std::io::stdout).try_init() {
+    if let Err(error) = athanor_unit::journal::with_filter(filter, athanor_unit::journal::Stream::Stdout).try_init() {
         eprintln!("athanor-sulphur: no log: {error}");
     }
     if let Some(error) = malformed {
