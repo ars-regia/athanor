@@ -22,12 +22,11 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import system_fixtures as fx  # noqa: E402
-from atspi_check import children, find_application  # noqa: E402
+from atspi_check import collect, find_application  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
     READY_FILE,
-    afresh,
     alive,
     buttons,
     check,
@@ -138,20 +137,7 @@ ALLOW_INTERACTION, REQUEST_NEW = 0x1, 0x2
 
 def showing_role(app, Atspi, role):
     """Every showing accessible of `role`, found afresh."""
-    found = []
-
-    def visit(accessible):
-        if accessible.get_role_name() == role and showing(accessible, Atspi):
-            found.append(accessible)
-        for child in children(accessible):
-            visit(child)
-
-    def walk_once():
-        found.clear()
-        visit(app)
-        return found
-
-    return afresh(walk_once)
+    return collect(app, lambda node: node.get_role_name() == role and showing(node, Atspi))
 
 
 def type_password(app, Atspi, password):
