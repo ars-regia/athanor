@@ -406,6 +406,7 @@ name = "athanor-backup"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "athanor-unit",
  "jiff 1.0.1",
  "nix 0.32.0",
 ]
@@ -542,7 +543,6 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
- "tracing-subscriber",
  "zbus 6.2.1",
  "zeroize",
 ]
@@ -611,7 +611,6 @@ dependencies = [
  "athanor-style",
  "athanor-unit",
  "tracing",
- "tracing-subscriber",
  "zbus 5.19.0",
 ]
 
@@ -890,6 +889,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-bus-api",
  "athanor-trust-state",
+ "athanor-unit",
  "base64",
  "clap",
  "hex",
@@ -914,7 +914,6 @@ dependencies = [
  "jiff 1.0.1",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "zbus 6.2.1",
 ]
 

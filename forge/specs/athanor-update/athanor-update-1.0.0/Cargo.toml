@@ -9,6 +9,8 @@ license = "GPL-3.0-or-later"
 [dependencies]
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
 athanor-bus-api = { path = "../../../../system/athanor-bus-api" }
+# The panic hook (`athanor_unit::panic`).
+athanor-unit = { path = "../../../../system/athanor-unit" }
 zbus = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

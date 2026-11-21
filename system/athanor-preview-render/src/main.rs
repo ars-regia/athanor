@@ -63,6 +63,7 @@ struct Picture {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     if std::env::args().skip(1).eq(["wallpaper"]) {
         return match wallpaper() {
             Ok(()) => ExitCode::SUCCESS,

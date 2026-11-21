@@ -34,6 +34,7 @@ const USAGE: &str =
     "usage: athanor-backup init | create | prune | list | restore <snapshot> <path>";
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,

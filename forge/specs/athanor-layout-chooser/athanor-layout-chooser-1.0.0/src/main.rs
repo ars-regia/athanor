@@ -7,7 +7,6 @@ mod look;
 mod sandbox;
 mod ui;
 
-use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 
 use athanor_layout::loader::Paths;
@@ -16,7 +15,9 @@ use zbus::blocking::Connection;
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
 
 fn main() -> ExitCode {
-    // Confinement first, while this is the only thread; logging is not set up yet.
+    athanor_unit::panic::install();
+    // Confinement next, after the panic hook, which starts no thread and opens nothing, while
+    // this is the only thread; logging is not set up yet.
     let Some(paths) = Paths::from_env() else {
         eprintln!("athanor-layout-chooser: no absolute XDG_CONFIG_HOME or HOME");
         return ExitCode::FAILURE;
@@ -29,15 +30,7 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        // Launched from the desktop, stderr goes to the journal, which stores colour codes
-        // as they come: colour only a terminal.
-        .with_ansi(io::stderr().is_terminal())
-        .init();
+    athanor_unit::journal::init_stdout();
     i18n::init();
 
     // Held until the window closes: the bus releases the name with the connection.
