@@ -346,14 +346,18 @@ can answer 403 "Resource not accessible by integration" although the job token s
 `Contents: write` (run 44944210948, build run 44614591709); the cause is not known and
 [#1442](https://github.com/ars-regia/athanor/issues/1442) tracks it. The promotion itself is
 done: `:stable` has moved and the approved bundle is on the run. The maintainer publishes the
-Release from their own machine, in a checkout of `iso-v0` with `gh` signed in and `cosign` on
-`PATH`, with the promotion run and the build run it promoted as placeholders:
+Release from their own machine, in a checkout at the commit of the promotion run
+(`gh run view <promotion run> -R ars-regia/athanor --json headSha`), because `publish` hashes
+the Release notes of `docs/releases/` in the checkout against the approved ones; with `gh`
+signed in and `cosign` on `PATH`, and the promotion run and the build run it promoted as
+placeholders:
 
 ```sh
 gh run download <promotion run> -R ars-regia/athanor -n promotion-<build run> -D approved
 bash system/evidence-bundle.sh verify-dir approved approved
 GITHUB_REPOSITORY=ars-regia/athanor GITHUB_SERVER_URL=https://github.com \
   GITHUB_RUN_ID=<promotion run> RUN_ID=<build run> \
+  MAINTAINER_TAG_EMAIL="$(gh variable get MAINTAINER_TAG_EMAIL -R ars-regia/athanor)" \
   bash system/github-release.sh publish approved
 ```
 
@@ -362,5 +366,6 @@ The artifact is named `promotion-<build run>` (the `Keep the bundle on GitHub` s
 keyless signature (`system/evidence-bundle.sh`); `publish` checks that the bundle is this
 promotion run's and that the approved choice still holds, then publishes the Release with the
 job's deterministic asset `evidence-<build run>-<promotion run>.tar`
-(`system/github-release.sh`). Do not skip `verify-dir`: `publish` relies on it. The Release is
+(`system/github-release.sh`). `MAINTAINER_TAG_EMAIL` is the repository variable the job
+reads; `publish` needs it when the revision carries a `v0.x` tag. Do not skip `verify-dir`: `publish` relies on it. The Release is
 then authored by the maintainer, not by `github-actions[bot]`.
