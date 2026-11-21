@@ -92,6 +92,16 @@ class ScheduledAlertTest(unittest.TestCase):
             "always() &&\n      !cancelled() &&   github.event_name == 'schedule'")
         self.assertEqual([], problems(HEAD + text))
 
+    def test_an_alert_that_can_be_skipped_or_ignored_fails(self):
+        good = HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule")
+        self.assertEqual([], problems(good))
+        for old, new in (
+            ("    runs-on: ubuntu-24.04\n", "    runs-on: ubuntu-24.04\n    continue-on-error: true\n"),
+            ("      - uses: ./.github/actions/alert\n", "      - uses: ./.github/actions/alert\n        continue-on-error: true\n"),
+            ("      - uses: ./.github/actions/alert\n", "      - if: false\n        uses: ./.github/actions/alert\n"),
+        ):
+            self.assertEqual(1, len(problems(good.replace(old, new))), new)
+
     def test_a_workflow_without_a_schedule_needs_no_alert(self):
         self.assertEqual([], problems("on:\n  push:\njobs:\n  a:\n    runs-on: x\n"))
 

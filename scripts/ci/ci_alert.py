@@ -77,7 +77,7 @@ def alert(
                         "--color",
                         "B60205",
                         "--description",
-                        "A scheduled or post-merge workflow job failed (PL51)",
+                        "A scheduled workflow job failed (PL51)",
                     )
                     label_ready = True
                 gh(

@@ -495,7 +495,7 @@ def alert_job_problems(name, jobs, event):
     """What keeps the alert jobs of workflow NAME from reporting every job of a run of EVENT: none
     uses the action, one has an `if` other than `always() && !cancelled() && github.event_name ==
     '<event>'` (a superseded run is cancelled and is not a failure), one is not on a hosted
-    runner, or a job is needed by none of them."""
+    runner, one sets continue-on-error or puts an `if` on its alert step, or a job is needed by none of them."""
     alerts = alert_jobs(jobs)
     if not alerts:
         return [f"{name}: no job uses {ALERT_ACTION}, which a run on {event} needs (PL51)"]
@@ -508,6 +508,12 @@ def alert_job_problems(name, jobs, event):
             problems.append(f"{name}: alert job {job_id} has the if {condition!r}, not {allowed!r} (PL51)")
         if not GITHUB_HOSTED.match(str(job.get("runs-on", ""))):
             problems.append(f"{name}: alert job {job_id} is not on a GitHub-hosted runner (PL51)")
+        if "continue-on-error" in job:
+            problems.append(f"{name}: alert job {job_id} sets continue-on-error, which hides its failure (PL51)")
+        for step in job.get("steps") or []:
+            if step.get("uses") == ALERT_ACTION and ("if" in step or "continue-on-error" in step):
+                problems.append(f"{name}: the alert step of {job_id} sets if or continue-on-error, "
+                                "so it can be skipped or fail unseen (PL51)")
         needed = job.get("needs") or []
         covered |= {needed} if isinstance(needed, str) else set(needed)
     return problems + [f"{name}: no alert job needs {job_id} (PL51)" for job_id in jobs if job_id not in covered]

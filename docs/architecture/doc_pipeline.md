@@ -1138,7 +1138,9 @@ decides; Kernel Build no longer runs on unrelated pull requests.
 
 **PL44. The release path does not repeat what the merge queue proved, and an artifact is
 built at most twice.** The pull-request run builds what the change selects; the
-`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it and alerts on failure, ADR-0146); `build.yml`
+`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it and alerts on failure, ADR-0146). "At most twice" counts the release candidates: a
+specs change is also built at the pull request and in the queue, on top of the build of the
+release; `build.yml`
 starts from the plan and builds once, and that build is the one signed, accepted on its own
 digests (UD17) and promoted, so what is released is what was tested. Building the release
 candidates in the `merge_group` run instead is not adopted now: the queue's ref is not a
@@ -1201,18 +1203,22 @@ no job restores is removed, and the
 ## 8. Observability
 
 **PL51. A scheduled run that fails is seen.** Every scheduled workflow ends with a job that
-runs the `alert` composite action on a GitHub-hosted runner once the jobs it reports have ended,
-whatever their result (every other job; the hours-long `mutants` job of `maintenance.yml` has an
-`alert-mutants` job of its own), so that a job whose runner was lost or that timed out is seen as well.
+runs the `alert` composite action on a GitHub-hosted runner once the jobs it reports have ended
+(every other job; the hours-long `mutants` job of `maintenance.yml` has an `alert-mutants` job of
+its own). Its condition is exactly `always() && !cancelled() && github.event_name == '<event>'`:
+a failed job alerts, a job whose runner was lost or that timed out alerts as well (its result is
+`failure`), and a cancelled run does not, since a superseded run is not a failure.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
 it on the next success. No scheduled failure stays silent. Every scheduled workflow ends with
-that job but `athanor-forge-orchestrator.yml`, whose alert job lands in a separate pull request
-(`ALERT_EXEMPT` in `verify.py`, which names the exception and fails once it is stale), and
-`shell-surfaces.yml` ends with the same job on a push to `iso-v0`, since the merge queue does not
-build the shell (ADR-0146; `QUEUE_COVERED_BY` in `verify.py` holds it), and
-`verify.py workflows` fails when another does not: a workflow with an `on.schedule`
-trigger needs an `always()` job on a hosted runner that uses the action and, with the other
-such jobs, needs every other job (#1353).
+that job except `athanor-forge-orchestrator.yml`, whose alert job lands in a separate pull
+request; `ALERT_EXEMPT` in `verify.py` names that one exception, a test pins it, and
+`verify.py workflows` reports an entry that is stale. `shell-surfaces.yml` ends with the same job
+on a push to `iso-v0`, since the merge queue does not build the shell (ADR-0146);
+`QUEUE_COVERED_BY` in `verify.py` maps each build the queue skips to the workflow that covers
+it. `verify.py workflows` fails when another workflow lacks the job: a workflow with an
+`on.schedule` trigger needs alert jobs on a hosted runner that use the action, with exactly the
+condition above, no `if` or `continue-on-error` on the alert step or job, and, between them,
+every other job as a need (#1353).
 
 **PL52. Settings drift is detected daily.** `scripts/github-settings/ghsettings.py diff`,
 which exists, is tested (`scripts/tests/test_ghsettings.py`) and exits 1 on drift, compares
@@ -1395,7 +1401,7 @@ Applied:
   PL44, PB2).
 - M2: `azoth-signer.yml` in section 3.5, in PL12 and PL19, its digest bumped
   by a bot (PB4, PB12).
-- M3 (in part): an artifact is built at most twice; the `merge_group` run builds the specs a change selects, and not the kernel or the shell.
+- M3 (in part): a release candidate is built at most twice (a specs change is also built at the pull request and in the queue); the `merge_group` run builds the specs a change selects, and not the kernel or the shell.
   Release candidates built in the merge queue are not adopted now (PL44).
 - M4: Build L3 for hosted builds, L2 for the self-hosted kernel, `--deny-self-hosted-runners`
   in the verification (principle 1, PL19, PL21, PB4, ADR-0088).

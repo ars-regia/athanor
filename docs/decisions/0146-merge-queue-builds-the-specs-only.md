@@ -15,9 +15,11 @@ areas: [process, build]
 
 [ADR-0137](0137-merge-queue-on-iso-v0.md) put a merge queue on `iso-v0` whose entries run
 `pr.yml` on the base they land on. Its Consequences say that a kernel change is built again in
-its entry's run. That never held: on `merge_group`, `scripts/ci/changes.py` selected none of
-the builds (kernel, specs, shell), so the queue repeated change detection and `just check` and
-proved no build on the merged base (issue #1353). The kernel is built once, at the pull request
+its entry's run. That held when it landed, on 2026-11-06: `changes.py` took no event, so
+`merge_group` selected the kernel, the specs and the shell by the diff. #1037 (5b1883276)
+stopped that the same day, to match PL44 and M3, so the builds are never selected on
+`merge_group`, and nobody amended ADR-0137. Since then the queue has repeated change detection
+and `just check` and proved no build on the merged base (issue #1353). The kernel is built once, at the pull request
 head, and its RPMs are published from that build
 ([ADR-0110](0110-kernel-artifact-promotion.md)). A shell entry, measured on the runs of
 2026-11-20, costs about 45 to 50 minutes of wall clock and about 240 runner minutes, against
@@ -58,5 +60,6 @@ Not built in the queue: kernel, shell.
   `QUEUE_SKIPS`, so this record cannot drift from the script again.
 - `doc_pipeline.md` PL44, PL51, M3 and sections 3.3 and 3.5, and `doc_ci.md` CI27, are amended
   with the pull request that makes this change.
-- Every alert job added with it runs only when its run was not cancelled: a superseded run is
-  not a failure.
+- Every alert job added with it, and the existing ones of `kernel-weekly.yml` and
+  `maintenance.yml`, runs only when its run was not cancelled: a superseded run is not a
+  failure.
