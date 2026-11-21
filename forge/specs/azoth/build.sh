@@ -461,12 +461,6 @@ rpmbuild -bp --target x86_64 "${BCONDS[@]}" "$TOP/SPECS/kernel.spec"
 CONFIG=$(find "$TOP/BUILD" -path '*/configs/kernel-*-x86_64.config' -print -quit)
 [[ -n $CONFIG ]] || die "generated config not found under $TOP/BUILD"
 check_delta "$CONFIG" "$LOCAL"
-# kernel-local pins the random kmalloc partition mode only because the compiler has no
-# allocation tokens. The generated config says whether it has them (CC_HAS_ALLOC_TOKEN, the
-# same cc-option Kconfig uses): once it does, the pin is obsolete and the build stops.
-if grep -qx 'CONFIG_CC_HAS_ALLOC_TOKEN=y' "$CONFIG" && grep -qx 'CONFIG_KMALLOC_PARTITION_RANDOM=y' "$LOCAL"; then
-  die "kernel-local: the compiler now supports allocation tokens (CC_HAS_ALLOC_TOKEN=y): remove the three KMALLOC_PARTITION lines from kernel-local, Fedora already selects KMALLOC_PARTITION_TYPED (section 13, decision 6)"
-fi
 cp "$CONFIG" "$SRC/kernel-local" "$OUT/"
 
 # --- MicroVM guest kernel (section 9) -----------------------------------------------------

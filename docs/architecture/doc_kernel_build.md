@@ -843,8 +843,9 @@ task_struct`.
    ha. `kernel-local` fissa la modalità casuale e `build.sh` si ferma quando il config
    generato riporta `CC_HAS_ALLOC_TOKEN=y`, per togliere il pin e tornare alla modalità per
    tipo scelta da Fedora, invece di restare in silenzio sulla protezione più debole.
-   *Amended 2026-11-21 by the maintainer (Fedora 45 builder):* the clang 23 of Fedora 45 has allocation tokens, so the pin is gone from
-   `kernel-local` and Fedora's `KMALLOC_PARTITION_TYPED` applies.
+   *Amended 2026-11-21 by the maintainer (Fedora 45 builder):* the clang 23 of Fedora 45 has allocation tokens, so the random pin is gone:
+   `kernel-local` now requires Fedora's `KMALLOC_PARTITION_TYPED`, so `check_delta` stops the
+   build if the config falls back to the random mode, and the `CC_HAS_ALLOC_TOKEN` stop is removed.
 7. (2026-09-16) Immagini di sistema: base `base-atomic:43` di Fedora al posto di
    `ermete-base-nvidia`, immagine predefinita con `nouveau` e NVK, varianti
    `athanor-system-nvidia` (pacchetti negativo17) e `athanor-system-nvidia-legacy` (RPM

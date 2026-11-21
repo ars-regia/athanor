@@ -63,6 +63,14 @@ CONFIG_ZSWAP_COMPRESSOR_DEFAULT_ZSTD=y
 CONFIG_ZRAM_DEF_COMP_ZSTD=y
 # CONFIG_ZRAM_DEF_COMP_LZORLE is not set
 
+# Slab hardening: partitioned kmalloc caches in the type-based mode Fedora selects, which
+# needs the compiler's allocation tokens (-falloc-token-max, in the clang 23 of Fedora 45).
+# Should the compiler or the config fall back to the weaker random mode, build.sh stops on
+# these lines (check_delta) instead of shipping it in silence (section 13, decision 6).
+CONFIG_KMALLOC_PARTITION_CACHES=y
+CONFIG_KMALLOC_PARTITION_TYPED=y
+# CONFIG_KMALLOC_PARTITION_RANDOM is not set
+
 # Immutable rootfs: EROFS in the kernel, config readable from /proc.
 CONFIG_EROFS_FS=y
 CONFIG_IKCONFIG=y
