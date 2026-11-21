@@ -1120,13 +1120,14 @@ amendment's audit:
     an item of OS19: it follows the switch, and cosmic-workspaces' retirement goes with it, in 1.1
     (`release-1.0.md`, ADR-0135), and release 1.1 waits for it and for the window switcher on
     Alt+Tab; release 1.0 ships without either (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* the overview
-    and cosmic-workspaces' retirement are in release 1.0 (`doc_overview.md` OV29).
+    and cosmic-workspaces' retirement are in release 1.0 (`doc_overview.md` OV29), and the window
+    switcher on Alt+Tab is in release 1.0 as ADR-0138 places it, so 1.0 ships with both.
     The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
     own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
     and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
     and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
     step 5 are amended to say so in the first pull request of the overview's implementation
-    (`release-1.0.md`, section 3, the work moved to 1.1; *amended 2026-11-21 by revision 4:* it is in release 1.0). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    (`release-1.0.md`, section 3, the work moved to 1.1; *amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* it is in release 1.0). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
@@ -2261,7 +2262,7 @@ compositor and that the own compositor did not yet offer:
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
 - **Release 1.1 waits for the overview and the window switcher on Alt+Tab** (decision 28);
-  release 1.0 ships without them (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* release 1.0 waits for the overview and ships it.
+  release 1.0 ships without them (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* release 1.0 waits for the overview and ships it, and the window switcher is in release 1.0 as ADR-0138 places it, so 1.0 ships with both.
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.
