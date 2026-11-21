@@ -17,7 +17,8 @@ use zbus::fdo::{RequestNameFlags, RequestNameReply};
 
 fn main() -> ExitCode {
     athanor_unit::panic::install();
-    // Confinement first, while this is the only thread; logging is not set up yet.
+    // Confinement next, after the panic hook, which starts no thread and opens nothing, while
+    // this is the only thread; logging is not set up yet.
     let Some(paths) = Paths::from_env() else {
         eprintln!("athanor-layout-chooser: no absolute XDG_CONFIG_HOME or HOME");
         return ExitCode::FAILURE;
