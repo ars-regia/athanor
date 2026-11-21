@@ -1,0 +1,183 @@
+//! Drag and drop between clients, and the drag icon (doc_own_stack.md decision 40): Smithay's
+//! grab, started only from the client's own press or touch point and never while locked, whose
+//! target reads the data only at the drop. The icon is drawn by `marks::stack`.
+
+use crate::state::State;
+use smithay::backend::input::TouchSlot;
+use smithay::input::dnd::SourceMetadata;
+use smithay::input::dnd::{DnDGrab, DndAction, DndGrabHandler, DndTarget, GrabType, Source};
+use smithay::input::pointer::Focus;
+use smithay::input::Seat;
+use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::{IsAlive, Logical, Point, Serial};
+use smithay::wayland::selection::data_device::WaylandDndGrabHandler;
+use std::any::Any;
+use std::os::fd::OwnedFd;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The icon of the drag in progress: a surface of the dragging client, at the touch point the
+/// drag follows, or at the pointer when `slot` is `None`.
+pub struct DragIcon {
+    surface: WlSurface,
+    slot: Option<TouchSlot>,
+}
+
+/// A drag's source that passes the target's reads on only once the drop is performed: a read
+/// while the drag hovers gets its descriptor closed, and the source is not asked. The drop is
+/// the user's choice of the target, as a paste is, so the rule of the clipboard holds.
+struct AtDrop<S> {
+    source: S,
+    dropped: AtomicBool,
+}
+
+impl<S: Source> IsAlive for AtDrop<S> {
+    fn alive(&self) -> bool {
+        self.source.alive()
+    }
+}
+
+impl<S: Source> Source for AtDrop<S> {
+    fn is_client_local(&self, target: &dyn Any) -> bool {
+        self.source.is_client_local(target)
+    }
+
+    fn metadata(&self) -> Option<SourceMetadata> {
+        self.source.metadata()
+    }
+
+    fn accepted(&self, mime_type: Option<String>) {
+        self.source.accepted(mime_type);
+    }
+
+    fn choose_action(&self, action: DndAction) {
+        self.source.choose_action(action);
+    }
+
+    fn send(&self, mime_type: &str, fd: OwnedFd) {
+        if self.dropped.load(Ordering::SeqCst) {
+            self.source.send(mime_type, fd);
+        }
+    }
+
+    fn drop_performed(&self) {
+        self.dropped.store(true, Ordering::SeqCst);
+        self.source.drop_performed();
+    }
+
+    fn cancel(&self) {
+        self.source.cancel();
+    }
+
+    fn finished(&self) {
+        self.source.finished();
+    }
+}
+
+/// The client that asks for a drag: its source's, or, for a drag inside one client, which
+/// names no source, its origin surface's.
+fn requester(source: &dyn Any) -> Option<ClientId> {
+    let client = match source.downcast_ref::<WlDataSource>() {
+        Some(source) => source.client(),
+        None => source
+            .downcast_ref::<WlSurface>()
+            .and_then(|surface| surface.client()),
+    };
+    client.map(|client| client.id())
+}
+
+impl WaylandDndGrabHandler for State {
+    /// Smithay has checked that `serial` is the press or the touch point the seat's grab holds;
+    /// the drag also needs it sent to the client that asks, as a move does (`window_grab`), and
+    /// no lock. A drag refused is cancelled.
+    fn dnd_requested<S: Source>(
+        &mut self,
+        source: S,
+        icon: Option<WlSurface>,
+        seat: Seat<Self>,
+        serial: Serial,
+        type_: GrabType,
+    ) {
+        let own = requester(&source).is_some_and(|client| match type_ {
+            GrabType::Pointer => self.grab_serials.clicked(serial, &client),
+            GrabType::Touch => self.grab_serials.touched(serial, &client),
+        });
+        if self.lock.is_some() || !own {
+            source.cancel();
+            return;
+        }
+        let source = AtDrop {
+            source,
+            dropped: AtomicBool::new(false),
+        };
+        let display = self.display_handle.clone();
+        // The icon is taken after the grab is set: setting it ends a drag the seat held before,
+        // whose end takes that drag's icon away (`DndGrabHandler`).
+        let slot = match type_ {
+            GrabType::Pointer => {
+                let Some((pointer, start)) = seat
+                    .get_pointer()
+                    .and_then(|pointer| Some((pointer.clone(), pointer.grab_start_data()?)))
+                else {
+                    source.cancel();
+                    return;
+                };
+                let grab = DnDGrab::new_pointer(&display, start, source, seat);
+                pointer.set_grab(self, grab, serial, Focus::Keep);
+                None
+            }
+            GrabType::Touch => {
+                let Some((touch, start)) = seat
+                    .get_touch()
+                    .and_then(|touch| Some((touch.clone(), touch.grab_start_data()?)))
+                else {
+                    source.cancel();
+                    return;
+                };
+                let slot = start.slot;
+                let grab = DnDGrab::new_touch(&display, start, source, seat);
+                touch.set_grab(self, grab, serial);
+                Some(slot)
+            }
+        };
+        self.drag_icon = icon.map(|surface| DragIcon { surface, slot });
+    }
+}
+
+/// A drag ends at its drop, or cancelled, the lock's included (`lock.rs` ends the seat's grabs):
+/// its icon goes with it.
+impl DndGrabHandler for State {
+    fn dropped(
+        &mut self,
+        _target: Option<DndTarget<'_, Self>>,
+        _validated: bool,
+        _seat: Seat<Self>,
+        _location: Point<f64, Logical>,
+    ) {
+        self.drag_icon = None;
+        self.request_redraw();
+    }
+
+    fn cancelled(&mut self, _seat: Seat<Self>, _location: Point<f64, Logical>) {
+        self.drag_icon = None;
+        self.request_redraw();
+    }
+}
+
+impl State {
+    /// The drag icon, and where its surface goes: at the touch point the drag follows, or at
+    /// the pointer.
+    pub(crate) fn drag_icon(&self) -> Option<(WlSurface, Point<i32, Logical>)> {
+        let icon = self
+            .drag_icon
+            .as_ref()
+            .filter(|icon| icon.surface.alive())?;
+        let at = match icon.slot {
+            Some(slot) => self.touch_at(slot)?,
+            None => self.seat.get_pointer()?.current_location(),
+        };
+        Some((icon.surface.clone(), at.to_i32_round()))
+    }
+}

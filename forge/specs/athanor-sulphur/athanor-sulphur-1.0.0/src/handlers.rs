@@ -43,7 +43,7 @@ use smithay::wayland::security_context::{
     SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
 };
 use smithay::wayland::selection::data_device::{
-    set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
+    set_data_device_focus, DataDeviceHandler, DataDeviceState,
 };
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
@@ -1587,9 +1587,6 @@ impl DataDeviceHandler for State {
         &mut self.data_device_state
     }
 }
-
-// ponytail: the default cancels every drag and drop; a DnD grab with its icon when a client needs it.
-impl WaylandDndGrabHandler for State {}
 
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {

@@ -961,8 +961,9 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for Client {
 delegate_noop!(Client: ignore wl_data_offer::WlDataOffer);
 
 /// A drag starts from a touch its client was sent, as from a press, while any finger is still
-/// down: the seat takes it, and, as for a press, cancels the source (drag and drop is not offered
-/// yet). A serial no touch sent is refused, and the source is left alone.
+/// down: the seat takes it, and holds it until that finger is lifted, when the drop, on no
+/// target that took it, cancels the source (`dnd.rs`). A serial no touch sent is refused, and
+/// the source is left alone.
 #[test]
 fn a_drag_starts_from_a_touch() {
     let mut run = Running::start(None);
@@ -972,14 +973,15 @@ fn a_drag_starts_from_a_touch() {
     let qh = local.queue.handle();
     let manager: wl_data_device_manager::WlDataDeviceManager = local.bind(3);
     let device = manager.get_data_device(&seat, &qh, ());
-    let drag = |local: &mut Local, run: &mut Running, serial: u32| -> bool {
+    let drag = |local: &mut Local, run: &mut Running, serial: u32| -> Cancelled {
         let cancelled = Cancelled::default();
         let source = manager.create_data_source(&local.queue.handle(), cancelled.clone());
         source.offer("text/plain".into());
         device.start_drag(Some(&source), &surface, None, serial);
         local.roundtrip(run);
-        cancelled.load(Ordering::SeqCst)
+        cancelled
     };
+    let cancelled = |source: &Cancelled| source.load(Ordering::SeqCst);
 
     down(&mut run, 0, (320.0, 210.0).into());
     down(&mut run, 1, (340.0, 220.0).into());
@@ -987,19 +989,15 @@ fn a_drag_starts_from_a_touch() {
         client.touch.downs.len() == 2
     });
     let serial = local.client.touch.downs[0].3;
-    assert!(
-        !drag(&mut local, &mut run, serial.wrapping_sub(1)),
-        "a serial no touch sent"
-    );
+    let refused = drag(&mut local, &mut run, serial.wrapping_sub(1));
+    assert!(!cancelled(&refused), "a serial no touch sent");
     up(&mut run, 1);
-    assert!(
-        drag(&mut local, &mut run, serial),
-        "the first touch, held, starts a drag"
-    );
+    let held = drag(&mut local, &mut run, serial);
+    assert!(!cancelled(&held), "the first touch, held, starts a drag");
     up(&mut run, 0);
-    assert!(
-        !drag(&mut local, &mut run, serial),
-        "the lifted touch no longer does"
-    );
+    local.roundtrip(&mut run);
+    assert!(cancelled(&held), "the drag ends with its finger");
+    let late = drag(&mut local, &mut run, serial);
+    assert!(!cancelled(&late), "the lifted touch no longer does");
     run.stop();
 }

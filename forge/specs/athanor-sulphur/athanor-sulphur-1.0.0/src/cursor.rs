@@ -30,7 +30,7 @@ pub(crate) const FALLBACK_RGBA: [u8; 4] = [230, 230, 230, 255];
 /// The largest cursor surface a client may set, in logical pixels a side: a larger one, or
 /// one whose hotspot lies off it, gets the default cursor, so that no client covers the screen
 /// with its cursor or draws it away from the pointer.
-const MAX_CLIENT_CURSOR: i32 = 256;
+pub(crate) const MAX_CLIENT_CURSOR: i32 = 256;
 
 render_elements! {
     pub PointerElement<R> where R: ImportAll + ImportMem;

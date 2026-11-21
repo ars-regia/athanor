@@ -298,6 +298,8 @@ pub struct Marks {
     pub edge: Edge,
     /// The surfaces that set a blur region (`background_effect.rs`).
     pub blurred: crate::background_effect::Regions,
+    /// The drag icon and where it goes (`State::drag_icon`).
+    pub drag: Option<(WlSurface, Point<i32, Logical>)>,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,
@@ -937,6 +939,30 @@ pub(crate) fn marked(toplevel: &ToplevelSurface) -> bool {
     !full_screen && !maximised
 }
 
+/// The drag icon with its top left at `at`, above everything else, as the cursor is: not drawn
+/// when its tree is larger than a client's cursor may be, and with the border when its client
+/// is confined (decision 40).
+fn icon_elements<R>(
+    renderer: &mut R,
+    elements: &mut Vec<Stacked<R>>,
+    icon: &WlSurface,
+    at: Point<i32, Logical>,
+    place: &Place,
+) where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let tree = bbox_from_surface_tree(icon, at);
+    let limit = crate::cursor::MAX_CLIENT_CURSOR;
+    if tree.size.w > limit || tree.size.h > limit {
+        return;
+    }
+    if confined(icon) && !tree.is_empty() {
+        border(renderer, elements, icon, tree, place.output, place);
+    }
+    elements.extend(surface_tree(renderer, icon, at, place));
+}
+
 /// `window` as it stands in the stack, front to back: its popups, each with a border when its
 /// client is confined, the window's own marks, and its surface tree.
 fn window_elements<R>(
@@ -1163,6 +1189,9 @@ where
             area: area.unwrap_or(geometry),
         }
     });
+    if let Some(((icon, at), place)) = marks.drag.as_ref().zip(places.as_ref()) {
+        icon_elements(renderer, &mut elements, icon, *at, place);
+    }
     layers(renderer, overlay, &mut elements);
     if let Some((window, place)) = lifted.zip(places.as_ref()) {
         if let Some(located) = space.element_geometry(window) {
