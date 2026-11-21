@@ -17,12 +17,17 @@ use smithay::wayland::selection::data_device::WaylandDndGrabHandler;
 use std::any::Any;
 use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-/// The icon of the drag in progress: a surface of the dragging client, at the touch point the
-/// drag follows, or at the pointer when `slot` is `None`.
+/// The icon of a drag in progress: a surface of the dragging client, at the touch point the
+/// drag follows, or at the pointer when `slot` is `None`. A pointer drag and a touch drag may be
+/// held together, each with its icon.
 pub struct DragIcon {
     surface: WlSurface,
     slot: Option<TouchSlot>,
+    /// Set by the drag's source when that drag ends (`AtDrop`), so that its end takes this icon
+    /// away and no other.
+    ended: Arc<AtomicBool>,
 }
 
 /// A drag's source that passes the target's reads on only once the drop is performed: a read
@@ -31,6 +36,8 @@ pub struct DragIcon {
 struct AtDrop<S> {
     source: S,
     dropped: AtomicBool,
+    /// Shared with the drag's icon: set at the drop or the cancel, which end the drag.
+    ended: Arc<AtomicBool>,
 }
 
 impl<S: Source> IsAlive for AtDrop<S> {
@@ -64,10 +71,12 @@ impl<S: Source> Source for AtDrop<S> {
 
     fn drop_performed(&self) {
         self.dropped.store(true, Ordering::SeqCst);
+        self.ended.store(true, Ordering::SeqCst);
         self.source.drop_performed();
     }
 
     fn cancel(&self) {
+        self.ended.store(true, Ordering::SeqCst);
         self.source.cancel();
     }
 
@@ -108,9 +117,11 @@ impl WaylandDndGrabHandler for State {
             source.cancel();
             return;
         }
+        let ended = Arc::new(AtomicBool::new(false));
         let source = AtDrop {
             source,
             dropped: AtomicBool::new(false),
+            ended: ended.clone(),
         };
         let display = self.display_handle.clone();
         // The icon is taken after the grab is set: setting it ends a drag the seat held before,
@@ -142,12 +153,18 @@ impl WaylandDndGrabHandler for State {
                 Some(slot)
             }
         };
-        self.drag_icon = icon.map(|surface| DragIcon { surface, slot });
+        if let Some(surface) = icon {
+            self.drag_icons.push(DragIcon {
+                surface,
+                slot,
+                ended,
+            });
+        }
     }
 }
 
 /// A drag ends at its drop, or cancelled, the lock's included (`lock.rs` ends the seat's grabs):
-/// its icon goes with it.
+/// its icon goes with it, and the icon of a drag still held stays.
 impl DndGrabHandler for State {
     fn dropped(
         &mut self,
@@ -156,12 +173,14 @@ impl DndGrabHandler for State {
         _seat: Seat<Self>,
         _location: Point<f64, Logical>,
     ) {
-        self.drag_icon = None;
+        self.drag_icons
+            .retain(|icon| !icon.ended.load(Ordering::SeqCst));
         self.request_redraw();
     }
 
     fn cancelled(&mut self, _seat: Seat<Self>, _location: Point<f64, Logical>) {
-        self.drag_icon = None;
+        self.drag_icons
+            .retain(|icon| !icon.ended.load(Ordering::SeqCst));
         self.request_redraw();
     }
 }
@@ -184,17 +203,19 @@ impl State {
         }
     }
 
-    /// The drag icon, and where its surface goes: at the touch point the drag follows, or at
+    /// The drag icons, and where each surface goes: at the touch point its drag follows, or at
     /// the pointer.
-    pub(crate) fn drag_icon(&self) -> Option<(WlSurface, Point<i32, Logical>)> {
-        let icon = self
-            .drag_icon
-            .as_ref()
-            .filter(|icon| icon.surface.alive())?;
-        let at = match icon.slot {
-            Some(slot) => self.touch_at(slot)?,
-            None => self.seat.get_pointer()?.current_location(),
-        };
-        Some((icon.surface.clone(), at.to_i32_round()))
+    pub(crate) fn drag_icons(&self) -> Vec<(WlSurface, Point<i32, Logical>)> {
+        self.drag_icons
+            .iter()
+            .filter(|icon| icon.surface.alive())
+            .filter_map(|icon| {
+                let at = match icon.slot {
+                    Some(slot) => self.touch_at(slot)?,
+                    None => self.seat.get_pointer()?.current_location(),
+                };
+                Some((icon.surface.clone(), at.to_i32_round()))
+            })
+            .collect()
     }
 }

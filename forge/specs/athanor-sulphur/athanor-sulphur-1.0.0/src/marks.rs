@@ -298,8 +298,8 @@ pub struct Marks {
     pub edge: Edge,
     /// The surfaces that set a blur region (`background_effect.rs`).
     pub blurred: crate::background_effect::Regions,
-    /// The drag icon and where it goes (`State::drag_icon`).
-    pub drag: Option<(WlSurface, Point<i32, Logical>)>,
+    /// The drag icons and where each goes (`State::drag_icons`).
+    pub drag: Vec<(WlSurface, Point<i32, Logical>)>,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,
@@ -1189,8 +1189,10 @@ where
             area: area.unwrap_or(geometry),
         }
     });
-    if let Some(((icon, at), place)) = marks.drag.as_ref().zip(places.as_ref()) {
-        icon_elements(renderer, &mut elements, icon, *at, place);
+    if let Some(place) = places.as_ref() {
+        for (icon, at) in &marks.drag {
+            icon_elements(renderer, &mut elements, icon, *at, place);
+        }
     }
     layers(renderer, overlay, &mut elements);
     if let Some((window, place)) = lifted.zip(places.as_ref()) {

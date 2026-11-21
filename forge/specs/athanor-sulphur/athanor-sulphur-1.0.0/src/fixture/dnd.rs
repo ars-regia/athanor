@@ -586,3 +586,46 @@ fn a_drag_needs_its_press_held() {
     assert!(to.heard.heard().entered.is_empty(), "no offer");
     run.stop();
 }
+
+/// A touch drag and a pointer drag held together each keep their own icon, which goes only with
+/// its own drag.
+#[test]
+fn two_drags_keep_their_own_icons() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let seat = from.local.seat.clone().expect("a seat");
+    let _touch = seat.get_touch(&from.local.queue.handle(), ());
+    from.local.roundtrip(&mut run);
+    down(&mut run, 0, (150.0, 150.0).into());
+    from.local.pump(&mut run, "the touch", |client, _| {
+        client.touch.downs.len() == 1
+    });
+    let touched = from.local.client.touch.downs[0].3;
+    let finger = from.icon(&mut run);
+    let (_touch_source, touch_log) = from.drag(&mut run, touched, Some(&finger));
+    from.paint(&mut run, &finger, 32);
+    motion(&mut run, 0, (700.0, 650.0).into());
+
+    let pressed = from.press(&mut run);
+    let pointer = from.icon(&mut run);
+    let (_source, log) = from.drag(&mut run, pressed, Some(&pointer));
+    from.paint(&mut run, &pointer, 32);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 710, 660), RED, "the touch drag's icon");
+    assert_eq!(at(&shown, 710, 510), RED, "the pointer drag's icon");
+
+    up(&mut run, 0);
+    from.local.roundtrip(&mut run);
+    assert!(touch_log.sourced().cancelled, "the touch drag ends");
+    assert!(!log.sourced().cancelled, "the pointer drag goes on");
+    let shown = frame(&mut run);
+    assert!(
+        background(&at(&shown, 710, 660)),
+        "the touch drag's icon goes with it"
+    );
+    assert_eq!(at(&shown, 710, 510), RED, "the pointer drag keeps its icon");
+    release(&mut run);
+    run.stop();
+}

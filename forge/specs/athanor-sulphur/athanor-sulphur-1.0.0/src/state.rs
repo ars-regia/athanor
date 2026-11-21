@@ -217,8 +217,8 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub xdg_activation_state: XdgActivationState,
     pub data_device_state: DataDeviceState,
-    /// The icon of the drag in progress, if it has one (`dnd.rs`).
-    pub drag_icon: Option<crate::dnd::DragIcon>,
+    /// The icons of the drags in progress (`dnd.rs`).
+    pub drag_icons: Vec<crate::dnd::DragIcon>,
     /// Primary selection and data control (`clipboard`).
     pub clipboard: crate::clipboard::Clipboard,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
@@ -498,7 +498,7 @@ impl State {
             dmabuf_state: DmabufState::new(),
             xdg_activation_state,
             data_device_state,
-            drag_icon: None,
+            drag_icons: Vec::new(),
             clipboard,
             syncobj_state: None,
             frame_stats: None,
@@ -1333,8 +1333,8 @@ impl State {
                 });
             }
         }
-        // Nor is the drag icon: its frames go to the output it is at.
-        if let Some((icon, at)) = self.drag_icon() {
+        // Nor are the drag icons: their frames go to the output each is at.
+        for (icon, at) in self.drag_icons() {
             let on = self
                 .space
                 .output_geometry(output)
@@ -1811,7 +1811,7 @@ impl State {
             outline,
             edge: self.focus_theme.edge(),
             blurred: self.blurred.clone(),
-            drag: self.drag_icon(),
+            drag: self.drag_icons(),
         }
     }
 }
