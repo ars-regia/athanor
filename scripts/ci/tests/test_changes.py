@@ -246,11 +246,15 @@ class MainTest(unittest.TestCase):
         self.assertRegex(written["base"], r"^[0-9a-f]{40}$")
 
     def test_every_area_is_a_build_or_the_audit(self):
-        # A new area must be placed: a build, which merge_group never selects, or not.
+        # A new area must be placed: a build, which merge_group selects unless QUEUE_SKIPS
+        # allows it, or not.
         self.assertEqual(set(changes.AREAS), {*changes.BUILDS, "rust_audit"})
+        self.assertLessEqual(set(changes.QUEUE_SKIPS), set(changes.BUILDS))
 
-    def test_a_merge_group_selects_no_build_but_still_the_audit(self):
+    def test_a_merge_group_builds_the_specs_but_not_the_kernel_or_the_shell(self):
         (self.root / "forge/specs/azoth/notes.txt").write_text("kernel 2\n")
+        (self.root / "forge/specs/athanor-bar").mkdir(parents=True)
+        (self.root / "forge/specs/athanor-bar/bar.spec").write_text("Name: bar\n")
         (self.root / "system/athanor-sal").mkdir(parents=True)
         (self.root / "system/athanor-sal/lib.rs").write_text("fn main() {}\n")
         self.git("add", "-A")
@@ -258,11 +262,12 @@ class MainTest(unittest.TestCase):
         out = self.root / "out" / "changes.json"
         changes.main("HEAD^1", str(out), cwd=self.root)
         on_pr = json.loads(out.read_text())
-        self.assertTrue(on_pr["kernel"] and on_pr["shell"] and on_pr["rust_audit"])
+        self.assertTrue(on_pr["kernel"] and on_pr["shell"] and on_pr["specs"] and on_pr["rust_audit"])
         changes.main("HEAD^1", str(out), cwd=self.root, event="merge_group")
         written = json.loads(out.read_text())
         for area in changes.BUILDS:
-            self.assertFalse(written[area], area)
+            self.assertEqual(written[area], area not in changes.QUEUE_SKIPS, area)
+        self.assertEqual((written["specs"], written["kernel"], written["shell"]), (True, False, False))
         self.assertTrue(written["rust_audit"])
         self.assertFalse(written["docs_only"])
 
@@ -320,6 +325,25 @@ class MainTest(unittest.TestCase):
                 out = self.root / "out" / "changes.json"
                 changes.main("HEAD^1", str(out), cwd=self.root)
                 self.assertTrue(json.loads(out.read_text())["kernel"])
+
+
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS",
+             "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY_OWNER")
+_environ = _mock.patch.dict(_os.environ)
+
+
+def setUpModule():
+    _environ.start()
+    for name in TRUST_ENV:
+        _os.environ.pop(name, None)
+
+
+def tearDownModule():
+    _environ.stop()
 
 
 if __name__ == "__main__":

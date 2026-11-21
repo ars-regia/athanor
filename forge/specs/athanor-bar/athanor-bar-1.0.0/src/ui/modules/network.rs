@@ -9,7 +9,6 @@ use std::rc::Rc;
 use athanor_bar::i18n::tr;
 use athanor_controls::bridge;
 use athanor_controls::sal::network::Page;
-use athanor_controls::sal::Turn;
 use athanor_sal::{Event, Ui, WidgetId};
 use athanor_services::network::{self, NetworkState};
 
@@ -89,10 +88,9 @@ impl Module for Network {
     }
 
     fn refresh(&mut self, _cx: &mut Cx, ui: &mut Ui) -> Reply {
-        match self.page.turn(ui) {
-            Turn::Rebuild => Reply::Reopen,
-            Turn::Updated | Turn::Unchanged => self.reply(),
-        }
+        let size = ui.size();
+        let turn = self.page.turn(ui);
+        controls::after_turn(turn, || ui.layout() != size, || self.reply())
     }
 
     fn wants_open(&mut self) -> bool {

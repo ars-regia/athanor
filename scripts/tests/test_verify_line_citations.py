@@ -81,6 +81,15 @@ class Forms(unittest.TestCase):
         )
         self.assertEqual(len(found), 2)
 
+    def test_an_upstream_path_cited_by_symbol_is_not_ambiguous(self):
+        files = {**FILES, "crate/benches/b.rs": "fn one() {}\n", "other/benches/b.rs": "fn one() {}\n"}
+        text = "The `one` is at `benches/b.rs#one`."
+        self.assertEqual(len(messages(text, files)), 1)
+        found = verify.citation_findings(
+            "doc.md", text, set(files), files.__getitem__, upstream={("doc.md", "benches/b.rs")}
+        )
+        self.assertEqual(found, [])
+
     def test_a_hyphenated_token_is_a_whole_word(self):
         self.assertEqual(messages("The `cosmic-osd` is at `data/clients:3`."), [])
         self.assertEqual(

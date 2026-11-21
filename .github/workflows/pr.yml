@@ -5,7 +5,9 @@ name: Pull Request
 #
 # changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
 #   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs. On
-#   merge_group it selects no build (kernel, specs, shell): the pull request proved them (PL44).
+#   merge_group it selects the specs as on a pull request, so the queue builds their merge result,
+#   and not the kernel, which the pull request head proved (ADR-0110), nor the shell, which the
+#   push run of shell-surfaces.yml covers after the merge (ADR-0146).
 # check-*: the parts of `just check`, the gate a contributor runs locally, one job and one recipe
 #   each so they run in parallel: check-static (lint, every verify.py check with
 #   scripts/ci/known-red.txt, kernel profile, Calmo), check-system and check-other (the Python
@@ -188,6 +190,8 @@ jobs:
     if: ${{ fromJSON(needs.changes.outputs.changes).shell }}
     permissions:
       contents: read
+      # The ceiling for the alert job of shell-surfaces.yml, which runs on a push only.
+      issues: write
     uses: ./.github/workflows/shell-surfaces.yml
 
   rust_audit:

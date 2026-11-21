@@ -141,13 +141,8 @@ impl Channel {
         let devices = shown
             .iter()
             .map(|(name, label, in_use)| {
-                let text = if *in_use {
-                    tr_with("{device}, in use", "device", label)
-                } else {
-                    label.clone()
-                };
                 // Across the page, its text centred, as GTK's button with a label.
-                let row = ui.add(list, Kind::Button(text));
+                let row = ui.add(list, Kind::Button(row_text(label, *in_use)));
                 ui.set_fill(row, true);
                 (name.clone(), row)
             })
@@ -163,7 +158,8 @@ impl Channel {
         }
     }
 
-    /// Shows the device in use. Whether the device rows must change, which the widgets cannot.
+    /// Shows the device in use, and a row's new label or use in place. Whether the device rows
+    /// must change, which the widgets cannot: a device came, went or moved.
     fn show(&mut self, ui: &mut Ui, state: &AudioState) -> bool {
         let (devices, default) = (self.direction.devices(state), self.direction.default(state));
         let chosen = audio::chosen(devices, default).and_then(|index| devices.get(index));
@@ -178,7 +174,15 @@ impl Channel {
                 ui.set_active(self.mute, device.muted);
             }
         }
-        rows(devices, default) != self.shown
+        let rows = rows(devices, default);
+        if !rows.iter().map(|row| &row.0).eq(self.shown.iter().map(|row| &row.0)) {
+            return true;
+        }
+        for ((_, button), (_, label, in_use)) in self.devices.iter().zip(&rows) {
+            ui.set_text(*button, &row_text(label, *in_use));
+        }
+        self.shown = rows;
+        false
     }
 
     /// The command for the person's `event` on this channel's widgets.
@@ -221,6 +225,15 @@ impl Direction {
             Direction::Output => state.default_output.as_deref(),
             Direction::Input => state.default_input.as_deref(),
         }
+    }
+}
+
+/// A device row's text: its label, and whether it is the one in use.
+fn row_text(label: &str, in_use: bool) -> String {
+    if in_use {
+        tr_with("{device}, in use", "device", label)
+    } else {
+        label.to_owned()
     }
 }
 
@@ -622,6 +635,56 @@ mod tests {
         state.outputs.remove(0);
         publish(&page, state);
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+    }
+
+    /// A row whose device comes into use, or takes a new label, is set in place, which keeps
+    /// the keyboard focus on the row the person just pressed; a device that comes, goes or
+    /// moves builds the rows again (#1248).
+    #[test]
+    fn a_device_in_use_keeps_the_rows_and_a_device_that_moves_rebuilds_them() {
+        let texts = |page: &Page, ui: &Ui| -> Vec<String> {
+            let devices = page.ids.as_ref().map_or(&[][..], |ids| &ids.output.devices);
+            devices.iter().map(|(_, id)| label(ui, *id).to_owned()).collect()
+        };
+        let build = |page: &mut Page| {
+            let mut ui = Ui::new("Sound", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, None, &Look::plain());
+            ui
+        };
+        let (mut page, mut received) = page();
+        publish(&page, speakers_and_headset());
+        let mut ui = build(&mut page);
+        let headset = page.ids.as_ref().map(|ids| ids.output.devices[1].1);
+
+        let mut state = speakers_and_headset();
+        state.default_output = Some("speakers".into());
+        state.outputs[1].label = "Headset".into();
+        publish(&page, state.clone());
+        assert_eq!(page.turn(&mut ui), Turn::Updated, "only the rows' state changed");
+        assert_eq!(texts(&page, &ui), ["SPEAKERS, in use", "Headset"]);
+        assert_eq!(page.ids.as_ref().map(|ids| ids.output.devices[1].1), headset);
+        let event = headset.and_then(|row| ui.activate(row)).expect("a row is clicked");
+        assert!(page.event(&mut ui, &event));
+        assert!(matches!(
+            received.try_recv(),
+            Ok(AudioCommand::Default { sink: true, name }) if name == "headset"
+        ));
+
+        let mut moved = state.clone();
+        moved.outputs.reverse();
+        let mut added = state.clone();
+        added.outputs.push(device("hdmi", 50.0, false));
+        let mut removed = added.clone();
+        removed.outputs.remove(1);
+        for (now, why) in [
+            (moved, "the same devices in another order"),
+            (added, "a device came"),
+            (removed, "a device left"),
+        ] {
+            publish(&page, now);
+            assert_eq!(page.turn(&mut ui), Turn::Rebuild, "{why}");
+            ui = build(&mut page);
+        }
     }
 
     #[test]

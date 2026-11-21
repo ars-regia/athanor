@@ -1,9 +1,9 @@
-name: Alert on a failed scheduled job
+name: Alert on a failed job of a scheduled or post-merge run
 description: >-
   PL51 (docs/architecture/doc_pipeline.md): opens or updates one ci-alert issue per job of the
   workflow that failed or was cancelled, and closes it once the job succeeds again. Use it in
   a last job of the workflow, on a GitHub-hosted runner, with `needs:` naming the jobs it
-  reports (every other job, or those of a long job's own alert job), `if: always()` and `permissions: issues: write`, after a checkout of the repository.
+  reports (every other job, or those of a long job's own alert job), `if: always() && !cancelled() && github.event_name == '<event>'` (a superseded run is not a failure) and `permissions: issues: write`, after a checkout of the repository.
 inputs:
   needs:
     description: The workflow's needs context, as toJSON(needs).

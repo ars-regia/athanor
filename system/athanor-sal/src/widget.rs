@@ -1005,6 +1005,8 @@ pub struct Ui {
     offered: Option<(WidgetId, String)>,
     /// The text [`Ui::announce`] asked for and its priority, until the driver publishes it.
     pub(crate) announcement: Option<(String, Priority)>,
+    /// How many announcements [`Ui::announce`] asked for: which one is pending.
+    pub(crate) announced: u64,
     /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
     pub(crate) pose: crate::motion::Pose,
     /// The ids of the next widgets of the slots [`Ui::remove_children`] freed, which
@@ -1056,6 +1058,7 @@ impl Ui {
             clips: Vec::new(),
             offered: None,
             announcement: None,
+            announced: 0,
             pose: crate::motion::Pose::REST,
             free: std::collections::BTreeSet::new(),
             descendants: Vec::new(),
@@ -1221,6 +1224,7 @@ impl Ui {
     /// of the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
     pub fn announce(&mut self, text: &str, priority: Priority) {
         self.announcement = Some((text.to_owned(), priority));
+        self.announced = self.announced.wrapping_add(1);
     }
 
     /// The text and priority [`Ui::announce`] asked for that the driver has not published

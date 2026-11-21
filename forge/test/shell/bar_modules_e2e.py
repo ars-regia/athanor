@@ -22,12 +22,11 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import system_fixtures as fx  # noqa: E402
-from atspi_check import children, find_application  # noqa: E402
+from atspi_check import collect, find_application  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
     READY_FILE,
-    afresh,
     alive,
     buttons,
     check,
@@ -40,6 +39,7 @@ from bar_e2e import (  # noqa: E402
     wait_for,
 )
 from gi.repository import Gio, GLib  # noqa: E402
+from input_method_check import capture, capture_after  # noqa: E402
 
 # Typed into the password entries. Searched for in every written file at the end.
 PASSWORDS = ["correct horse battery", "staple-9-orbit"]
@@ -138,20 +138,7 @@ ALLOW_INTERACTION, REQUEST_NEW = 0x1, 0x2
 
 def showing_role(app, Atspi, role):
     """Every showing accessible of `role`, found afresh."""
-    found = []
-
-    def visit(accessible):
-        if accessible.get_role_name() == role and showing(accessible, Atspi):
-            found.append(accessible)
-        for child in children(accessible):
-            visit(child)
-
-    def walk_once():
-        found.clear()
-        visit(app)
-        return found
-
-    return afresh(walk_once)
+    return collect(app, lambda node: node.get_role_name() == role and showing(node, Atspi))
 
 
 def type_password(app, Atspi, password):
@@ -279,9 +266,10 @@ def network(ctx):
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
     )
     check("the wired state is shown", bool(labelled(app, Atspi, "label", "Wired: connected")))
-    # The rows are rebuilt when the signal icon of a network changes, and kept when its
-    # strength moves inside the same icon: a rebuild on every update would take the
-    # keyboard focus off a row. A rebuilt row is a new accessible, at a new path.
+    # A network's new signal icon is set on its row in place, and a strength inside the same icon
+    # changes nothing: a rebuild would take the keyboard focus off a row, and a rebuilt row is a
+    # new accessible, at a new path. So the row keeps its path, and what the person sees is read
+    # from the output: the capture changes with the icon and stays with a strength inside it.
     def lab_row():
         found = buttons(app, Atspi, "Athanor Lab, connected")
         return found[0].path if found else None
@@ -292,15 +280,34 @@ def network(ctx):
             (ACCESS_POINT, "Strength", GLib.Variant("y", strength)),
         )
 
+    # The rig's theme draws the excellent and the good icon alike, so the strengths below are 82,
+    # 40 and 50: the excellent icon, then the ok icon twice.
     shown = lab_row()
-    set_strength("lab", 60)
-    check("a new signal icon rebuilds the rows", wait_for(lambda: lab_row() not in (None, shown), 5))
-    shown = lab_row()
-    set_strength("lab", 70)
+    # Settled, as the captures after it are: it is the reference the return to 82 is held to.
+    picture = capture_after("bar-modules-network-0", None)
+    check("the open popover settles on a picture", picture is not None)
+    set_strength("lab", 40)
+    redrawn = capture_after("bar-modules-network-1", picture)
+    check("a new signal icon is drawn on the row", redrawn is not None)
+    check("and the row stays the same accessible", shown is not None and lab_row() == shown)
+    set_strength("lab", 50)
     time.sleep(1)
-    check("a strength inside the same icon keeps them", shown is not None and lab_row() == shown)
+    check("a strength inside the same icon keeps the row", lab_row() == shown)
+    check(
+        "and the picture",
+        redrawn is not None and capture("bar-modules-network-2") == redrawn,
+    )
     set_strength("lab", 82)
-    check("the strength back, the rows follow", wait_for(lambda: lab_row() not in (None, shown), 5))
+    check(
+        "the strength back, the icon follows on the same row",
+        redrawn is not None
+        and capture_after("bar-modules-network-3", redrawn) is not None
+        and lab_row() == shown,
+    )
+    # The icon on the way back is the first one, not merely another. The bar's clock starts at
+    # 10:00:00 under FAKETIME and these captures run seconds after it starts, so the clock shows
+    # the same minute and the same icon draws the same picture.
+    check("and it is the icon the row began with", capture("bar-modules-network-4") == picture)
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
     check(

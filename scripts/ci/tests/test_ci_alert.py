@@ -16,7 +16,7 @@ RUN = "https://github.com/owner/repo/actions/runs/1"
 
 
 class Alert(unittest.TestCase):
-    def run_alert(self, results, open_issues=(), failing=(), unraised=()):
+    def run_alert(self, results, open_issues=(), failing=(), unraised=(), what="scheduled run"):
         """Runs the alert for job RESULTS with OPEN_ISSUES (title, number), the `gh issue create`
         of the FAILING jobs failing; checks the UNRAISED jobs and returns the gh calls."""
         calls = []
@@ -34,7 +34,7 @@ class Alert(unittest.TestCase):
         }
         with contextlib.redirect_stderr(io.StringIO()) as stderr:
             self.assertEqual(
-                ci_alert.alert(needs, "Kernel Weekly", RUN, gh), list(unraised)
+                ci_alert.alert(needs, "Kernel Weekly", RUN, gh, what), list(unraised)
             )
         for title in failing:
             self.assertIn(title, stderr.getvalue())
@@ -65,6 +65,22 @@ class Alert(unittest.TestCase):
         )
         self.assertEqual(create[create.index("--label") + 1], "ci-alert")
         self.assertIn(RUN, create[create.index("--body") + 1])
+
+    def test_a_scheduled_run_keeps_the_title_open_issues_already_have(self):
+        self.assertEqual(
+            "Kernel Weekly / repro: scheduled run failed",
+            ci_alert.title("Kernel Weekly", "repro", ci_alert.kind("schedule", "iso-v0")),
+        )
+
+    def test_a_push_run_is_worded_from_its_event_and_branch(self):
+        what = ci_alert.kind("push", "iso-v0")
+        calls = self.run_alert({"repro": "failure"}, what=what)
+        create = calls[1]
+        title = create[create.index("--title") + 1]
+        self.assertEqual("Kernel Weekly / repro: run on iso-v0 (push) failed", title)
+        body = create[create.index("--body") + 1]
+        self.assertIn("The run on iso-v0 (push)", body)
+        self.assertNotIn("scheduled", body)
 
     def test_a_cancelled_job_alerts_too(self):
         calls = self.run_alert({"repro": "cancelled"})

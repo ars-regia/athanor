@@ -1,6 +1,9 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import contextlib
+import importlib.util
+import io
 import datetime
 import hashlib
 import json
@@ -1224,6 +1227,59 @@ class CheckPlan(Repo):
         r = self.plan(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP))
         self.assertEqual(r.returncode, 1)
 
+    def test_nvidia_pin_companions_match_the_recorded_accepted_risk(self):
+        """Files allowed beside NVIDIA pins run only after the merge (#1332): the list is
+        recorded in doc_build_ordering.md, section 4, and widening it needs the doc to change.
+        The scan is lexical; the real boundary is that kernel-artifacts.sh is not a companion, so a pin bump cannot edit it."""
+        script = SCRIPT.read_text()
+        self.assertEqual(len(re.findall(r"^NVIDIA_PIN_COMPANIONS=\([^)]*\)$", script, re.M)), 1, "assigned once, at top level")
+        rest = re.sub(r"^NVIDIA_PIN_COMPANIONS=\([^)]*\)$", "", script, flags=re.M)
+        rest = rest.replace('"${NVIDIA_PIN_COMPANIONS[@]}"', "")
+        self.assertNotIn("NVIDIA_PIN_COMPANIONS", rest, "NVIDIA_PIN_COMPANIONS may appear only in its one assignment and as a quoted \"${NVIDIA_PIN_COMPANIONS[@]}\" read")
+        line = re.search(r"^NVIDIA_PIN_COMPANIONS=\([^)]*\)$", script, re.M).group(0)
+        out = subprocess.run(["bash", "-c", line + "\nprintf '%s\\n' \"${NVIDIA_PIN_COMPANIONS[@]}\"\n"], capture_output=True, text=True, check=True)
+        doc = (ROOT / "docs/architecture/doc_build_ordering.md").read_text()
+        recorded = re.search(r"Allowed: (`[^\n]*?`)\.", doc)
+        self.assertIsNotNone(recorded, "doc_build_ordering.md does not record the companions of an NVIDIA pin bump")
+        self.assertEqual(set(re.findall(r"`([^`]+)`", recorded.group(1))), set(out.stdout.split()))
+
+    def test_lock_fetch_refuses_bytes_that_do_not_match_the_lock(self):
+        """lock.py fetch is allowed beside NVIDIA pins and first runs after the merge (#1332), so
+        this test, outside NVIDIA_PIN_COMPANIONS, holds its hash check on every path itself."""
+        spec = importlib.util.spec_from_file_location("nvidia_lock", ROOT / "system/nvidia/lock.py")
+        lock = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lock)
+        good = b"rpm bytes"
+        sha = hashlib.sha256(good).hexdigest()
+
+        class Mirror:
+            def __init__(self, blob):
+                self.blob = blob
+
+            def has(self, wanted):
+                return self.blob is not None
+
+            def get(self, wanted):
+                if self.blob is None:
+                    raise OSError("HTTP Error 404: Not Found")
+                return self.blob
+
+        def fetch(mirror_blob, downloaded):
+            with tempfile.TemporaryDirectory() as d:
+                tmp = pathlib.Path(d)
+                url = lock.BRANCHES["open"]["baseurl"] + "a.rpm"
+                lock.write_lock(tmp / "open.lock", "open", "610.57.04", lock.BRANCHES["open"]["baseurl"], [(sha, url)])
+                out = tmp / "out" / "a.rpm"
+                with contextlib.redirect_stderr(io.StringIO()):
+                    code = lock.main(["fetch", "open", "--out", str(tmp / "out"), "--locks", str(tmp)], download=lambda u: downloaded, mirror=Mirror(mirror_blob))
+                return code, out.read_bytes() if out.exists() else None
+
+        self.assertEqual(fetch(good, b"never used"), (0, good), "the mirror's right bytes are accepted")
+        self.assertEqual(fetch(b"tampered", b"wrong"), (1, None), "wrong bytes from both sources")
+        self.assertEqual(fetch(b"tampered", good), (0, good), "the mirror's wrong bytes fall back to the download")
+        self.assertEqual(fetch(None, b"wrong"), (1, None), "a wrong download with an empty mirror")
+        self.assertEqual(fetch(None, good), (0, good))
+
     def test_kernel_pin_files_match_the_bump_workflow(self):
         """The kernel group of kernel-bump.yml regenerates exactly KERNEL_PIN_FILES (O7, O8):
         its bump-pins artifact plus the files of the bump-prep artifact (the two manifests and
@@ -1798,6 +1854,25 @@ class KernelTagRetention(Tool):
             }
         )
         self.assertEqual(deleted, {oldest})
+
+
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS",
+             "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY_OWNER")
+_environ = _mock.patch.dict(_os.environ)
+
+
+def setUpModule():
+    _environ.start()
+    for name in TRUST_ENV:
+        _os.environ.pop(name, None)
+
+
+def tearDownModule():
+    _environ.stop()
 
 
 if __name__ == "__main__":
