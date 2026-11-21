@@ -67,6 +67,29 @@ class Forms(unittest.TestCase):
         self.assertEqual(messages("The `alpha` is at `data/y:1`."), [])
         self.assertEqual(len(messages(f"{CRATE}then `deep` at `src/lib.rs:2`.")), 1)
 
+    def test_an_upstream_path_resolves_to_no_file_and_names_no_crate(self):
+        # `benches/b.rs` resolves only under the crate that `data/y` names.
+        files = {**FILES, "crate/benches/b.rs": "one\ntwo\n", "other/benches/b.rs": "one\ntwo\n"}
+        text = "The `beta` is at `data/y:2`; the `two` at `benches/b.rs:1`, and `two` at `:1`."
+        self.assertEqual(len(messages(text, files)), 2)
+        found = verify.citation_findings(
+            "doc.md", text, set(files), files.__getitem__, upstream={("doc.md", "data/y")}
+        )
+        self.assertEqual(found, [])
+        found = verify.citation_findings(
+            "other.md", text, set(files), files.__getitem__, upstream={("doc.md", "data/y")}
+        )
+        self.assertEqual(len(found), 2)
+
+    def test_an_upstream_path_cited_by_symbol_is_not_ambiguous(self):
+        files = {**FILES, "crate/benches/b.rs": "fn one() {}\n", "other/benches/b.rs": "fn one() {}\n"}
+        text = "The `one` is at `benches/b.rs#one`."
+        self.assertEqual(len(messages(text, files)), 1)
+        found = verify.citation_findings(
+            "doc.md", text, set(files), files.__getitem__, upstream={("doc.md", "benches/b.rs")}
+        )
+        self.assertEqual(found, [])
+
     def test_a_hyphenated_token_is_a_whole_word(self):
         self.assertEqual(messages("The `cosmic-osd` is at `data/clients:3`."), [])
         self.assertEqual(
@@ -339,12 +362,18 @@ class Moved(unittest.TestCase):
     HEAD = {"src/x.rs": "p\nq\nr\n" + FILES["src/x.rs"]}
     TEXT = "The line `grant` is at `src/x.rs:1-4`."
 
-    def found(self, text, hunks, base=None, extra=None):
+    def found(self, text, hunks, base=None, extra=None, before=None):
         files = {**FILES, **(self.HEAD if extra is None else extra)}
         return [
             f[-1]
             for f in verify.citation_findings(
-                "doc.md", text, set(files), files.__getitem__, hunks, text if base is None else base
+                "doc.md",
+                text,
+                set(files),
+                files.__getitem__,
+                hunks,
+                text if base is None else base,
+                base_file=None if before is None else before.__getitem__,
             )
         ]
 
@@ -377,6 +406,50 @@ class Moved(unittest.TestCase):
                 out = self.found(self.TEXT, {"src/x.rs": [hunk]}, extra={})
                 self.assertEqual(len(out), 1)
                 self.assertIn("edited or removed: place it again", out[0])
+
+    def test_a_cited_line_that_only_renumbers_its_citations_is_not_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        notes = {"notes.md": "a `note` at `src/x.rs:124` here\nnext\n"}
+        before = {"notes.md": "a `note` at `src/x.rs:120` here\nnext\n"}
+        hunks = {"notes.md": [(1, 1, 1)]}
+        self.assertEqual(self.found(text, hunks, extra=notes, before=before), [])
+        self.assertEqual(len(self.found(text, hunks, extra=notes)), 1)
+        short = {"notes.md": "a `note` at `src/x.rs:124`, `:9`\nnext\n"}
+        before_short = {"notes.md": "a `note` at `src/x.rs:120`, `:7`\nnext\n"}
+        self.assertEqual(self.found(text, hunks, extra=short, before=before_short), [])
+        reworded = {"notes.md": "a `note` at `src/x.rs:120` there\nnext\n"}
+        out = self.found(text, hunks, extra=notes, before=reworded)
+        self.assertIn("edited or removed: place it again", out[0])
+
+    def test_a_short_number_after_a_cited_file_counts_as_its_citation_number(self):
+        text = "The `note` is at `notes.md:1`."
+        now = {"notes.md": "see `src/x.rs:120`, listens on `:9090`\nnext\n"}
+        was = {"notes.md": "see `src/x.rs:120`, listens on `:8080`\nnext\n"}
+        self.assertEqual(self.found(text, {"notes.md": [(1, 1, 1)]}, extra=now, before=was), [])
+
+    def test_a_number_after_a_colon_that_is_no_citation_is_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        for name, now, was in (
+            ("notes.md", "a `note` of fedora:44\n", "a `note` of fedora:43\n"),
+            ("notes.md", "a `note` at `x:9090` there\n", "a `note` at `x:8080` there\n"),
+            ("notes.md", "a `note` at `registry.example:5001`\n", "a `note` at `registry.example:5000`\n"),
+            ("notes.md", "a `note` at `quay.io:444` and `:9090`\n", "a `note` at `quay.io:443` and `:8080`\n"),
+            ("notes.md", "a `note` at `:9090`\n", "a `note` at `:8080`\n"),
+            ("notes.rs", 'const `note`: &str = "127.0.0.1:9090";\n', 'const `note`: &str = "127.0.0.1:8080";\n'),
+            ("notes.rs", "a `note` at `src/x.rs:124` here\n", "a `note` at `src/x.rs:120` here\n"),
+        ):
+            with self.subTest(was=was):
+                out = self.found(
+                    text.replace("notes.md", name), {name: [(1, 1, 1)]}, extra={name: now}, before={name: was}
+                )
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("edited or removed", out[0])
+
+    def test_moved_ranges_reads_a_same_line_edit_through_the_predicate(self):
+        hunks = [(2, 2, 2)]
+        self.assertEqual(verify.moved_ranges([(1, 3)], hunks, lambda old, new: True), [(1, 3)])
+        self.assertIsNone(verify.moved_ranges([(1, 3)], hunks, lambda old, new: old != 3))
+        self.assertIsNone(verify.moved_ranges([(1, 3)], [(2, 2, 3)], lambda old, new: True))
 
     def test_moved_ranges_counts_every_hunk_before_a_line(self):
         hunks = [(1, 1, 3), (10, 2, 0)]
@@ -458,6 +531,65 @@ class Kept(unittest.TestCase):
 
     def test_the_shipped_documents_pass(self):
         self.assertEqual(verify.check_line_citations().problems, [])
+
+    def test_an_upstream_citation_is_not_moved_by_the_file_its_path_ends(self):
+        # doc_osd.md:40 cites cosmic-settings-daemon's `src/wayland.rs` and `src/main.rs`.
+        idle = {"system/athanor-idle/src/main.rs": [(0, 0, 1)], "system/athanor-idle/src/wayland.rs": [(0, 0, 1)]}
+        with (
+            mock.patch.object(verify, "BASE_REF", "HEAD"),
+            mock.patch.object(verify, "diff_hunks", return_value=idle),
+        ):
+            result = verify.check_line_citations()
+        self.assertFalse([p for p in result.problems if p.startswith("doc_osd.md:40:")], result.problems)
+
+    def test_an_upstream_entry_no_citation_writes_fails(self):
+        stale = {**verify.LINE_CITATIONS_UPSTREAM, ("doc_osd.md", "src/no_such_file.rs"): "a reason"}
+        with mock.patch.object(verify, "LINE_CITATIONS_UPSTREAM", stale):
+            result = verify.check_line_citations()
+        self.assertEqual(
+            [p for p in result.problems if "LINE_CITATIONS_UPSTREAM" in p],
+            ["LINE_CITATIONS_UPSTREAM names `src/no_such_file.rs` of doc_osd.md, which no citation writes: "
+             "remove the entry"],
+        )
+
+    def test_an_upstream_entry_that_is_a_tracked_file_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "docs/architecture").mkdir(parents=True)
+            (root / "docs/architecture/doc_x.md").write_text("The loop is at `src/w.rs:3` and `src/v.rs:1`.\n")
+            problems = verify.upstream_citation_problems(
+                root, {"crate/src/w.rs", "src/v.rs"}, {("doc_x.md", "src/w.rs"): "", ("doc_x.md", "src/v.rs"): ""})
+        self.assertEqual(problems, ["LINE_CITATIONS_UPSTREAM names `src/v.rs` of doc_x.md, a file of this "
+                                    "repository, not another project's: remove the entry"])
+
+    def test_an_upstream_entry_of_a_missing_document_fails_cleanly(self):
+        stale = {**verify.LINE_CITATIONS_UPSTREAM, ("doc_renamed.md", "src/wayland.rs"): "a reason"}
+        with mock.patch.object(verify, "LINE_CITATIONS_UPSTREAM", stale):
+            result = verify.check_line_citations()
+        problems = [p for p in result.problems if "LINE_CITATIONS_UPSTREAM" in p]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("LINE_CITATIONS_UPSTREAM names `src/wayland.rs` of doc_renamed.md, "
+                                               "a document that cannot be read ("), problems)
+
+    def test_the_upstream_list_only_shrinks(self):
+        self.assertLessEqual(len(verify.LINE_CITATIONS_UPSTREAM), 1)
+
+    def test_a_file_named_by_its_suffix_places_the_files_of_its_crate(self):
+        # `data/globals` and `src/notifications.rs` resolve by their suffix and name their crate,
+        # whose `src/state.rs` and `src/store.rs` the same lines cite after them.
+        state = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/state.rs"
+        store = "forge/specs/athanor-shelld/athanor-shelld-1.0.0/src/store.rs"
+        with (
+            mock.patch.object(verify, "BASE_REF", "HEAD"),
+            mock.patch.object(verify, "diff_hunks", return_value={state: [(0, 0, 1)], store: [(0, 0, 1)]}),
+        ):
+            result = verify.check_line_citations()
+        moved = {p.split(" is moved")[0] for p in result.problems if "is moved by this change" in p}
+        cited = {
+            f"doc_notification_center.md:15: `{store}:9`",
+            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (109, 370, 436, 544)),
+        }
+        self.assertLessEqual(cited, moved)
 
 
 if __name__ == "__main__":

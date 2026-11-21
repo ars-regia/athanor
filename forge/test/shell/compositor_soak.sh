@@ -111,7 +111,8 @@ done
 echo "--- explicit sync"
 grep 'explicit sync' "$out/compositor.log" || [ $? -eq 1 ]
 echo "--- warnings and errors"
-grep -n -E 'WARN|ERROR|panicked' "$out/compositor.log" || [ $? -eq 1 ]
+# tracing's level on a file or a pipe, the journal priority prefix (<0> to <4>) on the journal.
+grep -n -E 'WARN|ERROR|^<[0-4]>|panicked' "$out/compositor.log" || [ $? -eq 1 ]
 for i in $(seq "$n"); do
     # A journal priority prefix of warning or worse (<0> to <4>) counts as well.
     grep -n -i -E '^<[0-4]>|warn|error|critical|fail' "$out/client-$i.log" | sed "s/^/client $i: /" || [ $? -eq 1 ]
