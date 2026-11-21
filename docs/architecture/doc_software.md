@@ -18,14 +18,14 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **Applications.**
 
-- `flatpak` is installed by the image build (`system/Containerfile:212`, `forge/config/packages.json:95`), on the base `quay.io/fedora-ostree-desktops/base-atomic:45`, the `system` stage of `system/Containerfile`, whose digest the bump bot moves.
-- `cosmic-store` ships (`forge/config/packages.json:134`) and is today the only graphical way to install an application.
+- `flatpak` is installed by the image build (`system/Containerfile:212`, `forge/config/packages.json:97`), on the base `quay.io/fedora-ostree-desktops/base-atomic:45`, the `system` stage of `system/Containerfile`, whose digest the bump bot moves.
+- `cosmic-store` ships (`forge/config/packages.json:136`) and is today the only graphical way to install an application.
 - **No Flathub remote is configured.** The only remote on the desktop is `fedora` (system, OCI), which Fedora's `flatpak-add-fedora-repos.service` adds (enabled by Fedora's `90-default.preset:374`, desktop). The one script that adds Flathub and installs the `flatpaks` list of `forge/config/packages.json` (and the script `system/scripts/provision_flatpak.sh` that read it) were removed on 2026-10-08 (ADR-0089): no unit, kickstart or script ran them, so the list installed nothing, as the `upstream_*` lists once did.
 - The system helper's polkit defaults (Flatpak 1.16.6, desktop): install and uninstall are `auth_admin_keep` for an active session, update and AppStream refresh are `yes` for an active session and `auth_admin` otherwise. Fedora's `org.freedesktop.Flatpak.rules` lets an active local member of `wheel` install and uninstall without a password.
 
 **The legacy store crates.**
 
-- `forge/specs/athanor-store-rs` was out of the workspace (the root `Cargo.toml`, `exclude`, line 55 then) and is out of the image (absent from `forge/config/packages.json:2-84`). Its former entry in `experimental/EXEMPT` recorded why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
+- `forge/specs/athanor-store-rs` was out of the workspace (the root `Cargo.toml`, `exclude`, line 55 then) and is out of the image (absent from `forge/config/packages.json:2-86`). Its former entry in `experimental/EXEMPT` recorded why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
   - The unit is a system unit with `Type=dbus`, `BusName=os.athanor.Store` and `DynamicUser=yes` (`athanor-store-rs.spec:50-60`), the bus policy lets only root own the name (`os.athanor.Store.conf:5-7`), and the code connects to the **session** bus (`src/backend/dbus.rs:105`). It could never have started.
   - `os.athanor.store.install` is declared (`os.athanor.store.policy:9`) and checked nowhere.
   - `verify_pqc_package` verifies a Dilithium signature against a public key the caller passes in (`src/backend/dbus.rs:31-51`), which proves nothing: a facade in a security path.
@@ -34,7 +34,7 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **Nix.**
 
-- `nix` and `nix-daemon` are in `upstream_core` (`forge/config/packages.json:85-87`); the `nix` meta-package does not pull the daemon.
+- `nix` and `nix-daemon` are in `upstream_core` (`forge/config/packages.json:87-89`); the `nix` meta-package does not pull the daemon.
 - `/nix` is a bind mount of `/var/nix` (`forge/specs/athanor-nix-support/SOURCES/usr/lib/systemd/system/nix.mount:26-30`), ordered after `systemd-tmpfiles-setup` with `DefaultDependencies=no` (`nix.mount:18-24`), with the store skeleton seeded by tmpfiles (`usr/lib/tmpfiles.d/10-athanor-nix.conf:15-21`) and the daemon socket directory by `etc/tmpfiles.d/nix-daemon.conf:9-10`.
 - `nix.mount` and `nix-daemon.socket` are enabled by preset (`80-athanor-nix.preset:13-14`; `nix-daemon.socket` again in `80-athanor-system.preset:7`). An SELinux module in CIL labels the daemon socket `nix_socket_t` and lets PID 1 create it (`forge/specs/athanor-selinux/SOURCES/athanor_nix_daemon.cil:64-65, 84-85`); Fedora's policy has no Nix type.
 - Users are multi-user Nix clients through the daemon. `/etc/nix/nix.conf` enables `nix-command flakes` and sets `nixpkgs=flake:nixpkgs`, so `nixpkgs` resolves through the flake registry over the network (desktop).

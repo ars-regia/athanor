@@ -6671,7 +6671,7 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
+    ("doc_software.md", "forge/config/packages.json", "2-86", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 
