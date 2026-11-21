@@ -56,7 +56,8 @@ fn report(info: &PanicHookInfo<'_>, backtrace: &Backtrace) -> String {
     let current = thread::current();
     let name = current.name().unwrap_or("(unnamed)");
     let anchor = install as fn() as usize;
-    let head = format!("panic in thread {name} at {place}: {message}");
+    // "panicked at", as the default hook writes it: the rig and acceptance checks look for it.
+    let head = format!("thread {name} panicked at {place}: {message}");
     format!(
         "{head}\n\
          backtrace, with athanor_unit::panic::install at {anchor:#x}:\n{backtrace:#}\n\
@@ -86,19 +87,19 @@ mod tests {
         panic::set_hook(previous);
         assert!(ended.is_err());
         let report = seen.lock().expect("lock").clone();
-        assert!(report.starts_with("panic in thread worker at "), "{report}");
+        assert!(report.starts_with("thread worker panicked at "), "{report}");
         assert!(report.contains("panic.rs:"), "{report}");
         assert!(report.contains(": index 7 out of range\n"), "{report}");
         let anchor = format!("install at {:#x}:", install as fn() as usize);
         assert!(report.contains(&anchor), "{report}");
         let last = report.lines().last().unwrap_or_default();
-        assert!(last.starts_with("panic in thread worker at "), "{report}");
+        assert!(last.starts_with("thread worker panicked at "), "{report}");
         assert!(last.ends_with(": index 7 out of range"), "{report}");
     }
 
     #[test]
     fn every_line_of_the_report_is_at_err_priority() {
-        let report = "panic in thread main at a.rs:1:2: no\n   0: 0x1 - <unknown>\npanic in thread main at a.rs:1:2: no";
+        let report = "thread main panicked at a.rs:1:2: no\n   0: 0x1 - <unknown>\nthread main panicked at a.rs:1:2: no";
         let text = for_stderr(report);
         assert_eq!(text.lines().count(), 3);
         assert!(text.lines().all(|line| line.starts_with("<3>")), "{text}");
