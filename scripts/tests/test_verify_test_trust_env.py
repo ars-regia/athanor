@@ -421,6 +421,39 @@ class TestTrustEnv(unittest.TestCase):
                 self.assertIn("os.environ at import time", problems[0])
                 self.assertIn("inside the test", problems[0])
 
+    def test_a_load_of_os_that_is_not_an_attribute_base_is_named(self):
+        for use in ("a = o", "f(o)", "A = [o]", "class C:\n    a = o", "X = dict(a.environ)\n"):
+            with self.subTest(use=use):
+                body = BLOCK + ("a = o\n" if use.startswith("X") else "") + use + "\n" + USES
+                problems = self.problems(body)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("os.environ at import time", problems[0])
+
+    def test_the_names_the_block_uses_are_bound_once_and_never_rebound(self):
+        for name, change in (
+            ("o", "o = FakeOs()\n"),
+            ("o", "for o in [FakeOs()]:\n    pass\n"),
+            ("o", "o += 1\n"),
+            ("o", "with x() as o:\n    pass\n"),
+            ("o", "(o := FakeOs())\n"),
+            ("o", "del o\n"),
+            ("o", "def o():\n    pass\n"),
+            ("m", "class m:\n    pass\n"),
+            ("m", "m = FakeMock()\n"),
+            ("m", "def f():\n    global m\n    m = 1\n"),
+        ):
+            with self.subTest(change=change):
+                problems = self.problems(BLOCK + change + USES)
+                self.assertTrue(any(f"{name}, which the patch statement uses" in p for p in problems), problems)
+
+    def test_a_call_passing_the_names_list_is_named(self):
+        for change in ("list.clear(TRUST_ENV)\n", "f(TRUST_ENV)\n", "f(x=TRUST_ENV)\n"):
+            with self.subTest(change=change):
+                body = BLOCK.replace(repr(NAMES), repr(list(NAMES))) + change + USES
+                problems = self.problems(body)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("TRUST_ENV bound once and never changed", problems[0])
+
     def test_reading_a_trust_variable_at_import_time_is_named(self):
         for use in (
             "A = o.environ.get('GH_TOKEN')",

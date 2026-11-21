@@ -7329,9 +7329,12 @@ def environ_gaps(tree, aliases, exempt):
     to os.environ that is not a read of one variable that TRUST_ENV_NAMES does not hold: os.environ.get(<constant>
     [, default]), os.getenv(<constant>[, default]) or os.environ[<constant>] in a load. `exempt` holds the ids of
     the nodes allowed (the argument of the module's patch statement). Anything else is refused, which fails
-    closed: write `with mock.patch.dict(os.environ, ...)` inside the test in place of the decorator form, and
-    os.environ.get("<name outside the trust list>") in place of a membership test or a module-level write."""
+    closed: write `with mock.patch.dict(os.environ, ...)` inside the test in place of the decorator form,
+    read os.environ.get("<name outside the trust list>") in place of a membership test, and move a write into
+    the test or setUpModule. A load of `os` itself, one that is not the base of an attribute access (`o = os`,
+    `f(os)`, `[os]`), is refused too: an alias would reach the mapping unseen."""
     scope = list(scope_nodes(tree.body))
+    bases = {id(n.value) for n in scope if isinstance(n, ast.Attribute)}
     const = lambda a: isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value not in TRUST_ENV_NAMES  # noqa: E731
     allowed = set(exempt)
     lines = set()
@@ -7347,6 +7350,8 @@ def environ_gaps(tree, aliases, exempt):
             lines.add(n.lineno)
     lines |= {n.lineno for n in scope if isinstance(n, (ast.Name, ast.Attribute))
               and dotted(n, aliases) == "os.environ" and id(n) not in allowed}
+    lines |= {n.lineno for n in scope if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+              and aliases.get(n.id) == "os" and id(n) not in bases}
     return sorted(lines)
 
 
@@ -7363,6 +7368,13 @@ def mutated(tree, name):
         if isinstance(n, ast.Global) and name in n.names:
             return True
     return False
+
+
+def passed(tree, name):
+    """Whether a statement that runs at import time passes `name` to a call, as `list.clear(NAMES)` does."""
+    return any(isinstance(n, ast.Call) and any(isinstance(a, ast.Name) and a.id == name
+                                               for a in [*n.args, *(k.value for k in n.keywords)])
+               for n in scope_nodes(tree.body))
 
 
 def isolation_gaps(tree, shared):
@@ -7395,6 +7407,11 @@ def isolation_gaps(tree, shared):
     gaps = []
     if bindings(tree, patch) != 1:
         gaps.append(f"a patch variable {patch} bound once")
+    root = lambda node: dotted(node, {}).split(".")[0]  # noqa: E731
+    used = {root(patches[0].value.func), root(patches[0].value.args[0])}
+    for name in sorted(used):
+        if bindings(tree, name) != 1 or any(isinstance(n, ast.Global) and name in n.names for n in ast.walk(tree)):
+            gaps.append(f"{name}, which the patch statement uses, bound once at module level and never rebound")
 
     def expected(source):
         return ast.dump(ast.parse(source).body[0])
@@ -7415,7 +7432,7 @@ def isolation_gaps(tree, shared):
         pops = [expected(f"for name in {names}:\n    {o}.environ.pop(name, None)") for o in os_names]
         if names is None or ast.dump(loop) not in pops:
             gaps.append("a setUpModule whose second statement is `for name in NAMES: os.environ.pop(name, None)`")
-        elif bindings(tree, names) != 1 or mutated(tree, names):
+        elif bindings(tree, names) != 1 or mutated(tree, names) or passed(tree, names):
             gaps.append(f"a list {names} bound once and never changed")
         else:
             missing = [n for n in TRUST_ENV_NAMES if n not in lists.get(names, set())]
@@ -7499,7 +7516,9 @@ def check_test_trust_env():
     reaching script, nor a test that reaches the script through a name built at run time). The adversarial
     class is out too: reaching os.environ without naming it, or running a script at import time; one line each:
     `from os import *`; os.environb or posix.environ; sys.modules; getattr or __import__; a mutation of the
-    names list through an alias; statements after the first two of setUpModule. Ambient names outside
+    names list through an alias; statements after the first two of setUpModule. Refused, so not limits: a
+    module-level rebinding of the os or mock name the patch statement uses, a call that passes the names list
+    as an argument, and a load of os that is not an attribute base. Ambient names outside
     TRUST_ENV_NAMES are not dropped either: REGISTRY_HOST (read by tier-digests.sh in resolve), GH_HOST,
     GH_REPO, COSIGN_* and REGISTRY_AUTH_FILE. REGISTRY_HOST stays out because the block comparison needs the
     names literal of every carrying module (46 files) and signed_registry.TRUST_ENV to change with it."""
