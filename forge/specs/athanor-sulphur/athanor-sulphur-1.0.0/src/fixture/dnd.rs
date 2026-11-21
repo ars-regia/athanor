@@ -721,3 +721,49 @@ fn an_output_capture_has_the_icon_only_with_cursors() {
     release(&mut run);
     run.stop();
 }
+
+/// The icon sits where its client puts it relative to the pointer: the offset of
+/// `wl_surface.attach`, and `wl_surface.offset` on a surface of version 5, each move it by their
+/// delta from where it was.
+#[test]
+fn the_icon_moves_by_its_offsets() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let shm: wl_shm::WlShm = from.local.bind(1);
+
+    let serial = from.press(&mut run);
+    let icon = from.icon(&mut run);
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    let (buffer, _) = from.local.buffer(&shm, 32, 32, [0, 0, 255, 255]);
+    icon.attach(Some(&buffer), -10, -20);
+    icon.damage(0, 0, 32, 32);
+    icon.commit();
+    from.local.roundtrip(&mut run);
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 691, 481), RED, "moved by the attach's offset");
+    assert!(background(&at(&shown, 725, 515)), "off the pointer's corner");
+    release(&mut run);
+
+    let serial = from.press(&mut run);
+    let compositor: wl_compositor::WlCompositor = from.local.bind(5);
+    let icon = compositor.create_surface(&from.local.queue.handle(), ());
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    icon.offset(-10, -20);
+    icon.commit();
+    from.local.roundtrip(&mut run);
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 691, 481), RED, "moved by wl_surface.offset");
+    icon.offset(20, 20);
+    icon.commit();
+    from.local.roundtrip(&mut run);
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 741, 531), RED, "moved again, from where it was");
+    assert!(background(&at(&shown, 705, 505)), "and left there");
+    release(&mut run);
+    run.stop();
+}

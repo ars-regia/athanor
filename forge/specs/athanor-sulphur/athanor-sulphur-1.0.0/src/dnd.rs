@@ -13,6 +13,7 @@ use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{IsAlive, Logical, Point, Serial};
+use smithay::wayland::compositor::{with_states, SurfaceAttributes};
 use smithay::wayland::selection::data_device::WaylandDndGrabHandler;
 use std::any::Any;
 use std::os::fd::OwnedFd;
@@ -25,6 +26,9 @@ use std::sync::Arc;
 pub struct DragIcon {
     surface: WlSurface,
     slot: Option<TouchSlot>,
+    /// Where the client puts the icon from the pointer or the touch point: the sum of the
+    /// offsets of `wl_surface.attach` and `wl_surface.offset` it committed since the drag began.
+    offset: Point<i32, Logical>,
     /// Set by the drag's source when that drag ends (`AtDrop`), so that its end takes this icon
     /// away and no other.
     ended: Arc<AtomicBool>,
@@ -157,6 +161,7 @@ impl WaylandDndGrabHandler for State {
             self.drag_icons.push(DragIcon {
                 surface,
                 slot,
+                offset: Point::default(),
                 ended,
             });
         }
@@ -204,7 +209,7 @@ impl State {
     }
 
     /// The drag icons, and where each surface goes: at the touch point its drag follows, or at
-    /// the pointer.
+    /// the pointer, moved by the icon's offset.
     pub(crate) fn drag_icons(&self) -> Vec<(WlSurface, Point<i32, Logical>)> {
         self.drag_icons
             .iter()
@@ -214,8 +219,29 @@ impl State {
                     Some(slot) => self.touch_at(slot)?,
                     None => self.seat.get_pointer()?.current_location(),
                 };
-                Some((icon.surface.clone(), at.to_i32_round()))
+                Some((icon.surface.clone(), at.to_i32_round() + icon.offset))
             })
             .collect()
+    }
+
+    /// A commit of a drag icon's surface moves the icon by the offset it carries, of
+    /// `wl_surface.attach` or of `wl_surface.offset`, from where it was: the icon starts with
+    /// its top left at the pointer or the touch point, as `wl_data_device.start_drag` has it.
+    pub(crate) fn drag_icon_committed(&mut self, surface: &WlSurface) {
+        for icon in self
+            .drag_icons
+            .iter_mut()
+            .filter(|icon| &icon.surface == surface)
+        {
+            let delta = with_states(surface, |states| {
+                states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer_delta
+                    .take()
+            });
+            icon.offset += delta.unwrap_or_default();
+        }
     }
 }

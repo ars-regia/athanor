@@ -276,6 +276,7 @@ impl CompositorHandler for State {
         self.request_redraw();
         self.fifo_committed(surface);
         on_commit_buffer_handler::<Self>(surface);
+        self.drag_icon_committed(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
             while let Some(parent) = get_parent(&root) {
