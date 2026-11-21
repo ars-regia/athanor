@@ -7367,7 +7367,9 @@ def implicit_panic_counts(lines):
 
 
 def implicit_panic_problems(counts, budget):
-    """(problems, notes) of the measured `counts` against `budget`."""
+    """(problems, notes) of the measured `counts` against `budget`: a line holds its crate's count
+    exactly, so a count that went down lowers it in the same change, and a new crate enters at its
+    count. (`panics` only notes a lower count.)"""
     problems, notes = [], []
     for crate in sorted(counts.keys() | budget.keys()):
         have, allowed = counts.get(crate), budget.get(crate)
@@ -7379,7 +7381,8 @@ def implicit_panic_problems(counts, budget):
             problems.append(f"{crate}: {have} implicit panics over the budget of {allowed}: use checked or "
                             f"saturating arithmetic, `.get()`, or a split on a character boundary")
         elif have < allowed:
-            notes.append(f"{crate}: {have} (budget {allowed}): lower its line in {IMPLICIT_PANIC_BUDGET}")
+            problems.append(f"{crate}: {have} implicit panics under the budget of {allowed}: lower its line "
+                            f"in {IMPLICIT_PANIC_BUDGET} to {have}")
     return problems, notes
 
 
@@ -7392,8 +7395,21 @@ def implicit_panic_raises(budget, base):
 def implicit_panic_dropped(budget, base, crates):
     """The crates whose line `budget` drops from `base` while a manifest of theirs is still among
     `crates`: a line goes with its crate, never alone, and an emptied file drops them all."""
-    return [f"{crate}: {IMPLICIT_PANIC_BUDGET} drops its line of {base[crate]} while the crate is still in the tree"
-            for crate in sorted(base.keys() - budget.keys()) if crate in crates]
+    found = [f"{crate}: {IMPLICIT_PANIC_BUDGET} drops its line of {base[crate]} while the crate is still in the tree"
+             for crate in sorted(base.keys() - budget.keys()) if crate in crates]
+    return found + implicit_panic_renamed(budget, base)
+
+
+def implicit_panic_renamed(budget, base):
+    """A change that drops lines and adds lines of names the base has none for is read as a
+    rename: the added lines may hold at most what the dropped ones held, or a crate renamed
+    would carry a higher count past implicit_panic_raises."""
+    dropped = {crate: base[crate] for crate in base.keys() - budget.keys()}
+    added = {crate: budget[crate] for crate in budget.keys() - base.keys()}
+    if not dropped or sum(added.values()) <= sum(dropped.values()):
+        return []
+    return [f"{', '.join(sorted(added))}: {IMPLICIT_PANIC_BUDGET} adds {sum(added.values())} where it drops "
+            f"{sum(dropped.values())} ({', '.join(sorted(dropped))}): a rename keeps at most the old count"]
 
 
 def implicit_panic_unlisted(budget, members):

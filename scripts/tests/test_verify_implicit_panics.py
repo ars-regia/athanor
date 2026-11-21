@@ -65,11 +65,12 @@ class CountsTest(unittest.TestCase):
 
 
 class BudgetTest(unittest.TestCase):
-    def test_over_missing_and_unbuilt_crates_fail_and_a_lower_count_is_a_note(self):
+    def test_a_count_over_or_under_its_line_and_missing_or_unbuilt_crates_fail(self):
         problems, notes = verify.implicit_panic_problems(
             {"a": 3, "b": 1, "c": 0, "new": 2}, {"a": 2, "b": 4, "c": 0, "gone": 1})
-        self.assertEqual([p.split(":")[0] for p in problems], ["a", "gone", "new"])
-        self.assertEqual([n.split(":")[0] for n in notes], ["b"])
+        self.assertEqual([p.split(":")[0] for p in problems], ["a", "b", "gone", "new"])
+        self.assertIn("lower its line in scripts/ci/implicit-panics.txt to 1", problems[1])
+        self.assertEqual(notes, [])
 
     def test_the_budget_only_goes_down_against_the_base(self):
         raised = verify.implicit_panic_raises({"a": 3, "b": 1, "new": 9}, {"a": 2, "b": 4})
@@ -205,6 +206,14 @@ class BaseTest(unittest.TestCase):
     def test_a_line_dropped_while_its_crate_stays_fails(self):
         self.assertEqual(self.check("a 2\nb 4\n", "a 2\n"), ["b"])
         self.assertEqual(self.check("a 2\nb 4\ngone 1\n", "a 2\nb 4\n"), [])
+
+    def test_a_rename_keeps_at_most_the_old_count(self):
+        base = "a 2\nb 4\ngone 3\n"
+        self.assertEqual(self.check(base, "a 2\nb 4\nnew 4\n"), ["new"])
+        self.assertEqual(self.check(base, "a 2\nb 4\nnew 3\n"), [])
+        self.assertEqual(self.check(base, "a 2\nb 4\nx 2\ny 1\n"), [])
+        self.assertEqual(self.check(base, "a 2\nb 4\nx 2\ny 2\n"), ["x, y"])
+        self.assertEqual(self.check("a 2\nb 4\n", "a 2\nb 4\nnew 9\n"), [])
 
     def test_an_emptied_budget_fails(self):
         self.assertEqual(self.check("a 2\nb 4\n", "# empty\n"), ["a", "a", "b"])
