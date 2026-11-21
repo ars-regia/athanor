@@ -117,7 +117,6 @@ class RegistryStateTest(unittest.TestCase):
         env = {
             "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
             "ANSWER_DIR": str(root),
-            "GITHUB_REPOSITORY_OWNER": "Acme",
             "RETRY_ATTEMPTS": "1",
         }
         patcher = mock.patch.dict(os.environ, env)
@@ -125,6 +124,7 @@ class RegistryStateTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         for name in TRUST_ENV:
             os.environ.pop(name, None)  # restored by the patcher
+        os.environ["GITHUB_REPOSITORY_OWNER"] = "Acme"
         patcher = mock.patch.object(dag, "FORGE_DIR", str(root / "forge"))
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -355,6 +355,23 @@ class MatrixTest(unittest.TestCase):
         ):
             nodes, _, prereqs, _, _ = dag.build_dag(dag.load_package_manifest())
         self.assertIsNone(dag.graph_cycle(nodes, prereqs))
+
+
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+_environ = _mock.patch.dict(_os.environ)
+
+
+def setUpModule():
+    _environ.start()
+    for name in TRUST_ENV:
+        _os.environ.pop(name, None)
+
+
+def tearDownModule():
+    _environ.stop()
 
 
 if __name__ == "__main__":

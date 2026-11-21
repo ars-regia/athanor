@@ -19,6 +19,10 @@ OPEN = "sha256:" + "3" * 64
 LEGACY = "sha256:" + "4" * 64
 BOOT = "sha256:" + "7" * 64  # azoth-boot, the signed vmlinuz
 SYSTEM = "5" * 64  # the image ID the stub's --iidfile reports for the system stage
+# What decides which signatures a run trusts, and the tokens that reach the network: kernel-artifacts.sh
+# reaches tier-digests.sh, and a test must not inherit the CI run's (#1257).
+TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS",
+             "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY_OWNER")
 TIERS = {f"tier{n}": "sha256:" + "89ab"[n] * 64 for n in range(4)}  # the forge tier repositories
 
 
@@ -43,7 +47,7 @@ class BuildImage(unittest.TestCase):
         self.artifacts = self.dir / "artifacts"
         self.artifacts.mkdir()
         # No signing key anywhere: the vmlinuz arrives signed, by digest (D43).
-        self.env = {k: v for k, v in os.environ.items() if not k.endswith("_KEY")}
+        self.env = {k: v for k, v in os.environ.items() if not k.endswith("_KEY") and k not in TRUST_ENV}
         self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", KERNEL_ARTIFACTS_DIR=str(self.artifacts),
                         TIER_DIGESTS_DIR=str(self.dir / "tiers"), FAKE_REGISTRY=str(self.registry),
                         FAKE_LOG=str(self.dir / "registry.log"))
@@ -392,6 +396,23 @@ class ActivationOwners(unittest.TestCase):
         finally:
             sys.path.pop(0)
         self.assertEqual(loop, ["/" + d for d in check_image_session.SESSION_SERVICE_DIRS])
+
+
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+_environ = _mock.patch.dict(_os.environ)
+
+
+def setUpModule():
+    _environ.start()
+    for name in TRUST_ENV:
+        _os.environ.pop(name, None)
+
+
+def tearDownModule():
+    _environ.stop()
 
 
 if __name__ == "__main__":
