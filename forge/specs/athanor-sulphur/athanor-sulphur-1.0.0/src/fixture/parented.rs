@@ -29,12 +29,10 @@ impl Local {
         let surface = compositor.create_surface(&qh, ());
         let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
         let toplevel = xdg.get_toplevel(&qh, ());
-        self.client.configure = None;
         surface.commit();
-        self.pump(run, "the window is configured", |client, _| {
-            client.configure.is_some()
-        });
-        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        let serial = self.first_configure(run, &xdg);
+        self.client.configure = None;
+        xdg.ack_configure(serial);
         Created {
             surface,
             toplevel,
