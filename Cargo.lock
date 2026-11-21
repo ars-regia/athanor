@@ -620,7 +620,11 @@ name = "athanor-lock"
 version = "1.0.0"
 dependencies = [
  "athanor-auth",
+ "athanor-i18n",
+ "athanor-sal",
+ "athanor-unit",
  "calloop",
+ "nix 0.32.0",
  "tokio",
  "zbus 6.2.1",
 ]

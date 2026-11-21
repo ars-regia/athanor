@@ -9,6 +9,18 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 # LP18 step 2: each dependency arrives with the task that uses it; Sal follows.
 [dependencies]
 athanor-auth = { path = "../../../../system/athanor-auth" }
+athanor-i18n = { path = "../../../../system/athanor-i18n" }
+# Without its `gpu` feature: the lock draws with vello_cpu and opens no GPU node (LP15).
+athanor-sal = { path = "../../../../system/athanor-sal" }
+athanor-unit = { path = "../../../../system/athanor-unit" }
 calloop = { workspace = true }
+# prctl(PR_SET_DUMPABLE) and RLIMIT_CORE (LP15).
+nix = { workspace = true, features = ["process", "resource"] }
 tokio = { workspace = true }
 zbus = { workspace = true }
+
+# The one-thread check needs a process whose only thread is the test's: libtest runs each test
+# on a thread of its own, so this binary has no harness.
+[[test]]
+name = "confine"
+harness = false

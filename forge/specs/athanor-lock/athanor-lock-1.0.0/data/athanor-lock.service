@@ -10,6 +10,10 @@ StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/bin/athanor-lock
+# LP15: the lock draws with vello_cpu only. Sal's renderer switches would make this build, which
+# has no gpu feature, refuse to start, so a value set in the user manager's environment never
+# reaches it.
+UnsetEnvironment=ATHANOR_SAL_RENDERER ATHANOR_TOOLKIT_RENDERER
 # SN6: the RESTART_RESET=1 a guard sends after 60 s of healthy running reaches the manager.
 NotifyAccess=main
 Restart=always

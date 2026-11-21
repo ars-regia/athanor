@@ -5,13 +5,13 @@ Release:        1%{?athanor_content}%{?dist}
 Summary:        The Athanor session lock
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc
+BuildRequires:  rust cargo gcc pkgconf-pkg-config fontconfig-devel libxkbcommon-devel
 
 %description
 The session lock of doc_lock_and_prompts.md (LP2), written in Athanor's own toolkit, Sal, and
-run as a guard of the session that restarts without limit (LP10). This release carries the
-crate, the user unit and the package of LP18 step 2 alone: the program locks nothing yet, says
-so and exits with a failure. The unit is installed and not enabled; LP18 step 3 adds its preset.
+run as a guard of the session that restarts without limit (LP10). This release is LP18 step 2
+in progress: the program confines itself, talks to logind and runs Sal's loop, and locks
+nothing yet, which it says. The unit is installed and not enabled; LP18 step 3 adds its preset.
 
 %prep
 
