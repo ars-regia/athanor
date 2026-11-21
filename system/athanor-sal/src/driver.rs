@@ -1620,22 +1620,62 @@ fn whole((w, h): (f32, f32)) -> (u32, u32) {
 
 /// The size a window fills after a configure of `new_size`, and the [`Event::Resized`] that
 /// tells its application when that size is not the one it filled, `was`. It is `new_size`, never
-/// less than its widgets' size along an axis configured and 0 along an axis the compositor leaves
-/// to the window, for a resizable window that takes the size configured
-/// ([`Ui::sized_by_compositor`]); 0 on both for any other, which hears nothing.
+/// less than its widgets' size and never more than `max` along an axis configured; along an axis
+/// the compositor leaves to the window (a configure of 0) the size it has, `was`, and its
+/// widgets' size before it has one. Never 0. It is for a resizable window that takes the size
+/// configured ([`Ui::sized_by_compositor`]); 0 on both for any other, which hears nothing.
 fn fill(
     ui: &Ui,
     was: (f32, f32),
     new_size: (Option<std::num::NonZeroU32>, Option<std::num::NonZeroU32>),
+    max: u32,
 ) -> ((f32, f32), Option<Event>) {
     if !(ui.sized_by_compositor && ui.resizable) {
         return ((0.0, 0.0), None);
     }
     let (min_w, min_h) = natural_size(ui);
-    let axis = |n: Option<std::num::NonZeroU32>, min: u32| n.map_or(0, |n| n.get().max(min));
-    let (width, height) = (axis(new_size.0, min_w), axis(new_size.1, min_h));
+    let axis = |n: Option<std::num::NonZeroU32>, was: f32, min: u32| {
+        n.map_or(was as u32, |n| n.get()).min(max).max(min)
+    };
+    let (width, height) = (axis(new_size.0, was.0, min_w), axis(new_size.1, was.1, min_h));
     let fill = (width as f32, height as f32);
     (fill, (fill != was).then_some(Event::Resized { width, height }))
+}
+
+/// The largest logical size along an axis whose physical size at `scale` the renderer accepts:
+/// [`physical`] counts in 16 bits.
+fn largest_logical(scale: f32) -> u32 {
+    let scale120 = ((scale * 120.0).round() as u64).max(1);
+    let largest = (u64::from(u16::MAX) * 120 + 59) / scale120;
+    u32::try_from(largest).unwrap_or(u32::MAX).max(1)
+}
+
+/// [`fill`] for a configure of a window drawn at `scale`: the size is clamped to the widgets'
+/// size as it is after a layout at that size, so that a title bar added by this configure, or a
+/// height that follows the width, is in the minimum the size reported is clamped to.
+fn settle(
+    ui: &mut Ui,
+    scale: f32,
+    was: (f32, f32),
+    new_size: (Option<std::num::NonZeroU32>, Option<std::num::NonZeroU32>),
+) -> ((f32, f32), Option<Event>) {
+    let max = largest_logical(scale);
+    let (mut size, mut event) = fill(ui, was, new_size, max);
+    // The minimum moves with the width and settles within a few layouts; a layout that fails
+    // fails again at the draw, which ends the run through `fail`.
+    for _ in 0..4 {
+        ui.configured = filled(ui, size);
+        if layout(ui, scale).is_err() {
+            break;
+        }
+        let (next, next_event) = fill(ui, was, new_size, max);
+        let settled = next == size;
+        (size, event) = (next, next_event);
+        if settled {
+            break;
+        }
+    }
+    (size, event)
 }
 
 /// The size `ui` fills of `fill`, the size its window was last configured: `fill` while it takes
@@ -3204,7 +3244,8 @@ impl WindowHandler for App {
         // A window that takes the size configured fills it from its next layout, and its
         // application hears of a new size before the window is drawn at it.
         let resized;
-        (surface.fill, resized) = fill(&surface.ui, surface.fill, configure.new_size);
+        let scale = surface.scale;
+        (surface.fill, resized) = settle(&mut surface.ui, scale, surface.fill, configure.new_size);
         surface.configured = true;
         let id = surface.id;
         self.changed(id, resized);
@@ -4569,7 +4610,7 @@ mod tests {
         ui.sized_by_compositor = true;
         ui.layout();
         let widgets = ui.size();
-        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(900, 700));
+        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(900, 700), u32::MAX);
         assert_eq!(size, (900.0, 700.0));
         assert!(matches!(resized, Some(Event::Resized { width: 900, height: 700 })));
         // As the driver draws: the size filled, then a layout at it.
@@ -4588,7 +4629,7 @@ mod tests {
         ui.sized_by_compositor = true;
         ui.layout();
         let (w, h) = natural_size(&ui);
-        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(1, 1));
+        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(1, 1), u32::MAX);
         assert_eq!(size, (w as f32, h as f32));
         assert!(matches!(resized, Some(Event::Resized { width, height }) if (width, height) == (w, h)));
         ui.configured = filled(&ui, size);
@@ -4602,18 +4643,21 @@ mod tests {
         ui.sized_by_compositor = true;
         ui.min_width = 400.0;
         ui.layout();
-        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(0, 0));
-        assert_eq!((size, resized), ((0.0, 0.0), None), "nothing configured, nothing changed");
-        let (size, resized) = fill(&ui, (900.0, 700.0), suggested(900, 700));
+        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(0, 0), u32::MAX);
+        let (w, h) = natural_size(&ui);
+        assert_eq!(size, (w as f32, h as f32), "nothing configured, the widgets' size");
+        assert_eq!(w, 400);
+        assert!(matches!(resized, Some(Event::Resized { width, height }) if (width, height) == (w, h)));
+        let (size, resized) = fill(&ui, (900.0, 700.0), suggested(900, 700), u32::MAX);
         assert_eq!((size, resized), ((900.0, 700.0), None), "the same size again");
-        let (size, resized) = fill(&ui, (900.0, 700.0), suggested(0, 500));
-        assert_eq!(size, (0.0, 500.0));
-        assert!(matches!(resized, Some(Event::Resized { width: 0, height: 500 })));
+        let (size, resized) = fill(&ui, (900.0, 700.0), suggested(0, 500), u32::MAX);
+        assert_eq!(size, (900.0, 500.0), "0 keeps the size the window has along that axis");
+        assert!(matches!(resized, Some(Event::Resized { width: 900, height: 500 })));
         ui.configured = filled(&ui, size);
         ui.layout();
-        assert_eq!(ui.size(), (400.0, 500.0), "the application's width, the height configured");
+        assert_eq!(ui.size(), (900.0, 500.0));
         // The application reads it as any event of its widgets'.
-        let resized = Event::Resized { width: 0, height: 500 };
+        let resized = Event::Resized { width: 900, height: 500 };
         assert!(matches!(route(&ui, resized.clone(), false), Route::Application(e) if e == resized));
     }
 
@@ -4621,10 +4665,10 @@ mod tests {
     fn a_window_keeps_its_widgets_size_unless_it_takes_the_size_configured_and_is_resizable() {
         let mut ui = Ui::new("Chooser", crate::Theme::default(), false);
         assert!(!ui.sized_by_compositor, "the widgets' size by default");
-        assert_eq!(fill(&ui, (0.0, 0.0), suggested(900, 700)), ((0.0, 0.0), None));
+        assert_eq!(fill(&ui, (0.0, 0.0), suggested(900, 700), u32::MAX), ((0.0, 0.0), None));
         ui.sized_by_compositor = true;
         ui.resizable = false;
-        assert_eq!(fill(&ui, (0.0, 0.0), suggested(900, 700)), ((0.0, 0.0), None));
+        assert_eq!(fill(&ui, (0.0, 0.0), suggested(900, 700), u32::MAX), ((0.0, 0.0), None));
         ui.add(Ui::ROOT, Kind::Button("Open".into()));
         ui.layout();
         assert_eq!(natural_size(&ui), logical_size(&ui), "unfilled, its minimum is its size");
@@ -4639,10 +4683,49 @@ mod tests {
         ui.sized_by_compositor = true;
         ui.layout();
         let widgets = ui.size();
-        let (size, _) = fill(&ui, (0.0, 0.0), suggested(900, 700));
+        let (size, _) = fill(&ui, (0.0, 0.0), suggested(900, 700), u32::MAX);
         ui.sized_by_compositor = false;
         ui.configured = filled(&ui, size);
         ui.layout();
         assert_eq!(ui.size(), widgets);
+    }
+
+    /// The title bar a configure adds is in the minimum the size reported is clamped to.
+    #[test]
+    fn a_window_with_client_side_decorations_reports_the_size_it_will_have() {
+        let mut bare = Ui::new("Settings", crate::Theme::default(), false);
+        bare.add(Ui::ROOT, Kind::Button("Network".into()));
+        bare.add_title_bar();
+        bare.layout();
+        let (_, with_bar) = natural_size(&bare);
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        ui.layout();
+        let (_, without_bar) = natural_size(&ui);
+        assert!(without_bar < with_bar, "the bar has a height");
+        // As the configure does: the bar, then the size.
+        ui.add_title_bar();
+        let suggested_height = with_bar - 1;
+        assert!(suggested_height > without_bar);
+        let (size, resized) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(900, suggested_height));
+        assert_eq!(size, (900.0, with_bar as f32));
+        assert!(matches!(resized, Some(Event::Resized { height, .. }) if height == with_bar));
+        ui.configured = filled(&ui, size);
+        ui.layout();
+        assert_eq!(ui.size(), size, "the window has the size reported");
+    }
+
+    /// A configure larger than the renderer's buffers is bounded, not a failure of the run.
+    #[test]
+    fn a_window_configured_beyond_the_renderers_largest_size_is_bounded() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        let (size, _) = settle(&mut ui, 2.0, (0.0, 0.0), suggested(40_000, 40_000));
+        assert_eq!(size, (32_767.0, 32_767.0));
+        ui.configured = filled(&ui, size);
+        assert!(layout(&mut ui, 2.0).is_ok(), "the renderer takes the size reported");
+        assert_eq!(largest_logical(1.0), 65_535);
     }
 }

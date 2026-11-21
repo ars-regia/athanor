@@ -799,15 +799,15 @@ pub enum Event {
     },
     /// The compositor configured a window that takes its size ([`Ui::sized_by_compositor`])
     /// to another one: the size the window takes, in logical pixels, which is the one configured
-    /// but never less than its widgets' size, and 0 along an axis the compositor leaves to the
-    /// window, as xdg-toplevel's configure. It comes before the window is drawn at that size, so
+    /// but never less than its widgets' size, and along an axis configured as 0 (left to the
+    /// window) the size it has. It comes before the window is drawn at that size, so
     /// that the application lays its widgets out for it: a sidebar and a page that collapse into
     /// one column below a width.
     #[non_exhaustive]
     Resized {
-        /// The window's width, or 0.
+        /// The window's width, never 0.
         width: u32,
-        /// The window's height, or 0.
+        /// The window's height, never 0.
         height: u32,
     },
     /// Escape reached the surface and no menu took it: the application may close the surface,
