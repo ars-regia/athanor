@@ -459,6 +459,23 @@ class Kept(unittest.TestCase):
     def test_the_shipped_documents_pass(self):
         self.assertEqual(verify.check_line_citations().problems, [])
 
+    def test_a_file_named_by_its_suffix_places_the_files_of_its_crate(self):
+        # `data/globals` and `src/notifications.rs` resolve by their suffix and name their crate,
+        # whose `src/state.rs` and `src/store.rs` the same lines cite after them.
+        state = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/state.rs"
+        store = "forge/specs/athanor-shelld/athanor-shelld-1.0.0/src/store.rs"
+        with (
+            mock.patch.object(verify, "BASE_REF", "HEAD"),
+            mock.patch.object(verify, "diff_hunks", return_value={state: [(0, 0, 1)], store: [(0, 0, 1)]}),
+        ):
+            result = verify.check_line_citations()
+        moved = {p.split(" is moved")[0] for p in result.problems if "is moved by this change" in p}
+        cited = {
+            f"doc_notification_center.md:15: `{store}:9`",
+            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (109, 370, 436, 544)),
+        }
+        self.assertLessEqual(cited, moved)
+
 
 if __name__ == "__main__":
     unittest.main()
