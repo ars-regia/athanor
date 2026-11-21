@@ -8636,7 +8636,9 @@ MAIN_BRANCH_FILES = (
     ".github/workflows/kernel-build.yml",
     "forge/scripts/publish_tiers.sh",
 )
-MAIN_BRANCH_LINE = re.compile(r"branches:\s*\[[^\]]*(?<![\w-])main(?![\w-])[^\]]*\]|refs/heads/main(?![\w-])")
+MAIN_BRANCH_LINE = re.compile(
+    r"branches:\s*\[[^\]]*(?<![\w-])main(?![\w-])[^\]]*\]|refs/heads/main(?![\w-])"
+    r"""|^\s*-\s*['"]?main['"]?\s*(#.*)?$|ref_name\s*==\s*['"]main['"]""")
 
 
 def main_branch_problems(files):

@@ -36,6 +36,9 @@ class TrustedRefs(unittest.TestCase):
         for line in (
             "    branches: [iso-v0, main]",
             "    branches: [main]",
+            "      - main",
+            "      - 'main'",
+            "    if: github.ref_name == 'main'",
             "    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'",
             "    refs/heads/iso-v0 | refs/heads/main) TAG=latest ;;",
         ):

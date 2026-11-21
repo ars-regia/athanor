@@ -9,8 +9,8 @@ name: Kernel Build
 # (kernel, devel, debuginfo, and the MicroVM guest kernel as the <nvr>-microvm tag of the
 # kernel) signed with cosign keyless, with SBOM, SLSA provenance and the attestation of
 # the pins; `:latest` moves only on the repository's default branch. kmod: the NVIDIA modules against the freshly
-# built kernel-devel (nvidia-build.yml, reusable). gate: the single "Kernel gate" check
-# that the branch protection of `main` requires on PRs. A PR to `iso-v0` does not run this
+# built kernel-devel (nvidia-build.yml, reusable). gate: the single "Kernel gate" check,
+# which no pull request triggers now that the workflow runs on pushes to `iso-v0` alone. A PR to `iso-v0` does not run this
 # workflow: pr.yml calls call-kernel.yml, which mirrors the check jobs, and its `gate` is the
 # required check there, for the bump bot's PRs too (doc_ci.md CP4). This workflow has
 # no `pull_request` trigger. orchestrator: on pushes, downstream of publish, dispatches the
