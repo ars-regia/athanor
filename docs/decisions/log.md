@@ -11,6 +11,7 @@ still gets one, and the log line then links to it.
 A line has the form `YYYY-MM-DD: what was decided. Where.` Documents cite a decision as
 "maintainer decision, <date>", and the date of that citation is the date of the line.
 
+- 2026-11-21: the RemoteDesktop portal holds at most 8 sessions for one owner, and a ninth request is refused with an error that names the limit. [doc_portal](../architecture/doc_portal.md) PT15.
 - 2026-11-21: `athanor-shelld`, `athanor-sessiond`, `athanor-idle` and the portal backend send `WATCHDOG=1` only after a roundtrip on their own bus connection has succeeded, so that a daemon whose loop runs and whose connection is wedged is restarted. [doc_session](../architecture/doc_session.md) SN6.
 - 2026-11-21: the Software specification, revision 4: the recommended option of each question of section 10.4; Bazaar replaces `cosmic-store` as an RPM from a pinned tag tracked by `forge/upstream-watch.json`, Athanor's page waits after 1.0, and adwaita-icon-theme is the icon theme of 1.0. [doc_software](../architecture/doc_software.md).
 - 2026-11-21: the update trust, revision 5, the key hierarchy: K1 to K8 as recommended; `keyPaths` name fixed files outside `/usr` that a root verifier rewrites with the valid online keys, after a spike, key 2 is the first online key, the root has no expiry and signs DSSE statements with P-256, and a root-signed revocation list with a rising sequence ships in images and as an OCI artefact. [doc_update_trust](../architecture/doc_update_trust.md) UT2, section 4.
