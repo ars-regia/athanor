@@ -2,7 +2,8 @@
 
 Each file in this directory records one decision taken by the maintainer, in the
 order it was taken. The records replace the decision log that used to live outside
-the repository (A2-34).
+the repository (A2-34); [log.md](log.md) lists the maintainer's decisions by date, newest first, and points to where each
+is recorded. It is an index of dates, not a record.
 
 ## When to write a record
 
@@ -141,7 +142,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | amended by ADR-0074 | docs, process, ci |
 | A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | amended by ADR-0103 | signing, installer |
 | ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
-| ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs |
+| ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | amended by ADR-0145 | docs |
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | amended by ADR-0143 | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
@@ -212,4 +213,5 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0142 | 0142 | [The move to Fedora 45 turns sshd off on upgraded machines, as Fedora's desktop preset does](0142-fedora-45-upgrade-turns-sshd-off.md) | accepted | security, network |
 | ADR-0143 | 0143 | [Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console](0143-pre-1-0-audit-decisions.md) | accepted | security, build, process, kernel, shell, docs |
 | ADR-0144 | 0144 | [The QEMU guest agent is off until a person turns it on, and then answers an allow-list](0144-qemu-guest-agent-off-by-default.md) | accepted | security |
+| ADR-0145 | 0145 | [A small amendment to an approved specification is approved in the pull request of its code](0145-small-spec-amendment-in-the-code-pull-request.md) | accepted | process, docs |
 | ADR-0146 | 0146 | [The merge queue builds the specs, not the kernel or the shell, and the shell is covered by a push alert](0146-merge-queue-builds-the-specs-only.md) | accepted | process, build |

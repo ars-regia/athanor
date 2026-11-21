@@ -81,8 +81,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   directions, for keys and buttons; touch points never collide.
 - Proposed on 2026-11-18, awaiting the maintainer's approval: decision 38, the user's bindings
   and the input and window settings the compositor follows, with OS13, as `doc_settings.md`
-  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6); decisions 39, Sal's SR1 to SR14 with
-  OS11, and 40, drag and drop with its icon rule for decision 31 (`doc_files.md` revision 3).
+  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6).
+- Drafted on 2026-11-18, proposed for approval, awaiting the maintainer's approval under ADR-0074: decisions 39, Sal's SR1 to SR14 with OS11, amended on 2026-11-21 for the file chooser (SR1's type-ahead, the order of SR9 and SR11), and 40, drag and drop with its icon rule for decision 31 (`doc_files.md` revision 3).
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -1983,13 +1983,18 @@ compositor and that the own compositor did not yet offer:
     `89753530b`: a retained tree of widgets under generational ids (`system/athanor-sal/src/widget.rs:36`),
     one focused widget walked in tree order and by the arrows over laid-out boxes
     (`system/athanor-sal/src/focus.rs:10`, `:132`), a vertical scroll that measures every child
-    (`system/athanor-sal/src/widget.rs:2397-2403`), a list that chooses one row, a clipboard of
+    (`system/athanor-sal/src/widget.rs:2401-2407`), a list that chooses one row, a clipboard of
     UTF-8 text (`system/athanor-sal/src/driver/clipboard.rs:41`), and `wl_data_device` callbacks
     that do nothing (`system/athanor-sal/src/driver/clipboard.rs:537-555`). Each item is public
     API with rustdoc, a page of the gallery, unit tests, its goldens drawn with `vello_cpu` and
     its transcript (OS9, OS10), and is met before the step of `doc_files.md` FM21 that uses it:
     SR1 to SR4, SR6 and SR14 before `athanor-files-view` (step 2, the chooser first, decision 3 of
-    that revision), the others before the window.
+    that revision), the others before the window. Two parts of the others come before
+    `athanor-files-view` too, for the chooser in the portal's resident backend (`doc_portal.md`
+    PT2, PT7; *proposed for approval, 2026-11-21*, on the maintainer's decisions of 2026-11-21, D2
+    and D9 of `docs/superpowers/plans/2026-11-19-file-chooser.md`): of SR9, windows opened at run time
+    and a run that goes on with no window; of SR11, the keys the chooser uses, Ctrl+L, Ctrl+H,
+    Ctrl+Space, Alt+Up, Alt+Left, Alt+Right, Ctrl+Shift+N and F6.
     - **SR1, SR3. An item view over the application's model.** A new kind, the item view, in two
       layouts, list and grid, holds a count and asks the application for the items it shows,
       by index; it makes widgets for the items in its viewport and one viewport's height on each
@@ -1998,9 +2003,13 @@ compositor and that the own compositor did not yet offer:
       variable height is not offered. The grid lays out as many columns as the width holds and
       reflows at each resize; Up and Down move by a row of cells, Left and Right by one, Home,
       End, Page Up and Page Down as a list's. A model's change is reported by range (inserted,
-      removed, changed), so a folder that grows keeps the focused item and the scroll. Test: a
-      model of 100,000 items lays out and draws its first frame within FM20's 200 ms on the
-      reference laptop, with no more widgets than the viewport needs plus its margins.
+      removed, changed), so a folder that grows keeps the focused item and the scroll.
+      Type-ahead (*proposed for approval, 2026-11-21*): keys typed while the view holds the
+      focus select the first item whose name, as the application gives it, starts with the
+      typed text, as `doc_files.md` FM18 asks of the current folder. Test: a model of 100,000
+      items lays out and draws its first frame within FM20's 200 ms on the reference laptop,
+      with no more widgets than the viewport needs plus its margins; type-ahead moves the
+      cursor to the first match (*proposed for approval, 2026-11-21*).
     - **SR2. Multiple selection.** The item view holds a set of selected indices, an anchor and
       a cursor apart from the selection. A click selects one; Ctrl with a click toggles one;
       Shift with a click or an arrow extends from the anchor; Ctrl with an arrow moves the cursor
