@@ -10,8 +10,8 @@
         "type": "github",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "f68407657ad294471eb4b2e65d193df26edf729f",
-        "narHash": "sha256-E+XLAfnC7+bdr4qlEgRv6cdGmiqTU5oeFNKCha7epqQ="
+        "rev": "ab5c18fdedfc8f9bbc9d773f10a540790e2787a7",
+        "narHash": "sha256-iKXCN36qYfBni+3nH4vAd98/kshoIsPB2S9mYWhma30="
       }
     }
   ]
