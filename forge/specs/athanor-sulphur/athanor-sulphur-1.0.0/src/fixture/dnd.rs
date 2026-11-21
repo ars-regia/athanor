@@ -690,3 +690,34 @@ fn the_icon_limit_is_in_logical_pixels() {
     release(&mut run);
     run.stop();
 }
+
+/// An output capture has the drag icon only when it asks for cursors, as it has the pointer
+/// (`paint_cursors`).
+#[test]
+fn an_output_capture_has_the_icon_only_with_cursors() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    // The theme's fallback square, 12 pixels a side, stays clear of the pixel read.
+    run.state.cursor = crate::cursor::Cursor::new("athanor-no-such-theme", 24);
+    let mut from = party(&mut run, (100, 100), None);
+    let serial = from.press(&mut run);
+    let icon = from.icon(&mut run);
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    let mut viewer = Local::connect(&mut run, None);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = viewer.bind(1);
+    // Captured pixels are B, G, R, A.
+    let rgba = |frame: &[u8]| {
+        let [b, g, r, a] = pixel(frame, OUTPUTS[0].width, 725, 525);
+        [r, g, b, a]
+    };
+
+    let without = captured_output(&mut viewer, &mut run, &copy, 0, Options::empty());
+    assert!(background(&rgba(&without)), "no icon without paint_cursors");
+    let with = captured_output(&mut viewer, &mut run, &copy, 0, Options::PaintCursors);
+    assert_eq!(rgba(&with), RED, "the icon with paint_cursors");
+    release(&mut run);
+    run.stop();
+}
