@@ -801,3 +801,27 @@ fn an_icon_off_the_pointer_is_not_drawn() {
     release(&mut run);
     run.stop();
 }
+
+/// Offsets that add up past `i32::MAX` saturate: the compositor does not panic, and the icon,
+/// far off the pointer, is not drawn.
+#[test]
+fn an_icon_offset_past_the_limit_saturates() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+
+    let serial = from.press(&mut run);
+    let compositor: wl_compositor::WlCompositor = from.local.bind(5);
+    let icon = compositor.create_surface(&from.local.queue.handle(), ());
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    for _ in 0..2 {
+        icon.offset(i32::MAX, 0);
+        icon.commit();
+        from.local.roundtrip(&mut run);
+    }
+    assert!(background(&at(&frame(&mut run), 710, 510)), "not drawn");
+    release(&mut run);
+    run.stop();
+}
