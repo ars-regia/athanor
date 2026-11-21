@@ -204,16 +204,23 @@ pub struct Hardware {
     pub disk: Option<String>,
 }
 
-pub fn hardware() -> Hardware {
-    let processor = fs::read_to_string("/proc/cpuinfo")
+/// The text of `path`, with one journal line when it cannot be read, as for os-release.
+fn read_logged(path: impl AsRef<Path>) -> Option<String> {
+    let path = path.as_ref();
+    fs::read_to_string(path)
+        .map_err(|error| tracing::warn!(%error, "cannot read {}", path.display()))
         .ok()
+}
+
+pub fn hardware() -> Hardware {
+    let processor = read_logged("/proc/cpuinfo")
         .and_then(|text| about::processor(&text))
         .map(|(model, count)| format!("{model} \u{d7} {count}"));
-    let memory = fs::read_to_string("/proc/meminfo")
-        .ok()
+    let memory = read_logged("/proc/meminfo")
         .and_then(|text| about::memory_bytes(&text))
         .map(about::size);
     let disk = nix::sys::statvfs::statvfs("/var")
+        .map_err(|error| tracing::warn!(%error, "cannot read the capacity of /var"))
         .ok()
         .and_then(|fs| fs.fragment_size().checked_mul(fs.blocks()))
         .map(about::size);
@@ -227,10 +234,14 @@ pub fn hardware() -> Hardware {
 
 /// Every DRM card's adapter, named from pci.ids.
 fn graphics() -> Vec<String> {
-    let Ok(cards) = fs::read_dir(DRM) else {
-        return Vec::new();
+    let cards = match fs::read_dir(DRM) {
+        Ok(cards) => cards,
+        Err(error) => {
+            tracing::warn!(%error, "cannot read {DRM}");
+            return Vec::new();
+        }
     };
-    let ids = fs::read_to_string(PCI_IDS).unwrap_or_default();
+    let ids = read_logged(PCI_IDS).unwrap_or_default();
     let mut names: Vec<String> = cards
         .filter_map(Result::ok)
         .map(|card| card.path())
@@ -240,8 +251,7 @@ fn graphics() -> Vec<String> {
                 .is_some_and(|name| name.starts_with("card") && !name.contains('-'))
         })
         .filter_map(|card| {
-            let read =
-                |file: &str| fs::read_to_string(Path::new(&card).join("device").join(file)).ok();
+            let read = |file: &str| read_logged(Path::new(&card).join("device").join(file));
             about::pci_name(&ids, &read("vendor")?, &read("device")?)
         })
         .collect();
