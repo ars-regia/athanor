@@ -741,6 +741,15 @@ item = "CC3"
 purpose = "The shell's models of system services: D-Bus mirrors on zbus, off the interface thread, no GTK type"
 
 [[component]]
+path = "system/athanor-settings-core"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_settings.md"
+item = "SE2"
+purpose = "The logic of Settings with no toolkit type: page registry and search, deep-link grammar, writable keys, display revert, shortcut conflicts"
+
+[[component]]
 path = "system/athanor-style"
 kind = "crate"
 area = "shell"
