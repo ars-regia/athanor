@@ -4,6 +4,7 @@
 
 use crate::state::State;
 use smithay::backend::input::TouchSlot;
+use smithay::desktop::utils::bbox_from_surface_tree;
 use smithay::input::dnd::SourceMetadata;
 use smithay::input::dnd::{DnDGrab, DndAction, DndGrabHandler, DndTarget, GrabType, Source};
 use smithay::input::pointer::Focus;
@@ -209,19 +210,41 @@ impl State {
     }
 
     /// The drag icons, and where each surface goes: at the touch point its drag follows, or at
-    /// the pointer, moved by the icon's offset.
+    /// the pointer, moved by the icon's offset. Each is sent its frames, drawn or not.
     pub(crate) fn drag_icons(&self) -> Vec<(WlSurface, Point<i32, Logical>)> {
         self.drag_icons
             .iter()
-            .filter(|icon| icon.surface.alive())
-            .filter_map(|icon| {
-                let at = match icon.slot {
-                    Some(slot) => self.touch_at(slot)?,
-                    None => self.seat.get_pointer()?.current_location(),
-                };
-                Some((icon.surface.clone(), moved(at.to_i32_round(), icon.offset)))
-            })
+            .filter_map(|icon| self.placed(icon))
             .collect()
+    }
+
+    /// The drag icons that are drawn: as `drag_icons`, less an icon whose offsets moved it off
+    /// the pointer or the touch point, as a cursor whose hotspot lies off it is not drawn
+    /// (`cursor.rs`).
+    pub(crate) fn drawn_drag_icons(&self) -> Vec<(WlSurface, Point<i32, Logical>)> {
+        self.drag_icons
+            .iter()
+            .filter(|icon| {
+                let hotspot = Point::from((
+                    0i32.saturating_sub(icon.offset.x),
+                    0i32.saturating_sub(icon.offset.y),
+                ));
+                crate::cursor::drawable(bbox_from_surface_tree(&icon.surface, (0, 0)), hotspot)
+            })
+            .filter_map(|icon| self.placed(icon))
+            .collect()
+    }
+
+    /// Where `icon` goes, if its surface is alive and its pointer or touch point is there.
+    fn placed(&self, icon: &DragIcon) -> Option<(WlSurface, Point<i32, Logical>)> {
+        if !icon.surface.alive() {
+            return None;
+        }
+        let at = match icon.slot {
+            Some(slot) => self.touch_at(slot)?,
+            None => self.seat.get_pointer()?.current_location(),
+        };
+        Some((icon.surface.clone(), moved(at.to_i32_round(), icon.offset)))
     }
 
     /// A commit of a drag icon's surface moves the icon by the offset it carries, of

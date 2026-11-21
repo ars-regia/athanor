@@ -762,12 +762,42 @@ fn the_icon_moves_by_its_offsets() {
     from.local.roundtrip(&mut run);
     let shown = frame(&mut run);
     assert_eq!(at(&shown, 691, 481), RED, "moved by wl_surface.offset");
-    icon.offset(20, 20);
+    icon.offset(5, 10);
     icon.commit();
     from.local.roundtrip(&mut run);
     let shown = frame(&mut run);
-    assert_eq!(at(&shown, 741, 531), RED, "moved again, from where it was");
-    assert!(background(&at(&shown, 705, 505)), "and left there");
+    assert_eq!(at(&shown, 720, 515), RED, "moved again, from where it was");
+    assert!(background(&at(&shown, 691, 481)), "and left there");
+    release(&mut run);
+    run.stop();
+}
+
+/// Decision 40, as the cursor is: an icon its offsets move off the pointer is not drawn, and is
+/// drawn again once they bring it back.
+#[test]
+fn an_icon_off_the_pointer_is_not_drawn() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+
+    let serial = from.press(&mut run);
+    let compositor: wl_compositor::WlCompositor = from.local.bind(5);
+    let icon = compositor.create_surface(&from.local.queue.handle(), ());
+    let (_source, _) = from.drag(&mut run, serial, Some(&icon));
+    from.paint(&mut run, &icon, 32);
+    run.state.pointer_to(BARE.into(), InputTime::now());
+    from.local.roundtrip(&mut run);
+    assert_eq!(at(&frame(&mut run), 710, 510), RED, "on the pointer");
+    icon.offset(40, 0);
+    icon.commit();
+    from.local.roundtrip(&mut run);
+    let shown = frame(&mut run);
+    assert!(background(&at(&shown, 750, 510)), "moved off the pointer");
+    assert!(background(&at(&shown, 710, 510)), "and not left behind");
+    icon.offset(-40, 0);
+    icon.commit();
+    from.local.roundtrip(&mut run);
+    assert_eq!(at(&frame(&mut run), 710, 510), RED, "back on the pointer");
     release(&mut run);
     run.stop();
 }

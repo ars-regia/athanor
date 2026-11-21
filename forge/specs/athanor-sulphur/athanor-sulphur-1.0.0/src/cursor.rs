@@ -293,7 +293,7 @@ where
 /// Whether a client's cursor surface tree, `bbox` around it, is drawn with `hotspot`: it is no
 /// larger than `MAX_CLIENT_CURSOR` a side, and the hotspot lies on it, edges included, so that
 /// an empty surface hides the pointer.
-fn drawable(bbox: Rectangle<i32, Logical>, hotspot: Point<i32, Logical>) -> bool {
+pub(crate) fn drawable(bbox: Rectangle<i32, Logical>, hotspot: Point<i32, Logical>) -> bool {
     let on = |at: i32, from: i32, length: i32| (from..=from.saturating_add(length)).contains(&at);
     bbox.size.w <= MAX_CLIENT_CURSOR
         && bbox.size.h <= MAX_CLIENT_CURSOR
