@@ -1,7 +1,7 @@
 """Unit tests of the implicit-panics check of `verify.py`: clippy's JSON is counted per crate once
 per place and lint, a run that did not finish counts nothing, the budget only goes down and, without
-clippy, fails closed on a dropped line, a member without one and an `allow` of a budget lint
-(python3 -B -m unittest discover -s scripts/tests -v)."""
+clippy, fails closed on a dropped line, a member without one and a configuration that hides a
+budget lint; clippy runs with the lints forced and without RUSTFLAGS (python3 -B -m unittest discover -s scripts/tests -v)."""
 
 import importlib.util
 import json
@@ -98,41 +98,31 @@ class BudgetTest(unittest.TestCase):
         self.assertEqual(len(res.notes), 1)
 
 
-class AllowTest(unittest.TestCase):
-    def test_an_allow_of_a_budget_lint_outside_tests_is_found(self):
-        source = (
-            "#![allow(clippy::needless_return)]\n"
-            "#[allow(clippy::indexing_slicing)]\n"
-            "fn a() {}\n"
-            "#[expect(\n    dead_code,\n    clippy::arithmetic_side_effects,\n)]\n"
-            "fn b() {}\n"
-            "#[cfg_attr(feature = \"x\", allow(clippy::restriction))]\n"
-            "// #[allow(clippy::string_slice)]\n"
-            "const S: &str = \"#[allow(clippy::string_slice)]\";\n"
-            "#[cfg(test)]\nmod tests {\n    #[allow(clippy::string_slice)]\n    fn t() {}\n}\n"
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            (root / "lib.rs").write_text(source)
-            with mock.patch.object(verify, "ROOT", root):
-                found = verify.implicit_panic_allows([root / "lib.rs"])
-        self.assertEqual(found, ["lib.rs:2", "lib.rs:4", "lib.rs:9"])
+class ConfigTest(unittest.TestCase):
+    def test_clippy_measures_with_the_lints_forced_and_no_rustflags(self):
+        calls, real = [], subprocess.run
 
-    def test_an_allow_of_warnings_or_of_a_spaced_path_is_found(self):
-        source = (
-            "#![allow(warnings)]\n"
-            "#[allow(clippy :: indexing_slicing)]\n"
-            "#[expect(clippy::\n    string_slice)]\n"
-            "#[allow(clippy::all)]\n"
-            "#[allow(clippy::indexing_slicing_more)]\n"
-            "#[allow(dead_code, reason = \"x\")]\n"
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            (root / "lib.rs").write_text(source)
-            with mock.patch.object(verify, "ROOT", root):
-                found = verify.implicit_panic_allows([root / "lib.rs"])
-        self.assertEqual(found, ["lib.rs:1", "lib.rs:2", "lib.rs:3"])
+        def run(args, **kw):
+            if "clippy" not in args:
+                return real(args, **kw)
+            calls.append((args, kw["env"]))
+            return subprocess.CompletedProcess(args, 0, stdout=FINISHED + "\n", stderr="")
+
+        dropped = {"RUSTFLAGS": "--cap-lints=allow", "CARGO_ENCODED_RUSTFLAGS": "-Awarnings",
+                   "CARGO_BUILD_RUSTFLAGS": "x", "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS": "x",
+                   "CLIPPY_CONF_DIR": "/x", "CLIPPY_ARGS": "x"}
+        with (
+            mock.patch.dict(os.environ, {verify.IMPLICIT_PANIC_CARGO: "cargo", **dropped}),
+            mock.patch.object(verify, "BASE_REF", None),
+            mock.patch.object(verify.subprocess, "run", side_effect=run),
+        ):
+            verify.check_implicit_panics()
+        self.assertEqual(len(calls), len(verify.IMPLICIT_PANIC_RUNS))
+        for args, env in calls:
+            lints = args[args.index("--") + 1:]
+            self.assertEqual(lints, [a for lint in verify.IMPLICIT_PANIC_LINTS for a in ("--force-warn", lint)])
+            self.assertEqual(sorted(dropped.keys() & env.keys()), [])
+            self.assertEqual(env[verify.IMPLICIT_PANIC_CARGO], "cargo")
 
     def test_a_cargo_or_clippy_configuration_that_hides_a_lint_is_found(self):
         files = {
@@ -144,6 +134,11 @@ class AllowTest(unittest.TestCase):
             "x/.clippy.toml": "suppress-restriction-lint-in-const = true\n",
             "bad/clippy.toml": "not toml [",
             "config.toml": '[build]\nrustflags = ["-A", "x"]\n',
+            "inc/.cargo/config.toml": 'include = ["other.toml"]\n',
+            "wrap/.cargo/config.toml": '[build]\nrustc-wrapper = "w"\nrustc = "r"\njobs = 4\n',
+            "c/build.rs": 'fn main() { println!("cargo:rustc-env=CLIPPY_CONF_DIR=/x"); }\n',
+            "d/build.rs": 'fn main() { println!("cargo:rustc-env=CLIPPY_ARGS=x"); }\n',
+            "e/build.rs": 'fn main() { println!("cargo:rustc-env=OTHER=x"); }\n',
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -153,7 +148,8 @@ class AllowTest(unittest.TestCase):
             found = verify.implicit_panic_configs(root, list(files))
         self.assertEqual([f.split(":")[0] for f in found], [
             ".cargo/config.toml", ".cargo/config.toml", ".cargo/config.toml", ".cargo/config.toml",
-            "bad/clippy.toml", "clippy.toml", "sub/.cargo/config", "x/.clippy.toml",
+            "bad/clippy.toml", "c/build.rs", "clippy.toml", "d/build.rs", "inc/.cargo/config.toml",
+            "sub/.cargo/config", "wrap/.cargo/config.toml", "wrap/.cargo/config.toml", "x/.clippy.toml",
         ])
 
     def test_a_pruned_name_under_src_is_walked(self):
