@@ -3854,8 +3854,10 @@ REJECTED_PARAMETERS = {
     "arm64.mte=on": "not an x86 parameter",
     "selinux=": "switches SELinux off at boot, against D20 and TM7",
     "enforcing=": "puts SELinux in permissive mode at boot, against D20 and TM7",
+    "security=": "selects one legacy major security module at boot and can switch SELinux off, against D20 and TM7",
     "lsm=": "replaces the compiled-in security module order and can omit SELinux, IPE and Yama (doc_kernel_profile.md section 5)",
     "init=": "replaces PID 1 with another program, outside the image's trust chain (doc_kernel_profile.md section 7)",
+    "rdinit=": "replaces the initramfs' first program with another one, outside the image's trust chain (doc_kernel_profile.md section 7)",
     "rd.break": "stops the initramfs at a root shell, against rd.shell=0 (doc_kernel_profile.md section 6)",
     "cfi=": "weakens or disables kCFI at boot; cfi=warn is for one diagnostic boot only (forge/specs/azoth/AGENTS.md)",
 }
@@ -3900,6 +3902,8 @@ def cmdline_problems(root=None):
 
     def kargs(text):
         elements = tomllib.loads(text)["kargs"]
+        if not isinstance(elements, list):
+            raise ValueError("kargs is not an array")
         if not all(isinstance(element, str) for element in elements):
             raise ValueError("a kargs element is not a string")
         return [parameter for element in elements for parameter in cmdline_words(element)]

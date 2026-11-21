@@ -63,7 +63,7 @@ class Cmdline(unittest.TestCase):
         self.assertTrue(any("zswap.compressor=zstd" in p for p in self.problems()))
 
     def test_a_security_parameter_is_rejected_bare_or_with_any_value(self):
-        for parameter in ["selinux=0", "enforcing=0", "lsm=yama", "init=/bin/sh", "rd.break", "rd.break=pre-mount", "cfi=off"]:
+        for parameter in ["selinux=0", "enforcing=0", "lsm=yama", "init=/bin/sh", "rdinit=/bin/sh", "security=apparmor", "rd.break", "rd.break=pre-mount", "cfi=off"]:
             with self.subTest(parameter=parameter):
                 self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", f"page_alloc.shuffle=1 {parameter}")
                 self.assertTrue(any(f"{parameter} -> " in p for p in self.problems()), self.problems())
@@ -76,6 +76,13 @@ class Cmdline(unittest.TestCase):
     def test_a_kargs_element_that_is_no_string_is_reported(self):
         self.edit(KARGS, '"page_alloc.shuffle=1",', "42,")
         self.assertTrue(any(KARGS in p and "cannot read" in p for p in self.problems()), self.problems())
+
+    def test_a_kargs_value_that_is_no_array_is_reported(self):
+        for value in ['"selinux=0"', "42"]:
+            with self.subTest(value=value):
+                self.edit(KARGS, "kargs = [", f"kargs = {value}\nunused = [")
+                self.assertTrue(any(KARGS in p and "cannot read" in p for p in self.problems()), self.problems())
+                self.edit(KARGS, f"kargs = {value}\nunused = [", "kargs = [")
 
     def test_a_double_quoted_parameter_is_read_as_the_kernel_reads_it(self):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", 'page_alloc.shuffle=1 "selinux=0"')
