@@ -30,9 +30,6 @@ def problems(text, name="w.yml"):
     root = pathlib.Path(tempfile.mkdtemp())
     (root / ".github/workflows").mkdir(parents=True)
     (root / ".github/workflows" / name).write_text(text)
-    for exempt in verify.ALERT_EXEMPT:
-        if exempt != name:
-            (root / ".github/workflows" / exempt).write_text(HEAD)
     return verify.scheduled_alert_problems(root)
 
 
@@ -50,31 +47,6 @@ class ScheduledAlertTest(unittest.TestCase):
 
     def test_an_alert_on_a_self_hosted_runner_fails(self):
         self.assertEqual(1, len(problems(HEAD + ALERT.format(needs="a, b", runner="self-hosted", event="schedule"))))
-
-    def test_an_exempt_workflow_needs_no_alert_until_it_has_one(self):
-        name = "exempt.yml"
-        saved = dict(verify.ALERT_EXEMPT)
-        verify.ALERT_EXEMPT[name] = "its alert job lands elsewhere"
-        self.addCleanup(lambda: (verify.ALERT_EXEMPT.clear(), verify.ALERT_EXEMPT.update(saved)))
-        self.assertEqual([], problems(HEAD, name))
-        found = problems(HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule"), name)
-        self.assertEqual(1, len(found))
-        self.assertIn("no longer exempt", found[0])
-        self.assertEqual(1, len(problems(HEAD)))
-
-    def test_the_exempt_set_is_pinned(self):
-        # Adding an entry means editing this test, so the maintainer sees it in the diff.
-        self.assertEqual({"athanor-forge-orchestrator.yml"}, set(verify.ALERT_EXEMPT))
-
-    def test_an_exemption_of_a_missing_or_unscheduled_workflow_fails(self):
-        root = pathlib.Path(tempfile.mkdtemp())
-        (root / ".github/workflows").mkdir(parents=True)
-        found = verify.scheduled_alert_problems(root)
-        self.assertEqual(1, len(found))
-        self.assertIn("athanor-forge-orchestrator.yml", found[0])
-        (root / ".github/workflows/athanor-forge-orchestrator.yml").write_text(
-            "on:\n  push:\njobs:\n  a:\n    runs-on: x\n")
-        self.assertEqual(1, len(verify.scheduled_alert_problems(root)))
 
     def test_an_if_other_than_the_one_allowed_fails(self):
         good = ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule")

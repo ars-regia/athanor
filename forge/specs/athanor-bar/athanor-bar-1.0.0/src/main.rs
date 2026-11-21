@@ -13,6 +13,7 @@ use athanor_sulphur_client::Client;
 use wayland_client::Connection;
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     let (source, favorites_file, first_session) = match start::prepare() {
         Prepared::Run {
             source,

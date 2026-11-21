@@ -335,10 +335,10 @@ def main():
     daemon_dnd(False)
 
     text = client_log.read_text(encoding="utf-8")
-    # athanor_unit::journal starts each line with its syslog priority: <3> is an error.
+    # A log file is not the journal: each line carries tracing's level after the timestamp.
     check(
         "no error in the bar's log",
-        not re.search(r"^<[0-3]>", text, re.MULTILINE) and "panicked" not in text,
+        not re.search(r"^\S+\s+ERROR ", text, re.MULTILINE) and "panicked" not in text,
     )
     pss = pss_kb(pid)
     print(f"athanor-bar PSS with notifications: {pss} kB")

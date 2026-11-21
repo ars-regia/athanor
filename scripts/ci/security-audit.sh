@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Rust security audit: clippy (warnings denied) over the root workspace and the toolkit's gallery,
+# the implicit panics of the root workspace against scripts/ci/implicit-panics.txt (verify.py),
 # and the advisory check of the cargo-deny policy (deny.toml) over their lockfiles and fuzz/'s, and
 # `cargo audit --deny yanked` over the vendored lockfiles of scripts/ci/audited-lockfiles.txt.
 # Licences, bans and sources of the same policy run in the pull request gate (`just check-deny`), so they are not repeated here.
@@ -44,3 +45,9 @@ for lock in "${locks[@]}"; do
     echo "security-audit: cargo audit $lock" | tee -a "$out/audit.log"
     cargo audit --deny yanked --file "$lock" < /dev/null 2>&1 | tee -a "$out/audit.log"
 done
+
+# The implicit panics per crate (overflow, index, string slice) against their budget (#1352), last:
+# under `set -e` its failure would hide the results of cargo-deny and cargo-audit. The check runs
+# the two workspace clippy runs of the start again with its lints, on the same target, and fails on
+# a crate over its line, a crate without one and a line above the measured count.
+ATHANOR_IMPLICIT_PANICS_CARGO=cargo python3 -B scripts/verify.py implicit-panics 2>&1 | tee "$out/implicit-panics.log"

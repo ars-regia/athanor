@@ -71,7 +71,8 @@ fn failed(what: &str, code: athanor_trust_state::ErrorCode) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt().with_writer(std::io::stderr).without_time().init();
+    athanor_unit::panic::install();
+    athanor_unit::journal::init();
     let (tools, store) = (tools::System, store::Store::system());
     let ctx = check::Context::system(&tools, &store, now());
     match Cli::parse().command {

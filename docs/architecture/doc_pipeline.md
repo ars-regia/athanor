@@ -1208,10 +1208,7 @@ runs the `alert` composite action on a GitHub-hosted runner once the jobs it rep
 its own). Its condition is exactly `always() && !cancelled() && github.event_name == '<event>'`:
 a failed job alerts, a job whose runner was lost or that timed out alerts as well its result is `failure` or `cancelled`, both of which alert, since `!cancelled()` tests the run, not the job, and a cancelled run does not, since a superseded run is not a failure.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
-it on the next success. No scheduled failure stays silent. Every scheduled workflow ends with
-that job except `athanor-forge-orchestrator.yml`, whose alert job lands in a separate pull
-request; `ALERT_EXEMPT` in `verify.py` names that one exception, a test pins it, and
-`verify.py workflows` reports an entry that is stale. `shell-surfaces.yml` ends with the same job
+it on the next success. No scheduled failure stays silent. `shell-surfaces.yml` ends with the same job
 on a push to `iso-v0`, since the merge queue does not build the shell (ADR-0146);
 `QUEUE_COVERED_BY` in `verify.py` maps each build the queue skips to the workflow that covers
 it. `verify.py workflows` fails when another workflow lacks the job: a workflow with an
