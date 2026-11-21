@@ -6565,6 +6565,13 @@ LINE_CITATIONS_KEPT = {
     ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
+# Another project's file that a document cites by a path a tracked file also ends with, each
+# (document, path as written) with the project it belongs to: the path resolves to no file, sets no
+# crate, and a `:N` after it cites nothing. An entry whose path no citation of its document writes
+# fails, so the list only shrinks.
+LINE_CITATIONS_UPSTREAM = {
+    ("doc_osd.md", "src/wayland.rs"): "cosmic-settings-daemon's, not athanor-idle's",
+}
 
 
 def holds_token(text, token, quoted=False):
@@ -6616,7 +6623,7 @@ def moved_ranges(ranges, hunks):
     return [(shifted(start), shifted(last)) for start, last in ranges]
 
 
-def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
+def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", upstream=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -6628,7 +6635,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     before it, then by the one tracked file whose path ends with it; a name that several files
     end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
-    file is a finding, as is a bare `*.md` name that no tracked file ends with. A range is no line range when it starts at 0, ends before it starts,
+    file is a finding, as is a bare `*.md` name that no tracked file ends with. A path that
+    `upstream` ({(document, path)}, LINE_CITATIONS_UPSTREAM by default) lists for `doc` is another
+    project's and resolves to no file. A range is no line range when it starts at 0, ends before it starts,
     reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
     document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
     sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
@@ -6673,7 +6682,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
         for i in range(len(parts)):
             suffixes.setdefault("/".join(parts[i:]), []).append(path)
 
+    foreign = {path for d, path in (LINE_CITATIONS_UPSTREAM if upstream is None else upstream) if d == doc}
+
     def resolve(name, crate):
+        if name in foreign:
+            return None
         for candidate in (f"{crate}/{name}" if crate else None, name):
             if candidate in known:
                 return candidate
@@ -6691,7 +6704,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                 continue
             named, spec = m.groups()
             path = last if named is None else resolve(named, crate)
-            if path is None and named and (named.startswith(prefixes) or (
+            if path is None and named and named not in foreign and (named.startswith(prefixes) or (
                     named.endswith(".md") and "/" not in named
                     and not any(t.endswith("/" + named) for t in known))):
                 out.append((number, named, spec, None,
@@ -6842,6 +6855,9 @@ def check_line_citations():
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    for doc, path in sorted(LINE_CITATIONS_UPSTREAM):
+        if not re.search(rf"`{re.escape(path)}(?::[\d,\s-]+)?`", read_file(f"docs/architecture/{doc}")):
+            r.fail(f"LINE_CITATIONS_UPSTREAM names `{path}` of {doc}, which no citation writes: remove the entry")
     return r
 
 
