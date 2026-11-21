@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import children, find_application, walk  # noqa: E402
+from atspi_check import find_application, walk  # noqa: E402
 from bar_e2e import check, failures, pss_kb, wait_for  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 from bar_session import READY_FILE  # noqa: E402
@@ -60,16 +60,7 @@ def labels(Atspi):
     app = find_application(Atspi, "athanor-launcher", 1)
     if app is None:
         return []
-    found = []
-
-    def walk(node):
-        for child in children(node):
-            if child.get_role() == Atspi.Role.LIST_ITEM:
-                found.append(child.get_name())
-            walk(child)
-
-    walk(app)
-    return found
+    return [name for role, name, _, _ in walk(app, Atspi) if role == "list item"]
 
 
 def seen(read, Atspi):

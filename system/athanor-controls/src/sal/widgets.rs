@@ -7,6 +7,29 @@ use athanor_sal::{Image, Rgba, TextStyle, Ui, WidgetId};
 
 use crate::i18n::tr;
 
+/// Each icon of `names` once, with its image from `look`: a page looks up at build the icons a
+/// row may change to, as its `turn` has no [`Look`] to set the new one in place with.
+pub fn icon_images(
+    look: &mut Look,
+    names: impl IntoIterator<Item = &'static str>,
+) -> Vec<(&'static str, Option<Image>)> {
+    let mut images: Vec<(&'static str, Option<Image>)> = Vec::new();
+    for name in names {
+        if !images.iter().any(|(icon, _)| *icon == name) {
+            images.push((name, (look.icon)(name)));
+        }
+    }
+    images
+}
+
+/// The image of the icon `name`, from those [`icon_images`] looked up.
+pub fn icon_image(images: &[(&'static str, Option<Image>)], name: &str) -> Option<Image> {
+    images
+        .iter()
+        .find(|(icon, _)| *icon == name)
+        .and_then(|(_, image)| image.clone())
+}
+
 /// A labelled switch, as a row of a page: athanor-sal's switch draws its label at the start edge
 /// and the track at the end, and is named by its label for assistive technologies, as the GTK
 /// row's `LabelledBy` relation names its switch. `Event::Toggled` carries the id it returns.

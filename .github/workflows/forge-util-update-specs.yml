@@ -9,19 +9,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  pull-requests: write
-
-defaults:
-  run:
-    working-directory: forge
+permissions: {}
 
 jobs:
   update-specs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: bots
+    permissions:
+      contents: write
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: forge
     steps:
       # A bots App installation token, not the GITHUB_TOKEN: it may not open pull requests,
       # and PRs it opened would start no checks. The action fails the job when the App id or the
@@ -66,3 +66,23 @@ jobs:
           branch: "chore/update-specs-zero-trust"
           base: ${{ github.ref_name }}
           delete-branch: true
+
+  alert:
+    # PL51: a failed or cancelled job of a scheduled run opens or updates its ci-alert issue, and a
+    # success closes it. A job of its own on a GitHub runner, after every other job whatever
+    # their result, so a lost runner or a timeout is seen as well.
+    needs: [update-specs]
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/alert
+        with:
+          needs: ${{ toJSON(needs) }}

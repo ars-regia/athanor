@@ -79,10 +79,10 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   destroyed (#1217, #1231).
 - Amended on 2026-11-17 and 2026-11-18: decision 33's held input, per context, in both
   directions, for keys and buttons; touch points never collide.
-- Proposed on 2026-11-18, awaiting the maintainer's approval: decision 38, the user's bindings
+- Proposed on 2026-11-18, approved by the maintainer on 2026-11-21 with the pull request that records it: decision 38, the user's bindings
   and the input and window settings the compositor follows, with OS13, as `doc_settings.md`
-  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6); decisions 39, Sal's SR1 to SR14 with
-  OS11, and 40, drag and drop with its icon rule for decision 31 (`doc_files.md` revision 3).
+  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6).
+- Drafted on 2026-11-18, approved by the maintainer on 2026-11-21 with the pull request that records it (ADR-0074): decisions 39, Sal's SR1 to SR14 with OS11, amended on 2026-11-21 for the file chooser (SR1's type-ahead, the order of SR9 and SR11), and 40, drag and drop with its icon rule for decision 31 (`doc_files.md` revision 3).
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -413,7 +413,7 @@ magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+
 decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
 (decision 29); and the switch to a text console. The bindings a user
 assigns in Settings, system actions and custom commands, keep `athanor_sulphur_client::shortcuts`
-as their interface (OS5, `doc_settings.md`), and the compositor reads what that module writes, laid over these defaults (decision 38, proposed on 2026-11-18). While the session is locked only the actions
+as their interface (OS5, `doc_settings.md`), and the compositor reads what that module writes, laid over these defaults (decision 38, approved on 2026-11-21). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). While the surface with the keyboard
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
 reach that surface. Each default binding has a fixture test
@@ -648,7 +648,7 @@ takes it as a git dependency pinned to a commit:
 
 **OS11. Stage 2: a toolkit of GTK's class** (direction, no date). Later, the toolkit grows toward
 what GTK gives applications: tables, trees, drag and drop, rich text, printing and the like. This
-revision records the direction only; a later revision specifies stage 2 before its code starts. Decision 39 proposes the part the file manager needs (2026-11-18).
+revision records the direction only; a later revision specifies stage 2 before its code starts. Decision 39 sets the part the file manager needs (proposed 2026-11-18, approved 2026-11-21).
 
 **OS20. The first surface's acceptance.** The layout chooser moves to the toolkit when, besides OS8
 and OS9, each visible difference milestone T1 recorded against the GTK goldens is closed or recorded
@@ -1180,7 +1180,7 @@ compositor and that the own compositor did not yet offer:
       unmarked where no window covers it. A cursor surface is at most 256 px a side
       (`cursor.rs`) and stays unmarked, a risk this decision accepts: it has room for a small
       imitation, which moves with the pointer. Drag and drop is cancelled today, and a drag icon,
-      when it comes, needs a rule here first (decision 40, proposed on 2026-11-18).
+      when it comes, needs a rule here first (decision 40, approved on 2026-11-21).
     - Each mark is stacked with its window, under whatever stands above that window, and
       neither is drawn while the lock holds the session. One function builds that stack for
       `draw_view` and for the DRM path of `udev.rs`, so that what the fixture reads is what a
@@ -1908,7 +1908,7 @@ compositor and that the own compositor did not yet offer:
 
 38. **The user's bindings, and the input and window settings the compositor follows** (OS5,
     OS13; `doc_settings.md` SE14 to SE16, section 7, SE-Q5 and SE-Q6; `doc_overview.md` OV3;
-    proposed on 2026-11-18, awaiting the maintainer's approval under ADR-0074). The compositor
+    proposed on 2026-11-18, approved by the maintainer on 2026-11-21 with the pull request that records it). The compositor
     reads no configuration of the user's but decision 27's `xkb_config` and decision 28's
     accessibility files (`src/bindings.rs:1-6`, `src/xkb_config.rs:1-6`,
     `src/screen_filter.rs:1-7`), while the Keyboard, Mouse and Touchpad and Desktop pages of
@@ -1977,8 +1977,8 @@ compositor and that the own compositor did not yet offer:
       settings left out of 1.0 until the compositor has a store (option 4).
 
 39. **What Sal gains for the file manager, SR1 to SR14** (OS10, OS11; `doc_files.md` revision 3,
-    section 7, and decisions 7, 10 and 11; proposed on 2026-11-18, awaiting the maintainer's
-    approval under ADR-0074). This decision specifies the part of OS11's stage 2 that the file
+    section 7, and decisions 7, 10 and 11; proposed on 2026-11-18, approved by the maintainer on 2026-11-21
+    with the pull request that records it). This decision specifies the part of OS11's stage 2 that the file
     manager and its chooser need; the rest of stage 2 stays a direction. Sal as it is at
     `89753530b`: a retained tree of widgets under generational ids (`system/athanor-sal/src/widget.rs:36`),
     one focused widget walked in tree order and by the arrows over laid-out boxes
@@ -1989,7 +1989,12 @@ compositor and that the own compositor did not yet offer:
     API with rustdoc, a page of the gallery, unit tests, its goldens drawn with `vello_cpu` and
     its transcript (OS9, OS10), and is met before the step of `doc_files.md` FM21 that uses it:
     SR1 to SR4, SR6 and SR14 before `athanor-files-view` (step 2, the chooser first, decision 3 of
-    that revision), the others before the window.
+    that revision), the others before the window. Two parts of the others come before
+    `athanor-files-view` too, for the chooser in the portal's resident backend (`doc_portal.md`
+    PT2, PT7; *approved, 2026-11-21*, on the maintainer's decisions of 2026-11-21, D2
+    and D9 of `docs/superpowers/plans/2026-11-19-file-chooser.md`): of SR9, windows opened at run time
+    and a run that goes on with no window; of SR11, the keys the chooser uses, Ctrl+L, Ctrl+H,
+    Ctrl+Space, Alt+Up, Alt+Left, Alt+Right, Ctrl+Shift+N and F6.
     - **SR1, SR3. An item view over the application's model.** A new kind, the item view, in two
       layouts, list and grid, holds a count and asks the application for the items it shows,
       by index; it makes widgets for the items in its viewport and one viewport's height on each
@@ -1998,9 +2003,13 @@ compositor and that the own compositor did not yet offer:
       variable height is not offered. The grid lays out as many columns as the width holds and
       reflows at each resize; Up and Down move by a row of cells, Left and Right by one, Home,
       End, Page Up and Page Down as a list's. A model's change is reported by range (inserted,
-      removed, changed), so a folder that grows keeps the focused item and the scroll. Test: a
-      model of 100,000 items lays out and draws its first frame within FM20's 200 ms on the
-      reference laptop, with no more widgets than the viewport needs plus its margins.
+      removed, changed), so a folder that grows keeps the focused item and the scroll.
+      Type-ahead (*approved, 2026-11-21*): keys typed while the view holds the
+      focus select the first item whose name, as the application gives it, starts with the
+      typed text, as `doc_files.md` FM18 asks of the current folder. Test: a model of 100,000
+      items lays out and draws its first frame within FM20's 200 ms on the reference laptop,
+      with no more widgets than the viewport needs plus its margins; type-ahead moves the
+      cursor to the first match (*approved, 2026-11-21*).
     - **SR2. Multiple selection.** The item view holds a set of selected indices, an anchor and
       a cursor apart from the selection. A click selects one; Ctrl with a click toggles one;
       Shift with a click or an arrow extends from the anchor; Ctrl with an arrow moves the cursor
@@ -2061,8 +2070,8 @@ compositor and that the own compositor did not yet offer:
     widgets in memory; and SR4's columns resized by the user in 1.0, left to a later revision.
 
 40. **Drag and drop between clients, and the drag icon** (OS4, OS17; decisions 30, 31 and 37;
-    `doc_files.md` revision 3, decision 12; proposed on 2026-11-18, awaiting the maintainer's
-    approval under ADR-0074). The compositor cancels every drag and drop today, through the
+    `doc_files.md` revision 3, decision 12; proposed on 2026-11-18, approved by the maintainer on 2026-11-21
+    with the pull request that records it). The compositor cancels every drag and drop today, through the
     default of Smithay's handler (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/handlers.rs:1591-1592`),
     and decision 37's toplevel drag runs on that same grab. The compositor runs Smithay's drag
     and drop grab:

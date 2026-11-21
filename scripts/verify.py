@@ -197,7 +197,8 @@ def check_workflows():
 
     # 1e. D43: signing keys only in sign-only jobs
     for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
-                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)
+                    + scheduled_alert_problems(ROOT) + queue_skip_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -447,6 +448,118 @@ def merge_queue_problems(root):
                      f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
                      for context in sorted(required)
                      if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+    return problems
+
+
+ALERT_ACTION = "./.github/actions/alert"
+# Scheduled workflows that have no alert job yet, each with the reason. An entry whose workflow
+# gains the job is itself reported, so the list only shrinks.
+ALERT_EXEMPT = {
+    "athanor-forge-orchestrator.yml": "its alert job lands in a separate pull request (#1353 follow-up)",
+}
+
+
+def scheduled_alert_problems(root):
+    """PL51: a workflow with an `on.schedule` trigger ends with alert jobs that use the alert
+    action on a GitHub-hosted runner, run with `always()`, and between them need every other job,
+    so a scheduled failure, a lost runner or a timeout opens a ci-alert issue."""
+    problems = []
+    workflows = Path(root) / ".github/workflows"
+    for name in sorted(ALERT_EXEMPT):
+        path = workflows / name
+        doc = yaml.safe_load(read(path)) if path.is_file() else None
+        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
+            problems.append(f"ALERT_EXEMPT names {name}, which does not exist or has no schedule: "
+                            "remove the entry (PL51)")
+    for wf in sorted(workflows.glob("*.y*ml")):
+        doc = yaml.safe_load(read(wf))
+        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
+            continue
+        jobs = doc.get("jobs") or {}
+        if wf.name in ALERT_EXEMPT:
+            if alert_jobs(jobs):
+                problems.append(f"{wf.name}: has an alert job, so it is no longer exempt: "
+                                "remove it from ALERT_EXEMPT (PL51)")
+            continue
+        problems += alert_job_problems(wf.name, jobs, "schedule")
+    return problems
+
+
+def alert_jobs(jobs):
+    """The jobs of a workflow that use the alert action."""
+    return {name: job for name, job in jobs.items()
+            if any(step.get("uses") == ALERT_ACTION for step in (job or {}).get("steps") or [])}
+
+
+def alert_job_problems(name, jobs, event):
+    """What keeps the alert jobs of workflow NAME from reporting every job of a run of EVENT: none
+    uses the action, one has an `if` other than `always() && !cancelled() && github.event_name ==
+    '<event>'` (a superseded run is cancelled and is not a failure), one is not on a hosted
+    runner, one sets continue-on-error or puts an `if` on its alert step, or a job is needed by none of them."""
+    alerts = alert_jobs(jobs)
+    if not alerts:
+        return [f"{name}: no job uses {ALERT_ACTION}, which a run on {event} needs (PL51)"]
+    problems = []
+    covered = set(alerts)
+    for job_id, job in alerts.items():
+        condition = re.sub(r"\s+", " ", re.sub(r"^\s*\$\{\{(.*)\}\}\s*$", r"\1", str(job.get("if", "")))).strip()
+        allowed = f"always() && !cancelled() && github.event_name == '{event}'"
+        if condition != allowed:
+            problems.append(f"{name}: alert job {job_id} has the if {condition!r}, not {allowed!r} (PL51)")
+        if not GITHUB_HOSTED.match(str(job.get("runs-on", ""))):
+            problems.append(f"{name}: alert job {job_id} is not on a GitHub-hosted runner (PL51)")
+        if "continue-on-error" in job:
+            problems.append(f"{name}: alert job {job_id} sets continue-on-error, which hides its failure (PL51)")
+        for step in job.get("steps") or []:
+            if step.get("uses") != ALERT_ACTION:
+                continue
+            if "if" in step or "continue-on-error" in step:
+                problems.append(f"{name}: the alert step of {job_id} sets if or continue-on-error, "
+                                "so it can be skipped or fail unseen (PL51)")
+            given = {key: re.sub(r"\s+", " ", str(value)).strip() for key, value in (step.get("with") or {}).items()}
+            if given != {"needs": "${{ toJSON(needs) }}"} or "env" in step:
+                problems.append(f"{name}: the alert step of {job_id} must pass exactly "
+                                "`needs: ${{ toJSON(needs) }}` and no env (PL51)")
+        needed = job.get("needs") or []
+        covered |= {needed} if isinstance(needed, str) else set(needed)
+    return problems + [f"{name}: no alert job needs {job_id} (PL51)" for job_id in jobs if job_id not in covered]
+
+
+# ADR-0146: each build the merge queue skips (QUEUE_SKIPS of scripts/ci/changes.py) names the
+# workflow whose push run on iso-v0 covers it and alerts on failure, or None with the reason.
+QUEUE_COVERED_BY = {
+    "kernel": (None, "built once at the pull request head and published from that build on the "
+                     "push (ADR-0110); the Orchestrator has no push alert yet (#1353 follow-up)"),
+    "shell": ("shell-surfaces.yml", "the push run on iso-v0 builds the merged base and alerts"),
+}
+
+
+def queue_skip_problems(root):
+    """ADR-0146: a build the queue skips is covered after the merge by a workflow that runs on a
+    push and ends with an alert job for that push, or has a stated reason why none does."""
+    root = Path(root)
+    spec = importlib.util.spec_from_file_location("changes", root / "scripts/ci/changes.py")
+    changes = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(changes)
+    problems = []
+    for area in sorted(changes.QUEUE_SKIPS):
+        covered = QUEUE_COVERED_BY.get(area)
+        if covered is None:
+            problems.append(f"changes.py: the queue skips {area}, but QUEUE_COVERED_BY says nothing about it")
+            continue
+        name, reason = covered
+        if not reason:
+            problems.append(f"QUEUE_COVERED_BY[{area!r}] has no reason")
+        if name is None:
+            continue
+        path = root / ".github/workflows" / name
+        doc = yaml.safe_load(read(path)) if path.is_file() else None
+        if not isinstance(doc, dict):
+            problems.append(f"QUEUE_COVERED_BY[{area!r}]: {name} does not exist")
+            continue
+        if "push" not in triggers(doc):
+            problems.append(f"{name}: covers the skipped {area} build after the merge but does not run on push")
+        problems += alert_job_problems(name, doc.get("jobs") or {}, "push")
     return problems
 
 
@@ -6611,7 +6724,295 @@ def moved_ranges(ranges, hunks):
     return [(shifted(start), shifted(last)) for start, last in ranges]
 
 
-def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
+# What a backtick span cites by name: `path#symbol`, or `#symbol` for the path named last. A colour
+# (`#e62d42`, the placeholder `#rrggbb`) is no citation.
+SYMBOL_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?#([A-Za-z_][^`]*)")
+SCHEME = re.compile(r"[A-Za-z][\w+.-]*:")
+COLOUR = re.compile(r"#(?:[0-9A-Fa-f]{3,8}|r+g+b+a*)")
+# The files whose citations stay `path:N`, each with its reason: a file with no symbol to name (a
+# data file, a generated list). An entry that no `path:N` citation names fails, so the list only shrinks.
+CITATION_LINES_KEPT = {}
+# Whether the documents cite by symbol (#1278). Until the migration sets it, `line-citations` checks
+# every `path:N` and symbol-citations only the `path#symbol` form; once set, symbol-citations also
+# checks `path:N`, which only a file of CITATION_LINES_KEPT may take.
+CITATION_LINES_RETIRED = False
+
+RUST_ITEM = re.compile(r"(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|async|unsafe|default|extern(?:\s+\"[^\"]*\")?)\s+)*"
+                       r"(fn|struct|enum|union|trait|type|const|static|mod|macro_rules!)\s+(?:mut\s+)?(?:r#)?([A-Za-z_]\w*)")
+RUST_IMPL = re.compile(r"(\s*)(?:unsafe\s+)?impl\b(.*)")
+SHELL_FUNCTION = re.compile(r"(\s*)(?:function\s+([\w:.-]+)\s*(?:\(\s*\))?|([\w:.-]+)\s*\(\s*\))\s*\{?\s*(?:#.*)?$")
+TOML_KEY = r"(?:[\w-]+|\"[^\"]*\"|'[^']*')(?:\s*\.\s*(?:[\w-]+|\"[^\"]*\"|'[^']*'))*"
+TOML_HEADER = re.compile(rf"\[\[?\s*({TOML_KEY})\s*\]\]?\s*(?:#.*)?")
+TOML_ASSIGN = re.compile(rf"({TOML_KEY})\s*=(.*)")
+MARKDOWN_SECTION = re.compile(r"\*\*([A-Z]{1,4}\d+[a-z]?)\.")
+MARKDOWN_HEADING = re.compile(r"(#{1,6})\s+(.*?)\s*#*\s*")
+
+
+def qualified(chain, name, sep):
+    """The spellings that select `name` nested in the containers `chain`: `name`, then each longer
+    suffix of `chain::name`."""
+    return {sep.join([*chain[k:], name]) for k in range(len(chain) + 1)}
+
+
+def indent_of(row):
+    return len(row) - len(row.lstrip())
+
+
+def rust_definitions(rows):
+    """The items of a Rust file, each ({spellings}, first line, last line). An item (`fn`, `struct`,
+    `enum`, `union`, `trait`, `type`, `const`, `static`, `mod`, `macro_rules!`) is spelled by its
+    name, or qualified by the `mod`, `trait` and `impl` blocks around it (`Lock::new`, an impl being
+    named by its type); an impl block is spelled as its header, without the impl's own parameters
+    (`impl Lock`, `impl Drop for Lock`, `impl Dispatch<WlSurface, ()> for Client`).
+    An item starts at the attributes and comments right above it and ends on its line when that line
+    ends with `;` or `}`, else at the next line of its indent that starts with `}`, `)` or `]` and
+    opens no block. Limit: rustfmt's layout is assumed, and an item-like line inside a string
+    (a raw-string fixture) counts as an item."""
+    found = []
+    for i, row in enumerate(rows):
+        if (m := RUST_ITEM.match(row)):
+            kind, name = m.group(2), m.group(3)
+        elif (m := RUST_IMPL.match(row)):
+            head = re.split(r"\{|\bwhere\b", m.group(2))[0].strip()
+            depth = 0
+            for k, char in enumerate(head if head.startswith("<") else ""):
+                depth += {"<": 1, ">": -1}.get(char, 0)
+                if depth == 0:
+                    head = head[k + 1:]
+                    break
+            kind, name = "impl", " ".join(head.split())
+            if not name:
+                continue
+        else:
+            continue
+        indent = len(m.group(1))
+        first = i
+        while first > 0 and indent_of(rows[first - 1]) == indent:
+            above = rows[first - 1].strip()
+            if above.startswith(("#[", "//")) and not above.startswith("//!"):
+                first -= 1
+            elif above in (")]", "]"):
+                opener = next((k for k in range(first - 2, -1, -1) if indent_of(rows[k]) == indent
+                               and rows[k].strip().startswith("#[")), None)
+                if opener is None:
+                    break
+                first = opener
+            else:
+                break
+        last = i
+        if not row.rstrip().endswith((";", "}")):
+            for j in range(i + 1, len(rows)):
+                text = rows[j].strip()
+                if not text:
+                    continue
+                if indent_of(rows[j]) < indent and text[0] in "})]":
+                    break
+                if indent_of(rows[j]) == indent:
+                    if text[0] in "})]" and not text.endswith("{"):
+                        last = j
+                        break
+                    if not text.startswith(("where", "{", ")", "]", "->")):
+                        break
+                last = j
+        found.append((kind, name, indent, first + 1, i + 1, last + 1))
+    out = []
+    for kind, name, indent, first, line, last in found:
+        chain = [(re.sub(r"<.*", "", target.rsplit(" for ", 1)[-1]).split("::")[-1].strip("&* ") if k == "impl" else target)
+                 for k, target, _, _, start, end in found
+                 if k in ("impl", "trait", "mod") and start < line <= end]
+        out.append(({f"impl {name}"} if kind == "impl" else qualified(chain, name, "::"), first, last))
+    return out
+
+
+def python_definitions(body):
+    """The functions and classes of a Python file, spelled by their name or qualified by the classes
+    and functions around them (`Result.fail`), with their decorators; and the names a module-level
+    assignment binds. Raises ValueError when the file does not parse."""
+    try:
+        tree = ast.parse(body)
+    except SyntaxError as e:
+        raise ValueError(f"does not parse as Python (line {e.lineno})") from e
+    out = []
+
+    def walk(nodes, chain):
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+                out.append((qualified(chain, node.name, "."), first, node.end_lineno))
+                walk(node.body, [*chain, node.name])
+            elif not chain and isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                    if isinstance(target, ast.Name):
+                        out.append(({target.id}, node.lineno, node.end_lineno))
+
+    walk(tree.body, [])
+    return out
+
+
+def shell_definitions(rows):
+    """The functions of a shell script (`name() {`, `function name {`), from the comments right above
+    one to the next line of its indent that starts with `}`."""
+    out = []
+    for i, row in enumerate(rows):
+        if not (m := SHELL_FUNCTION.match(row)) or row.lstrip().startswith("#"):
+            continue
+        indent = len(m.group(1))
+        first = i
+        while first > 1 and indent_of(rows[first - 1]) == indent and rows[first - 1].lstrip().startswith("#"):
+            first -= 1
+        last = i if row.rstrip().endswith("}") else next(
+            (j for j in range(i + 1, len(rows)) if indent_of(rows[j]) == indent
+             and rows[j].strip().startswith("}")), len(rows) - 1)
+        out.append(({m.group(2) or m.group(3)}, first + 1, last + 1))
+    return out
+
+
+def toml_definitions(rows):
+    """The tables and keys of a TOML file, spelled by their full dotted path (`workspace.members`):
+    a table from its header to the line before the next header, a key from its line to the end of
+    its value."""
+    def path(raw):
+        return ".".join(p.strip().strip("\"'") for p in re.findall(r"\"[^\"]*\"|'[^']*'|[^.]+", raw))
+
+    out, table, depth, quote, key = [], "", 0, None, None
+    for n, row in enumerate(rows, 1):
+        text = row.strip()
+        resumed = bool(quote)
+        if quote:
+            if quote not in text:
+                continue
+            text, quote = text.split(quote, 1)[1], None  # what follows the closing quotes counts as brackets
+        if depth == 0 and not resumed:
+            if (m := TOML_HEADER.fullmatch(text)):
+                table = path(m.group(1))
+                out.append([{table}, n, n])
+                continue
+            if not (m := TOML_ASSIGN.match(text)) or text.startswith("#"):
+                continue
+            key = [{f"{table}.{path(m.group(1))}" if table else path(m.group(1))}, n, n]
+            out.append(key)
+            text = m.group(2)
+        bare = re.sub(r"\"\"\"|'''", "\0", text)
+        bare = re.sub(r"\"(?:\\.|[^\"\\])*\"|'[^']*'", "", bare)
+        bare = bare.split("#", 1)[0]
+        if bare.count("\0") % 2:
+            quote = '"""' if '"""' in text else "'''"
+        depth += bare.count("[") + bare.count("{") - bare.count("]") - bare.count("}")
+        if key and depth == 0 and not quote:
+            key[2], key = n, None
+    headers = [first for names, first, last in out if first == last and TOML_HEADER.fullmatch(rows[first - 1].strip())]
+    for entry in out:
+        if entry[1] in headers:
+            end = next((h - 1 for h in headers if h > entry[1]), len(rows))
+            while end > entry[1] and not rows[end - 1].strip():
+                end -= 1
+            entry[2] = end
+    return [tuple(entry) for entry in out]
+
+
+def yaml_definitions(body):
+    """The keys of a YAML file, spelled by their dotted path (`jobs.build`), an item of a list that
+    has a `name` spelled by it (`jobs.build.steps[name=Sign]`), each from its line to the end of its
+    value. Raises ValueError without PyYAML or when the file does not parse."""
+    if yaml is None:
+        raise ValueError("needs PyYAML to read the symbols of a YAML file")
+    try:
+        root = yaml.compose(body)
+    except yaml.YAMLError as e:
+        raise ValueError(f"does not parse as YAML: {e}") from e
+    out, rows = [], body.split("\n")
+
+    def end(node, first):
+        # A block value ends where the next token starts: on the line before it when only blanks
+        # precede that token on its line; trailing blank and comment lines are left out.
+        mark = node.end_mark
+        last = mark.line if mark.line >= len(rows) or not rows[mark.line][:mark.column].strip() else mark.line + 1
+        while last > first and rows[last - 1].strip()[:1] in ("", "#"):
+            last -= 1
+        return last
+
+    def walk(node, prefix):
+        if isinstance(node, yaml.MappingNode):
+            for key, value in node.value:
+                if isinstance(key, yaml.ScalarNode):
+                    name = f"{prefix}.{key.value}" if prefix else key.value
+                    out.append(({name}, key.start_mark.line + 1, end(value, key.start_mark.line + 1)))
+                    walk(value, name)
+        elif isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                titles = [v.value for k, v in item.value if k.value == "name" and isinstance(v, yaml.ScalarNode)
+                          ] if isinstance(item, yaml.MappingNode) else []
+                if titles:
+                    name = f"{prefix}[name={titles[0]}]"
+                    out.append(({name}, item.start_mark.line + 1, end(item, item.start_mark.line + 1)))
+                    walk(item, name)
+
+    walk(root, "")
+    return out
+
+
+def markdown_slug(heading):
+    """The anchor GitHub gives a heading: lower case, punctuation dropped, spaces as hyphens."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def markdown_definitions(rows):
+    """The sections of a markdown document: a `**SH3.` section, to the next such line or heading of
+    level 1 to 3 (as section_lines reads it), spelled by its id; and a heading, to the next heading
+    of its level or above, spelled by its GitHub anchor and by the id it starts with (`CT3.`). Lines
+    in a fenced block are no heading."""
+    heads, fenced = [], False
+    for n, row in enumerate(rows, 1):
+        if row.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and (m := MARKDOWN_HEADING.fullmatch(row)):
+            heads.append((n, len(m.group(1)), m.group(2)))
+    out = []
+    for i, (n, level, title) in enumerate(heads):
+        end = next((h - 1 for h, lv, _ in heads[i + 1:] if lv <= level), len(rows))
+        names = {markdown_slug(title)}
+        if (m := re.match(r"([A-Z]{1,4}\d+[a-z]?)\.", title)):
+            names.add(m.group(1))
+        out.append((names, n, end))
+    starts = [n for n, row in enumerate(rows, 1) if SECTION_START.match(row)]
+    for n, row in enumerate(rows, 1):
+        if (m := MARKDOWN_SECTION.match(row)):
+            out.append(({m.group(1)}, n, next((s - 1 for s in starts if s > n), len(rows))))
+    trimmed = []
+    for names, first, last in out:
+        while last > first and not rows[last - 1].strip():
+            last -= 1
+        trimmed.append((names, first, last))
+    return trimmed
+
+
+def symbol_definitions(path, body):
+    """The definitions a `path#symbol` citation may name, as [({spellings}, first line, last line)],
+    by the kind of the file: Rust, Python, shell (by extension or `#!` line), TOML, YAML and
+    markdown. None for a file of another kind, which has no symbol to name. Raises ValueError when
+    the file cannot be read as its kind."""
+    rows = body.split("\n")
+    head = rows[0] if rows else ""
+    if path.endswith(".rs"):
+        return rust_definitions(rows)
+    if path.endswith(".py") or re.match(r"#!.*python", head):
+        return python_definitions(body)
+    if path.endswith((".sh", ".bash")) or re.match(r"#!.*\b(?:ba|da|k|z)?sh\b|# shellcheck shell=", head):
+        return shell_definitions(rows)
+    if path.endswith(".toml"):
+        try:
+            tomllib.loads(body)
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"does not parse as TOML: {e}") from e
+        return toml_definitions(rows)
+    if path.endswith((".yml", ".yaml")):
+        return yaml_definitions(body)
+    if path.endswith(".md"):
+        return markdown_definitions(rows)
+    return None
+
+
+def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -6658,7 +7059,24 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch."""
+    the limit: every citation on an edited line is skipped, also one the edit did not touch.
+
+    A citation by name is `path#symbol`, or `#symbol` for the file named last (a colour, `#e62d42`, is
+    none unless the last file defines the symbol, `#add`; an `x#y` whose `x` is no file, a flake
+    reference or a URL, is none and leaves the file named last as it was); its spec in a finding starts with `#`. The symbol must spell exactly one of the
+    definitions that symbol_definitions reads in the file: none means it was renamed or removed,
+    several that it must be qualified (`Lock::new`), and a file of a kind with no symbols cannot be
+    cited so. The definition's lines are then read as cited lines, for the token and the sections
+    of the sentence; a symbol does not move, so the hunks are not read for it, and its lines may
+    span LINE_RANGE_LIMIT or more: a long definition holds more words, and proves less. A `#symbol`
+    on a line that names no file before it is a finding; after a name that resolves to no file (code
+    outside the repository), it is not checked. A `path#symbol` whose path is the end of several tracked
+    files is a finding ("ambiguous"); a `path:N` of one is not. Trade-off: an upstream crate's
+    `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`.
+
+    With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
+    is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
+    `path:N`."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
@@ -6675,41 +7093,105 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
         found = suffixes.get(name, [])
         return found[0] if len(found) == 1 else None
 
+    def names_a_file(name, crate):
+        """NAME is a tracked file or the end of some tracked files' paths."""
+        return name in suffixes or bool(crate and f"{crate}/{name}" in known)
+
+    def defines(path, symbol):
+        """The file PATH holds a definition spelled SYMBOL."""
+        try:
+            return path is not None and any(symbol in names for names, _, _ in symbol_definitions(
+                path, read_file(path)) or ())
+        except ValueError:
+            return False
+
+    def counts_as_named(name, crate):
+        """NAME is a file of the repository, or code outside it that the document cites by a relative
+        path (`glib/gmain.c`), whose lines a bare `:N` may follow; an absolute host path
+        (`/usr/bin/x`) is neither."""
+        return names_a_file(name, crate) or not name.startswith("/")
+
+    def names_a_gone_file(name):
+        """NAME is under a top-level directory of the repository, or is a bare `*.md` name that no
+        tracked file ends with: if it resolves to nothing, the file was removed."""
+        return name.startswith(prefixes) or (
+            name.endswith(".md") and "/" not in name and not any(t.endswith("/" + name) for t in known))
+
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
+        named_any = False
         line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m:
+                m = SYMBOL_CITATION.fullmatch(span.group(1))
+                if m and (not (names_a_file(m[1], crate) or names_a_gone_file(m[1])) if m[1] else
+                          COLOUR.fullmatch(span.group(1)) and not defines(last, m[2].strip())):
+                    m = None  # a flake reference, or a colour that its file does not define
+            if not m:
+                head = span.group(1).partition("#")[0]
+                if SCHEME.match(span.group(1)) or (
+                        "#" in span.group(1) and not (names_a_file(head, crate) or names_a_gone_file(head))):
+                    continue  # a URL or a flake reference, which is no file of the repository
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
+                named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))
                 continue
             named, spec = m.groups()
+            symbol = spec.strip() if m.re is SYMBOL_CITATION else None
+            spec, sep = (f"#{symbol}", "") if symbol else (spec, ":")
             path = last if named is None else resolve(named, crate)
-            if path is None and named and (named.startswith(prefixes) or (
-                    named.endswith(".md") and "/" not in named
-                    and not any(t.endswith("/" + named) for t in known))):
+            if path is None and named and names_a_gone_file(named):
                 out.append((number, named, spec, None,
-                            f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
+                            f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
+                if symbol and named and len(suffixes.get(named, ())) > 1:
+                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{spec}` is ambiguous: "
+                                "several files end with it, give a longer path"))
+                if named is None and not named_any and (symbol or lines_kept is not None):
+                    out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
+                                "before it on its line, and the line names none: name its path"))
+                named_any = named_any or (named is not None and counts_as_named(named, crate))
                 continue
-            body = read_file(path)
+            named_any = True
             if (c := CRATE_ROOT.match(path)):
                 crate = c.group(1)
-            ranges = []
-            for part in re.split(r",\s*", spec):
-                first, _, end = part.partition("-")
-                ranges.append((int(first), int(end or first)))
+            if not symbol and cited is not None:
+                cited.add(path)
+            if not symbol and lines_kept is not None and path not in lines_kept:
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites lines: cite a "
+                            f"symbol, `{path}#name`, or keep a file with no symbol in CITATION_LINES_KEPT"))
+                continue
+            body = read_file(path)
+            if symbol:
+                try:
+                    defs = symbol_definitions(path, body)
+                except ValueError as e:
+                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}{spec}`: the file {e}"))
+                    continue
+                ranges = [(f, e) for names, f, e in defs or () if symbol in names]
+                problem = ("cites a file with no symbols: cite its lines, and keep the file in CITATION_LINES_KEPT"
+                           if defs is None else "names no definition of its file: the symbol was renamed or removed"
+                           if not ranges else f"names {len(ranges)} definitions: qualify it (`Type::name`)"
+                           if len(ranges) > 1 else None)
+                if problem:
+                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}{spec}` {problem}"))
+                    continue
+            else:
+                ranges = []
+                for part in re.split(r",\s*", spec):
+                    first, _, end = part.partition("-")
+                    ranges.append((int(first), int(end or first)))
             rows = body.split("\n")
             if rows[-1] == "":
                 rows.pop()
-            if any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
+            if not symbol and any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
                 out.append((number, path, spec, None,
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
-            if line in unchanged and path in hunks:
+            if not symbol and line in unchanged and path in hunks:
                 new = moved_ranges(ranges, hunks[path])
                 if new is None:
                     out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
@@ -6721,7 +7203,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                     out.append((number, path, spec, "moved", f"{doc}:{number}: `{path}:{spec}` is moved by "
                                 f"this change: it should name `{path}:{named}`"))
                     continue
-            if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
+            if not symbol and path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
                 out.append((number, path, spec, None,
                             f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved"))
                 continue
@@ -6743,7 +7225,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                     if any(not (low <= f and e <= high or any(holds_token("\n".join(rows[f - 1:e]), i)
                                                                for i in spans)) for f, e in ranges):
                         named = ", ".join(spans)
-                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
+                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}{sep}{spec}` is not in "
                                     f"the section of {named}, which its sentence names: the lines moved"))
                         continue
             quoted = path.endswith(".json")
@@ -6787,11 +7269,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
                 tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
             if listed and not tokens:
-                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` names no token "
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
                             "that the file holds: put the entry's name in backticks, or hyphenated, "
                             "in its sentence"))
             elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
-                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}:{spec}` does not hold "
+                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}{sep}{spec}` does not hold "
                             f"`{missing}`, which its sentence names: the lines moved"))
     return out
 
@@ -6831,12 +7313,58 @@ def check_line_citations():
         counted = {}
         for _, path, spec, token, problem in citation_findings(
                 doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else ""):
+            if spec.startswith("#"):
+                continue  # a citation by name, which symbol-citations checks
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
             seen.add((doc.name, path, spec, token, n))
             if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    return r
+
+
+@check("symbol-citations", "A path#symbol citation of an architecture document names one definition, which holds the code its sentence names")
+def check_symbol_citations():
+    r = Result()
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = {f for f in listed.stdout.split("\0") if f}
+
+    def read_file(path):
+        try:
+            return read(ROOT / path)
+        except OSError:
+            return ""
+
+    hunks = None
+    if not CITATION_LINES_RETIRED:
+        r.note("the documents still cite lines (CITATION_LINES_RETIRED): line-citations checks `path:N`")
+    elif BASE_REF is None:
+        r.note("no base revision (--known-red-base REF): the citations that the change moved were not checked")
+    else:
+        try:
+            hunks = diff_hunks(ROOT, BASE_REF)
+        except ValueError as e:
+            r.fail(str(e))
+
+    def base_text(doc):
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{doc.relative_to(ROOT).as_posix()}"],
+                               capture_output=True, text=True)
+        return shown.stdout if shown.returncode == 0 else ""  # a document the change adds has no base text
+
+    cited = set()
+    kept = CITATION_LINES_KEPT if CITATION_LINES_RETIRED else None
+    for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
+                       ROOT / "docs/architecture/shell-features.md"]):
+        for _, _, spec, _, problem in citation_findings(
+                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else "", kept, cited):
+            if CITATION_LINES_RETIRED or spec.startswith("#"):
+                r.fail(problem)
+    for path in sorted(set(CITATION_LINES_KEPT) - cited):
+        r.fail(f"CITATION_LINES_KEPT names {path}, which no `path:N` citation cites: remove the entry")
     return r
 
 
@@ -7261,6 +7789,307 @@ def judge_known_red(entries, base, results, today):
         if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
+# A test that runs a script reaching system/tier-digests.sh and hands it a copy of
+# os.environ inherits the CI run's trust environment: on a pull request into rebase/*,
+# GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
+# The names are the ones tier-digests.sh reads: a rebase/* head switches the base and calls
+# `gh api` (GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REF, GITHUB_REPOSITORY, GITHUB_SERVER_URL,
+# TIER_TRUSTED_REFS, the tokens), and the registry owner comes from GITHUB_REPOSITORY_OWNER.
+TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REF", "GITHUB_REPOSITORY",
+                   "GITHUB_REPOSITORY_OWNER", "GITHUB_SERVER_URL", "TIER_TRUSTED_REFS", "GITHUB_ACTIONS",
+                   "GH_TOKEN", "GITHUB_TOKEN")
+TIER_DIGESTS = "system/tier-digests.sh"
+TEMPLATE_MODULE = "forge/scripts/tests/test_tier_cache.py"  # carries the isolation block every other copies
+SHARED_TRUST_ENV = "forge/scripts/tests/signed_registry.py"
+COMMENT_LINE = re.compile(r"(?m)^\s*#.*$")
+
+
+def dotted(node, aliases):
+    """`a.b.c` of a Name or Attribute chain whose first name is expanded through the import aliases,
+    "" for anything else."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(aliases.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def string_literals(tree):
+    """The module-level `NAME = (strings...)` tuples, lists and sets of a module, as {NAME: {strings}}."""
+    return {n.targets[0].id: {e.value for e in n.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+            for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name) and isinstance(n.value, (ast.Tuple, ast.List, ast.Set))}
+
+
+def scope_nodes(body):
+    """Every node that runs when a module is imported: the statements of `body` and what they hold, a class
+    body included; of a function or lambda only its decorators and default values, never its body."""
+    stack = list(body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            stack.extend(getattr(node, "decorator_list", []))
+            stack.extend(node.args.defaults + [d for d in node.args.kw_defaults if d is not None])
+        else:
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def bindings(tree, name):
+    """How many times the module scope binds `name`: a def, a class, an assignment, an import, a `for` or
+    `with` target, a match capture, a deletion. `import a` and `import a.b` bind `a` together, once; any `from` import binds on its own."""
+    count, plain = 0, set()
+    for n in scope_nodes(tree.body):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count += n.name == name
+        elif isinstance(n, ast.Name):
+            count += n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+        elif isinstance(n, ast.ImportFrom):
+            count += sum((a.asname or a.name) == name for a in n.names)
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if (a.asname or a.name.split(".")[0]) == name:
+                    if a.asname:
+                        count += 1
+                    else:
+                        plain.add(name)
+        elif isinstance(n, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            count += n.name == name
+        elif isinstance(n, ast.MatchMapping):
+            count += n.rest == name
+    return count + len(plain)
+
+
+def top_import_aliases(tree):
+    """{bound name: dotted target} of the imports that are direct children of the module."""
+    aliases = {}
+    for n in tree.body:
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            for a in n.names:
+                aliases[a.asname or a.name] = f"{n.module}.{a.name}"
+    return aliases
+
+
+def anchored(tree, name):
+    """Whether `name` is bound once, by an import that is a direct child of the module, and is neither
+    imported inside a function or a block nor declared `global`."""
+    if bindings(tree, name) != 1 or name not in top_import_aliases(tree):
+        return False
+    top = {id(n) for n in tree.body}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global) and name in n.names:
+            return False
+        if isinstance(n, (ast.Import, ast.ImportFrom)) and id(n) not in top \
+                and any((a.asname or a.name.split(".")[0]) == name for a in n.names):
+            return False
+    return True
+
+
+def environ_gaps(tree, aliases, exempt):
+    """The lines, at import time (module level, class bodies, function defaults and decorators), of a reference
+    to os.environ that is not a read of one variable that TRUST_ENV_NAMES does not hold: os.environ.get(<constant>
+    [, default]), os.getenv(<constant>[, default]) or os.environ[<constant>] in a load. `exempt` holds the ids of
+    the nodes allowed (the argument of the module's patch statement). Anything else is refused, which fails
+    closed: write `with mock.patch.dict(os.environ, ...)` inside the test in place of the decorator form,
+    read os.environ.get("<name outside the trust list>") in place of a membership test, and move a write into
+    the test or setUpModule. A load of `os` itself, one that is not the base of an attribute access (`o = os`,
+    `f(os)`, `[os]`), is refused too: an alias would reach the mapping unseen."""
+    scope = list(scope_nodes(tree.body))
+    bases = {id(n.value) for n in scope if isinstance(n, ast.Attribute)}
+    const = lambda a: isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value not in TRUST_ENV_NAMES  # noqa: E731
+    allowed = set(exempt)
+    lines = set()
+    for n in scope:
+        if isinstance(n, ast.Call) and n.args and isinstance(n.func, ast.Attribute) and n.func.attr == "get" \
+                and dotted(n.func.value, aliases) == "os.environ":
+            if const(n.args[0]):
+                allowed.add(id(n.func.value))
+        elif isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Load) and dotted(n.value, aliases) == "os.environ":
+            if const(n.slice):
+                allowed.add(id(n.value))
+        elif isinstance(n, ast.Call) and dotted(n.func, aliases) == "os.getenv" and not (n.args and const(n.args[0])):
+            lines.add(n.lineno)
+    lines |= {n.lineno for n in scope if isinstance(n, (ast.Name, ast.Attribute))
+              and dotted(n, aliases) == "os.environ" and id(n) not in allowed}
+    lines |= {n.lineno for n in scope if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+              and aliases.get(n.id) == "os" and id(n) not in bases}
+    return sorted(lines)
+
+
+def mutated(tree, name):
+    """Whether `name` is rebound or changed other than by its one binding: a method call, an item assignment
+    or deletion, a `global` statement."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+                and n.func.value.id == name:
+            return True
+        if isinstance(n, ast.Subscript) and isinstance(n.ctx, (ast.Store, ast.Del)) \
+                and isinstance(n.value, ast.Name) and n.value.id == name:
+            return True
+        if isinstance(n, ast.Global) and name in n.names:
+            return True
+    return False
+
+
+def passed(tree, name):
+    """Whether a statement that runs at import time passes `name` to a call, as `list.clear(NAMES)` does."""
+    return any(isinstance(n, ast.Call) and any(isinstance(x, ast.Name) and x.id == name
+                                               for a in [*n.args, *(k.value for k in n.keywords)]
+                                               for x in ast.walk(a))
+               for n in scope_nodes(tree.body))
+
+
+def isolation_gaps(tree, shared):
+    """What a test module lacks of the isolation block, which it copies from TEMPLATE_MODULE: a module-level
+    `P = mock.patch.dict(os.environ)`, a setUpModule that begins with `P.start()` and then
+    `for name in NAMES: os.environ.pop(name, None)`, a tearDownModule that begins with `P.stop()`; NAMES is
+    a literal list of strings (or the signed_registry import) that holds every TRUST_ENV_NAMES entry, bound
+    once and never changed. The leading statements are compared as trees, so nothing before or between them
+    can skip them. At import time the module reads no variable of TRUST_ENV_NAMES and no os.environ but one
+    named variable."""
+    aliases = top_import_aliases(tree)
+    lists = string_literals(tree)
+    if aliases.get("TRUST_ENV") == "signed_registry.TRUST_ENV":
+        lists["TRUST_ENV"] = shared
+    patches = [n for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+               and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Call)
+               and dotted(n.value.func, aliases) == "unittest.mock.patch.dict" and n.value.args
+               and dotted(n.value.args[0], aliases) == "os.environ"]
+    if not patches:
+        return ["a module-level mock.patch.dict(os.environ)"]
+    patch = patches[0].targets[0].id
+    os_names = [k for k, v in aliases.items() if v == "os"]
+    gaps = []
+    if bindings(tree, patch) != 1:
+        gaps.append(f"a patch variable {patch} bound once")
+    root = lambda node: dotted(node, {}).split(".")[0]  # noqa: E731
+    used = {root(patches[0].value.func), root(patches[0].value.args[0]), *os_names}
+    for name in sorted(used):
+        if not anchored(tree, name):
+            gaps.append(f"{name}, which the isolation block uses, bound once by a top-level import and never "
+                        "rebound or imported again elsewhere")
+
+    def expected(source):
+        return ast.dump(ast.parse(source).body[0])
+
+    def hook(name):
+        defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+        if len(defs) == 1 and not defs[0].decorator_list and bindings(tree, name) == 1:
+            return defs[0].body
+        gaps.append(f"a single undecorated {name}")
+        return None
+
+    setup, teardown = hook("setUpModule"), hook("tearDownModule")
+    if setup is not None:
+        if not (setup and ast.dump(setup[0]) == expected(f"{patch}.start()")):
+            gaps.append(f"a setUpModule that starts with {patch}.start()")
+        loop = setup[1] if len(setup) > 1 else None
+        names = loop.iter.id if isinstance(loop, ast.For) and isinstance(loop.iter, ast.Name) else None
+        pops = [expected(f"for name in {names}:\n    {o}.environ.pop(name, None)") for o in os_names]
+        if names is None or ast.dump(loop) not in pops:
+            gaps.append("a setUpModule whose second statement is `for name in NAMES: os.environ.pop(name, None)`")
+        elif bindings(tree, names) != 1 or mutated(tree, names) or passed(tree, names):
+            gaps.append(f"a list {names} bound once and never changed")
+        else:
+            missing = [n for n in TRUST_ENV_NAMES if n not in lists.get(names, set())]
+            if missing:
+                gaps.append(f"a setUpModule that pops {', '.join(missing)}")
+    if teardown is not None and not (teardown and ast.dump(teardown[0]) == expected(f"{patch}.stop()")):
+        gaps.append(f"a tearDownModule that starts with {patch}.stop()")
+    reads = environ_gaps(tree, aliases, {id(patches[0].value.args[0])})
+    if reads:
+        gaps.append("no use of os.environ at import time but the read of one named variable that is not a "
+                    f"trust variable (line {', '.join(map(str, reads))}); write the patch as "
+                    "`with mock.patch.dict(os.environ, ...)` inside the test, or read "
+                    "os.environ.get(\"<name outside the trust list>\")")
+    return gaps
+
+
+def trust_env_problems(root=None, reached=None):
+    """Every tracked test_*.py that names a script reaching tier-digests.sh carries the isolation block
+    (isolation_gaps); `reached`, when given, is filled with those tests. A script reaches it when a
+    non-comment line of a tracked .sh names tier-digests.sh or a script that reaches it, as a whole file
+    name. A Python intermediary is out of scope: the closure through the .py files that name a reaching
+    script would cover almost every test, and a test would carry the block for a script it never runs."""
+    root = root or ROOT
+    tracked = [f for f in subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
+                                         text=True, check=True).stdout.split("\0") if f]
+    is_test = re.compile(r"(?:^|/)test_[^/]*\.py$")
+    problems, texts = [], {}
+    for f in tracked:
+        if f.endswith(".sh") or is_test.search(f):
+            try:
+                texts[f] = COMMENT_LINE.sub("", read(root / f))
+            except OSError as e:
+                problems.append(f"{f}: tracked but unreadable ({e.strerror})")
+
+    def naming(names, candidates):
+        if not names:
+            return set()
+        found = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names))) + r")(?![\w.-])")
+        return {f for f in candidates if found.search(texts[f])}
+
+    base = lambda f: f.rsplit("/", 1)[-1]  # noqa: E731
+    if TIER_DIGESTS not in texts:
+        return problems + [f"{TIER_DIGESTS}: not tracked, so no test can be found that reaches it "
+                           "(renamed or removed? update TIER_DIGESTS in scripts/verify.py)"]
+    reaching = {TIER_DIGESTS}
+    pending, rest = {base(f) for f in reaching}, {f for f in texts if not is_test.search(f)} - reaching
+    while pending and rest:
+        more = naming(pending, rest)
+        rest -= more
+        reaching |= more
+        pending = {base(f) for f in more}
+    names = {base(f) for f in reaching}
+    tests = sorted(f for f in naming(names, [f for f in texts if is_test.search(f)]))
+    if reached is not None:
+        reached.extend(tests)
+    shared, shared_error = set(), None
+    try:
+        shared = string_literals(ast.parse(read(root / SHARED_TRUST_ENV))).get("TRUST_ENV", set())
+    except (OSError, SyntaxError) as e:
+        shared_error = f"{SHARED_TRUST_ENV}: cannot be read as the shared TRUST_ENV ({e})"
+    for f in tests:
+        try:
+            tree = ast.parse(read(root / f))
+        except SyntaxError as e:
+            problems.append(f"{f}: not parseable ({e.msg}, line {e.lineno})")
+            continue
+        if shared_error and "signed_registry" in texts[f]:
+            problems.append(f"{f}: {shared_error}")
+            continue
+        gaps = isolation_gaps(tree, shared)
+        if gaps:
+            problems.append(f"{f}: reaches tier-digests.sh without the isolation block; it lacks "
+                            + "; ".join(gaps) + f". Copy the block from {TEMPLATE_MODULE}")
+    return problems
+
+
+@check("test-trust-env", "A test that reaches tier-digests.sh isolates the CI run's trust environment (module-level patch, popped in setUpModule)")
+def check_test_trust_env():
+    """Static, so with known limits: a rebinding through globals(), exec or setattr, and a helper function called at
+    import time that copies the environment, are not seen (nor a Python intermediary between a test and a
+    reaching script, nor a test that reaches the script through a name built at run time). The adversarial
+    class is out too: reaching os.environ without naming it, or running a script at import time; one line each:
+    `from os import *`; os.environb or posix.environ; sys.modules; getattr or __import__; a mutation of the
+    names list through an alias; statements after the first two of setUpModule. Refused, so not limits: a
+    module-level rebinding of the os or mock name the patch statement uses, a call that passes the names list
+    as an argument, and a load of os that is not an attribute base. Ambient names outside
+    TRUST_ENV_NAMES are not dropped either: REGISTRY_HOST (read by tier-digests.sh in resolve), GH_HOST,
+    GH_REPO, COSIGN_* and REGISTRY_AUTH_FILE. REGISTRY_HOST stays out because the block comparison needs the
+    names literal of every carrying module (46 files) and signed_registry.TRUST_ENV to change with it."""
+    r = Result()
+    for problem in trust_env_problems():
+        r.fail(problem)
+    return r
+
+
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
     if name not in argv:

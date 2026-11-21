@@ -7,13 +7,13 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use athanor_sal::{Align, Event, Kind, Ui, WidgetId, Wrap};
+use athanor_sal::{Align, Event, Image, Kind, Ui, WidgetId, Wrap};
 use athanor_services::bluetooth::{
-    BluetoothCommand, BluetoothState, Device, PairingReply, PairingRequest,
+    self, BluetoothCommand, BluetoothState, Device, PairingReply, PairingRequest,
 };
 use tokio::sync::{mpsc, oneshot};
 
-use super::widgets::{column, heading, switch_row, Failure, Look};
+use super::widgets::{column, heading, icon_image, icon_images, switch_row, Failure, Look};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -241,6 +241,9 @@ struct Ids {
     rows: Vec<(WidgetId, Device)>,
     /// How many of `rows` are paired.
     paired_rows: usize,
+    /// Every device icon, from the [`Look`] of the build: `turn`, which has none, sets a row's
+    /// new icon in place.
+    icons: Vec<(&'static str, Option<Image>)>,
     prompt: WidgetId,
     title: WidgetId,
     code: WidgetId,
@@ -346,13 +349,14 @@ impl Page {
             .map(|state| (state.paired.clone(), state.nearby.clone()))
             .unwrap_or_default();
         let paired_rows = paired_devices.len();
+        let icons = icon_images(look, bluetooth::ICONS);
         let nearby_devices = nearby_devices.into_iter().filter(|_| self.pairing);
         let rows = (paired_devices.into_iter().map(|device| (paired, device)))
             .chain(nearby_devices.map(|device| (nearby, device)))
             .map(|(list, device)| {
                 // The kind's icon, then the name, as the GTK row's box.
                 let name = device_name(&device);
-                let icon = (look.icon)(device.icon);
+                let icon = icon_image(&icons, device.icon);
                 let row = ui.labelled_button(list, &name, icon, look.icon_size, &name);
                 (row, device)
             })
@@ -388,6 +392,7 @@ impl Page {
             nearby,
             rows,
             paired_rows,
+            icons,
             prompt,
             title,
             code,
@@ -404,26 +409,42 @@ impl Page {
         page
     }
 
-    /// Shows what changed since the last call: a new state or request, and a failure as the
-    /// note under the page. A device that came, went or changed asks for the page to be built
-    /// again.
+    /// Shows what changed since the last call: a new state or request, a device's new label,
+    /// connection or icon in its row, and a failure as the note under the page. A device that
+    /// came, went or moved asks for the page to be built again.
     pub fn turn(&mut self, ui: &mut Ui) -> Turn {
         let now = (self.service.states.get(), self.service.failures.get());
         if now == self.seen {
             return Turn::Unchanged;
         }
-        let rebuild = self.ids.as_ref().is_some_and(|ids| {
+        let rebuild = self.ids.as_mut().is_some_and(|ids| {
             let state = self.service.state.borrow();
             let (paired, nearby) = state.as_ref().map_or((&[][..], &[][..]), |s| {
                 (s.paired.as_slice(), s.nearby.as_slice())
             });
             let nearby = if self.pairing { nearby } else { &[] };
-            ids.paired_rows != paired.len()
+            if ids.paired_rows != paired.len()
                 || !ids
                     .rows
                     .iter()
-                    .map(|(_, d)| d)
-                    .eq(paired.iter().chain(nearby))
+                    .map(|(_, d)| &d.path)
+                    .eq(paired.iter().chain(nearby).map(|d| &d.path))
+            {
+                return true;
+            }
+            // The same devices: a new icon, label or connection is set in place.
+            for ((id, shown), device) in ids.rows.iter_mut().zip(paired.iter().chain(nearby)) {
+                if shown.icon != device.icon {
+                    ui.set_image(*id, icon_image(&ids.icons, device.icon));
+                }
+                if shown != device {
+                    let name = device_name(device);
+                    ui.set_text(*id, &name);
+                    ui.set_shown_text(*id, &name);
+                    shown.clone_from(device);
+                }
+            }
+            false
         });
         let failed = now.1 != self.seen.1;
         if rebuild {
@@ -689,9 +710,85 @@ mod tests {
         assert!(ui.is_visible(ids(&page).failure.note));
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+    }
+
+    /// A device that connects, takes a new label or shows another icon keeps its row, which
+    /// keeps the keyboard focus on the row the person just pressed; a device that comes, goes
+    /// or moves builds the rows again (#1248).
+    #[test]
+    fn a_device_that_connects_keeps_its_row_and_a_new_device_rebuilds_them() {
+        let shown = |ui: &Ui, row| match &ui.widget(row).kind {
+            Kind::LabelledButton { label, text, .. } => (label.clone(), text.clone()),
+            _ => unreachable!("a labelled button"),
+        };
+        let (mut page, mut received) =
+            page(state(vec![device("Headphones", false), device("Keyboard", false)]));
+        // The mouse's icon alone has an image: a row's image tells which icon it shows.
+        let mut look = Look {
+            icon: Box::new(|name| {
+                (name == "input-mouse-symbolic")
+                    .then(|| Image::from_rgba8(1, 1, vec![0; 4]).ok())
+                    .flatten()
+            }),
+            ..Look::plain()
+        };
+        let mut ui = Ui::new("t", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &mut look);
+        let headphones = ids(&page).rows[0].0;
+        let mut renamed = device("Keyboard", false);
+        renamed.label = "Desk keyboard".to_owned();
+        page.service
+            .state
+            .replace(Some(state(vec![device("Headphones", true), renamed.clone()])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated, "only the rows' state changed");
+        assert_eq!(ids(&page).rows[0].0, headphones);
+        let connected = tr_with("{device}, connected", "device", "Headphones");
+        assert_eq!(shown(&ui, headphones), (connected.clone(), connected));
+        let keyboard = ids(&page).rows[1].0;
+        let desk = "Desk keyboard".to_owned();
+        assert_eq!(shown(&ui, keyboard), (desk.clone(), desk));
+        // The row's press acts on the state the update brought.
+        let clicked = ui.activate(headphones);
+        assert!(clicked.is_some_and(|event| page.event(&mut ui, &event)));
+        assert!(matches!(
+            received.try_recv(),
+            Ok(BluetoothCommand::Disconnect(path)) if path == "/org/bluez/hci0/dev_Headphones"
+        ));
+
+        let image = |ui: &Ui| {
+            matches!(&ui.widget(keyboard).kind, Kind::LabelledButton { image: Some(_), .. })
+        };
+        assert!(!image(&ui));
+        let mouse = Device {
+            icon: "input-mouse-symbolic",
+            ..renamed
+        };
+        page.service
+            .state
+            .replace(Some(state(vec![device("Headphones", true), mouse.clone()])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated, "only the row's icon changed");
+        assert_eq!(ids(&page).rows[1].0, keyboard);
+        assert!(image(&ui), "the mouse's icon, set in place");
+
+        for (now, why) in [
+            (vec![mouse.clone(), device("Headphones", true)], "another order"),
+            (
+                vec![mouse.clone(), device("Headphones", true), device("Speaker", false)],
+                "a device came",
+            ),
+            (vec![device("Headphones", true)], "a device left"),
+        ] {
+            page.service.state.replace(Some(state(now)));
+            page.service.changed();
+            assert_eq!(page.turn(&mut ui), Turn::Rebuild, "{why}");
+            ui = Ui::new("t", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+        }
     }
 
     #[test]
@@ -701,11 +798,11 @@ mod tests {
         let mut ui = Ui::new("t", Theme::default(), false);
         page.build(&mut ui, Ui::ROOT, &mut Look::plain());
 
-        // A refusal that comes with a device that changed: the page built again shows it.
+        // A refusal that comes with a device that came: the page built again shows it.
         page.service.failed();
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
         let mut again = Ui::new("t", Theme::default(), false);
@@ -760,7 +857,7 @@ mod tests {
         page.service.failed();
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
         page.dropped();
@@ -793,7 +890,7 @@ mod tests {
         page.service.failed();
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut next), Turn::Rebuild);
         page.closed(&mut next);
