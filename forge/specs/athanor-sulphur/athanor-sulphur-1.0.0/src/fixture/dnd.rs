@@ -803,8 +803,8 @@ fn an_icon_off_the_pointer_is_not_drawn() {
     run.stop();
 }
 
-/// Offsets that add up past `i32::MAX` saturate: the compositor does not panic, and the icon,
-/// far off the pointer, is not drawn.
+/// Offsets that add up past `i32::MAX` saturate: the compositor does not panic, the icon, far
+/// off the pointer, is not drawn, and an offset of `-i32::MAX` brings it back to the pointer.
 #[test]
 fn an_icon_offset_past_the_limit_saturates() {
     let mut run = Running::start(None);
@@ -823,6 +823,10 @@ fn an_icon_offset_past_the_limit_saturates() {
         from.local.roundtrip(&mut run);
     }
     assert!(background(&at(&frame(&mut run), 710, 510)), "not drawn");
+    icon.offset(-i32::MAX, 0);
+    icon.commit();
+    from.local.roundtrip(&mut run);
+    assert_eq!(at(&frame(&mut run), 710, 510), RED, "back on the pointer");
     release(&mut run);
     run.stop();
 }
