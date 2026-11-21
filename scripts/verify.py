@@ -197,7 +197,8 @@ def check_workflows():
 
     # 1e. D43: signing keys only in sign-only jobs
     for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
-                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)
+                    + scheduled_alert_problems(ROOT) + queue_skip_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -450,6 +451,118 @@ def merge_queue_problems(root):
     return problems
 
 
+ALERT_ACTION = "./.github/actions/alert"
+# Scheduled workflows that have no alert job yet, each with the reason. An entry whose workflow
+# gains the job is itself reported, so the list only shrinks.
+ALERT_EXEMPT = {
+    "athanor-forge-orchestrator.yml": "its alert job lands in a separate pull request (#1353 follow-up)",
+}
+
+
+def scheduled_alert_problems(root):
+    """PL51: a workflow with an `on.schedule` trigger ends with alert jobs that use the alert
+    action on a GitHub-hosted runner, run with `always()`, and between them need every other job,
+    so a scheduled failure, a lost runner or a timeout opens a ci-alert issue."""
+    problems = []
+    workflows = Path(root) / ".github/workflows"
+    for name in sorted(ALERT_EXEMPT):
+        path = workflows / name
+        doc = yaml.safe_load(read(path)) if path.is_file() else None
+        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
+            problems.append(f"ALERT_EXEMPT names {name}, which does not exist or has no schedule: "
+                            "remove the entry (PL51)")
+    for wf in sorted(workflows.glob("*.y*ml")):
+        doc = yaml.safe_load(read(wf))
+        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
+            continue
+        jobs = doc.get("jobs") or {}
+        if wf.name in ALERT_EXEMPT:
+            if alert_jobs(jobs):
+                problems.append(f"{wf.name}: has an alert job, so it is no longer exempt: "
+                                "remove it from ALERT_EXEMPT (PL51)")
+            continue
+        problems += alert_job_problems(wf.name, jobs, "schedule")
+    return problems
+
+
+def alert_jobs(jobs):
+    """The jobs of a workflow that use the alert action."""
+    return {name: job for name, job in jobs.items()
+            if any(step.get("uses") == ALERT_ACTION for step in (job or {}).get("steps") or [])}
+
+
+def alert_job_problems(name, jobs, event):
+    """What keeps the alert jobs of workflow NAME from reporting every job of a run of EVENT: none
+    uses the action, one has an `if` other than `always() && !cancelled() && github.event_name ==
+    '<event>'` (a superseded run is cancelled and is not a failure), one is not on a hosted
+    runner, one sets continue-on-error or puts an `if` on its alert step, or a job is needed by none of them."""
+    alerts = alert_jobs(jobs)
+    if not alerts:
+        return [f"{name}: no job uses {ALERT_ACTION}, which a run on {event} needs (PL51)"]
+    problems = []
+    covered = set(alerts)
+    for job_id, job in alerts.items():
+        condition = re.sub(r"\s+", " ", re.sub(r"^\s*\$\{\{(.*)\}\}\s*$", r"\1", str(job.get("if", "")))).strip()
+        allowed = f"always() && !cancelled() && github.event_name == '{event}'"
+        if condition != allowed:
+            problems.append(f"{name}: alert job {job_id} has the if {condition!r}, not {allowed!r} (PL51)")
+        if not GITHUB_HOSTED.match(str(job.get("runs-on", ""))):
+            problems.append(f"{name}: alert job {job_id} is not on a GitHub-hosted runner (PL51)")
+        if "continue-on-error" in job:
+            problems.append(f"{name}: alert job {job_id} sets continue-on-error, which hides its failure (PL51)")
+        for step in job.get("steps") or []:
+            if step.get("uses") != ALERT_ACTION:
+                continue
+            if "if" in step or "continue-on-error" in step:
+                problems.append(f"{name}: the alert step of {job_id} sets if or continue-on-error, "
+                                "so it can be skipped or fail unseen (PL51)")
+            given = {key: re.sub(r"\s+", " ", str(value)).strip() for key, value in (step.get("with") or {}).items()}
+            if given != {"needs": "${{ toJSON(needs) }}"} or "env" in step:
+                problems.append(f"{name}: the alert step of {job_id} must pass exactly "
+                                "`needs: ${{ toJSON(needs) }}` and no env (PL51)")
+        needed = job.get("needs") or []
+        covered |= {needed} if isinstance(needed, str) else set(needed)
+    return problems + [f"{name}: no alert job needs {job_id} (PL51)" for job_id in jobs if job_id not in covered]
+
+
+# ADR-0146: each build the merge queue skips (QUEUE_SKIPS of scripts/ci/changes.py) names the
+# workflow whose push run on iso-v0 covers it and alerts on failure, or None with the reason.
+QUEUE_COVERED_BY = {
+    "kernel": (None, "built once at the pull request head and published from that build on the "
+                     "push (ADR-0110); the Orchestrator has no push alert yet (#1353 follow-up)"),
+    "shell": ("shell-surfaces.yml", "the push run on iso-v0 builds the merged base and alerts"),
+}
+
+
+def queue_skip_problems(root):
+    """ADR-0146: a build the queue skips is covered after the merge by a workflow that runs on a
+    push and ends with an alert job for that push, or has a stated reason why none does."""
+    root = Path(root)
+    spec = importlib.util.spec_from_file_location("changes", root / "scripts/ci/changes.py")
+    changes = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(changes)
+    problems = []
+    for area in sorted(changes.QUEUE_SKIPS):
+        covered = QUEUE_COVERED_BY.get(area)
+        if covered is None:
+            problems.append(f"changes.py: the queue skips {area}, but QUEUE_COVERED_BY says nothing about it")
+            continue
+        name, reason = covered
+        if not reason:
+            problems.append(f"QUEUE_COVERED_BY[{area!r}] has no reason")
+        if name is None:
+            continue
+        path = root / ".github/workflows" / name
+        doc = yaml.safe_load(read(path)) if path.is_file() else None
+        if not isinstance(doc, dict):
+            problems.append(f"QUEUE_COVERED_BY[{area!r}]: {name} does not exist")
+            continue
+        if "push" not in triggers(doc):
+            problems.append(f"{name}: covers the skipped {area} build after the merge but does not run on push")
+        problems += alert_job_problems(name, doc.get("jobs") or {}, "push")
+    return problems
+
+
 def job_contexts(root, doc, depth=0):
     """The status contexts a workflow's jobs report, as fnmatch patterns: an expression in a
     name and the values of an unnamed matrix match anything, and so does the inner job of a
@@ -582,7 +695,7 @@ RELEASE_PATH_ACTIONS = {
     "actions/attest-build-provenance", "actions/checkout", "actions/create-github-app-token",
     "actions/download-artifact", "actions/upload-artifact", "anchore/sbom-action/download-syft",
     "cachix/install-nix-action", "oras-project/setup-oras", "sigstore/cosign-installer",
-    "ublue-os/remove-unwanted-software", "./.github/actions/kvm",
+    "ublue-os/remove-unwanted-software", "./.github/actions/kvm", "./.github/actions/alert",
 }
 # The settings that give a build a cache from outside the job: sccache on the Actions cache, and
 # a BuildKit or buildah cache-from or cache-to of any type. A cache that lives only in the job's
