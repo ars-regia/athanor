@@ -171,8 +171,8 @@ same_frame() { python3 "$HERE/same_frame.py" "$SHOTS/$1.ppm" "$SHOTS/$2.ppm"; }
 
 launcher_journal() { in_session "journalctl --user -u athanor-launcher --since @$1 --no-pager -o cat"; }
 decoder_journal() { in_session "journalctl --user -t systemd --since @$1 --no-pager -o cat -u 'athanor-preview-*'"; }
-shown_count() { launcher_journal "$1" | awk '/^shown ms=/ { n++ } END { print n + 0 }'; }
-shown_ms() { launcher_journal "$1" | sed -n 's/^shown ms=\([0-9]*\).*/\1/p'; }
+shown_count() { launcher_journal "$1" | awk '/: shown ms=/ { n++ } END { print n + 0 }'; }
+shown_ms() { launcher_journal "$1" | sed -n 's/^.*: shown ms=\([0-9]*\).*/\1/p'; }
 # A known gap the bar and the dock share: reported, never fixed here.
 note_dconf() {
     if launcher_journal "$1" | grep -qF "$DCONF_GAP"; then
@@ -309,7 +309,7 @@ stage_activation() {
     wait_until 10 unit_active || fail "no active athanor-launcher after Show: $(unit show -p ActiveState --value)"
     pid=$(unit show -p MainPID --value)
     [[ $pid =~ ^[1-9][0-9]*$ ]] || fail "MainPID '$pid' after the activation"
-    wait_until 5 in_session "journalctl --user -u athanor-launcher --since @$since -o cat | grep -q '^shown ms='" ||
+    wait_until 5 in_session "journalctl --user -u athanor-launcher --since @$since -o cat | grep -q ': shown ms='" ||
         fail "no 'shown ms=' within 5 s: $(launcher_journal "$since" | tail -n 5)"
     ms=$(shown_ms "$since" | head -n 1)
     echo "show time: first Show (D-Bus activation) ${ms} ms"
@@ -337,7 +337,7 @@ stage_activation() {
         pid=$(unit show -p MainPID --value)
     fi
     # The count is only read once the launcher is shown: the first line is the show time.
-    wait_until 5 in_session "test \$(journalctl --user -u athanor-launcher --since @$since -o cat | grep -c '^shown ms=') -gt $count" ||
+    wait_until 5 in_session "test \$(journalctl --user -u athanor-launcher --since @$since -o cat | grep -c ': shown ms=') -gt $count" ||
         fail "no second 'shown' after Super (before: $count)"
     ms=$(shown_ms "$since" | tail -n 1)
     echo "show time: Super ${ms} ms"
@@ -997,7 +997,7 @@ launcher_pss() { in_session "awk '/^Pss:/ { print \$2 }' /proc/$(unit show -p Ma
 # The compositor lists exactly N outputs: a removal has been processed.
 outputs_are() { [[ $(in_session "wayland-info | grep -c \"interface: 'wl_output'\"") == "$1" ]]; }
 # The connector the launcher last showed on since $1, from its "shown" line.
-shown_on() { launcher_journal "$1" | sed -n 's/^shown ms=[0-9]* output="\{0,1\}\([^" ]*\).*/\1/p' | tail -n 1; }
+shown_on() { launcher_journal "$1" | sed -n 's/^.*: shown ms=[0-9]* output="\{0,1\}\([^" ]*\).*/\1/p' | tail -n 1; }
 shown_on_is() { [[ $(shown_on "$1") == "$2" ]]; }
 same_process() { [[ $(unit show -p MainPID --value) == "$1" ]]; }
 
