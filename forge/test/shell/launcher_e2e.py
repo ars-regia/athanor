@@ -185,9 +185,9 @@ def stage_no_localsearch(Atspi):
     check("no Files header", "Files" not in texts, str(texts))
     check("no indexing row", "Indexing files…" not in texts, str(texts))
     log = log_text()
-    # The journal format prefixes the priority: <6> is info, <3> an error.
-    check("launcher logged", "<6>shown ms=" in log, "no shown line in the log")
-    errors = [line for line in log.splitlines() if line.startswith("<3>")]
+    # A log file is not the journal: each line carries tracing's level after the timestamp.
+    check("launcher logged", re.search(r"^\S+\s+INFO .*shown ms=", log, re.MULTILINE), "no shown line in the log")
+    errors = [line for line in log.splitlines() if re.match(r"\S+\s+ERROR ", line)]
     check("no error", not errors, "\n".join(errors))
 
 
