@@ -1,6 +1,6 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 3, decided by the maintainer on 2026-11-05 ([ADR-0135](../decisions/0135-faster-road-to-1-0.md)) and approved with the pull request that records it.** Revision 3 changes what release 1.0 waits for: 1.0 ships the own compositor as the default session of decision 28, with cosmic-comp's session as the second choice, and OS19 in full, the overview, the window switcher on Alt+Tab and cosmic-workspaces' retirement are release 1.1's. Revision 2 was approved by the maintainer on 2026-10-23 (#755). Revision 1 was approved by
+Status: **revision 4 (2026-11-21), approved by the maintainer on 2026-11-21 with the pull request that records it.** Revision 4 adds OS21, the greeter's mode, in which greetd's greeter session runs on this compositor instead of cosmic-comp once the greeter has moved to Sal, before cosmic-comp leaves the image (#1356; ADR-0141 decisions 2 and 3), and decision 41, which records the maintainer's choices of 2026-11-21: the grant that admits the greeter to the mode is decided with the greeter's port to Sal, which becomes a prerequisite of the change that takes cosmic-comp's session off the greeter, and before login the mode serves the greeter's aids, Orca's keyboard monitor and Super+Alt+S once it is verified how the compositor finds the `greetd` user's bus. It amends the opening of OS19, the greeter's clause of OS19 item 1 and section 6, step 5, and moves to release 1.0, by ADR-0141 decisions 3 and 4, what revision 3 placed in release 1.1: the own compositor replacing cosmic-comp, cosmic-comp's session leaving the greeter and cosmic-workspaces' retirement (the list of revision 3's changes, OS5, OS19's opening, section 6 step 4, decision 28 and its note on the overview, section 8 and its line on what release 1.1 waits for, and decision 33's capture of a workspace for the overview's thumbnails). Its rules carry "(revision 4)" or "(maintainer decision, 2026-11-21)". Revision 3 was decided by the maintainer on 2026-11-05 ([ADR-0135](../decisions/0135-faster-road-to-1-0.md)) and approved with the pull request that records it. Revision 3 changes what release 1.0 waits for: 1.0 ships the own compositor as the default session of decision 28, with cosmic-comp's session as the second choice, and OS19 in full, the overview, the window switcher on Alt+Tab and cosmic-workspaces' retirement are release 1.1's. Revision 2 was approved by the maintainer on 2026-10-23 (#755). Revision 1 was approved by
 the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
@@ -91,7 +91,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - OS5, the list of what the compositor provides: cosmic-workspaces is replaced in 1.1.
 - OS19's lead-in, section 6 step 4, decision 28 and section 8: the own compositor replaces
   cosmic-comp in release 1.1; release 1.0 ships it as the default session, with cosmic-comp's
-  session as the second choice.
+  session as the second choice. *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* both are in release 1.0, and 1.0 ships no cosmic-comp session.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each milestone reads them
@@ -369,7 +369,7 @@ own compositor provides what the shell and the components 1.0 keeps take from co
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
   is replaced in 1.1 by `athanor-overview` (decision 28, ADR-0135), and runs until then only in
-  cosmic-comp's session.
+  cosmic-comp's session. *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* it is replaced in release 1.0 (`doc_overview.md` OV29, OV34).
   Under milestone C1, cosmic-workspaces' overview was closed for want of the top layer and the
   process then ended on SIGSEGV (C1 results, section 7.3, T9-6).
 
@@ -491,15 +491,18 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 **OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.1
 (section 6, step 4; ADR-0135) when each of the following holds, recorded in the pull request that takes
 cosmic-comp's session off the greeter, which also waits for the overview and the window
-switcher on Alt+Tab (decision 28). Decision 28 makes it the default session before then, on
+switcher on Alt+Tab (decision 28) and, from revision 4, for the greeter's port to Sal and its move
+to the greeter's mode (OS21; decision 41). Decision 28 makes it the default session before then, on
 the parts of them it names, recorded in the pull request that makes it the default session, and
-release 1.0 ships it so, with cosmic-comp's session as the second choice (ADR-0135):
+release 1.0 ships it so, with cosmic-comp's session as the second choice (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):*
+the replacement and cosmic-comp's session leaving the greeter are in release 1.0, which ships no
+cosmic-comp session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
    `rig.sh golden-report` passes, against cosmic-comp's goldens, every case of `cases.py` but the
    toolkit's (those pass the gates of OS8 and OS9 in the gallery, OS10): the 243 of today's 18
-   surfaces and layouts, the greeter's 12 included, which the report leaves out while the greeter
-   runs on cosmic-comp in greetd's session (`doc_session.md` SN12; section 6, step 5), and the 24 of
+   surfaces and layouts, the greeter's 12 included, which the report leaves out until the greeter
+   runs on this compositor in greetd's session (OS21, revision 4; `doc_session.md` SN12), and the 24 of
    the lock screen and the polkit agent once installed. Each difference has its cause and its issue
    in `athanor-differences.toml`, and a second set of goldens is recorded only when cosmic-comp
    leaves the image (OS9 plan, questions 1 and 2). The eight causes milestone C1 listed are tied to
@@ -534,6 +537,98 @@ release 1.0 ships it so, with cosmic-comp's session as the second choice (ADR-01
 This acceptance closes the gaps 2 to 5 and 7 of `doc_session.md` SN16: the trusted path, gap 2
 with the reveal key of decision 31, and Orca's keyboard monitor (OS4), the aids, the magnifier and the filters (item 3), the identity's limits
 (OS4) and the key bindings (OS13).
+
+**OS21. The greeter's mode** (#1356; ADR-0141 decisions 2 and 3; decision 41; revision 4).
+greetd's greeter session runs on this compositor, not on cosmic-comp, so that no cosmic-comp process
+runs from boot to the desktop once cosmic-comp leaves the image (ADR-0141 decision 3). The greeter
+moves to this compositor with its port to Sal (section 6, step 5; decision 34), not before it, and
+the grant that admits it to the mode's restricted protocols is decided with that port, by a
+revision of this document (decision 41; maintainer decision, 2026-11-21). The port is therefore a
+prerequisite of the change that takes cosmic-comp's session off the greeter, and cosmic-comp stays
+in the image, running the greeter, until the port has merged. `doc_lock_and_prompts.md` LP19 holds
+as written: the greeter writes nothing, reads no file under a home directory and reaches only the
+filtered buses of `athanor-greeter-client`.
+
+- **How it starts.** greetd runs `athanor-greeter-session` as the `greetd` user in the greeter's
+  logind session on VT 1 (`forge/specs/athanor-system-config/SOURCES/usr/share/athanor-system-config/greetd.toml`).
+  The script keeps what it sets today: the runtime directory, the system's language, the system's
+  keyboard layout as `XKB_DEFAULT_LAYOUT`, `XKB_DEFAULT_VARIANT`, `XKB_DEFAULT_MODEL` and
+  `XKB_DEFAULT_OPTIONS` (`doc_languages.md` LN10), and the journal tag `athanor-greeter`. Its last
+  command runs `athanor-sulphur --greeter /usr/libexec/athanor-greeter-client` where it runs
+  `cosmic-comp --no-xwayland` with the same program today
+  (`forge/specs/athanor-system-config/SOURCES/usr/bin/athanor-greeter-session`). `--greeter` takes
+  exactly one program and no other option, as `--drm` takes none (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/lib.rs#options`),
+  and draws on the monitors of the seat's primary GPU through logind's seat, as `--drm` does
+  (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/lib.rs#Options`).
+- **No user unit.** The compositor runs as the script's child, never under `athanor-sulphur.service`
+  or another unit of a user manager, and starts no unit: no `athanor-session.target`, no readiness
+  gate, no shell component. Outside a notify unit it sends nothing to a user manager
+  (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/ready.rs#announce`), so it writes nothing into the `greetd` user's manager, whether
+  logind started one or not. It is not restarted (OS18).
+- **One program, and the end with it.** Once its socket listens, the compositor starts the program,
+  with `WAYLAND_DISPLAY` naming that socket, and exits when the program exits: with status 0 when the
+  program's status is 0 and with 1 otherwise, the program's status in the journal. greetd then starts
+  the signed-in user's session on the freed VT, or counts the greeter's failure. The program,
+  `athanor-greeter-client`, runs the greeter UI under bubblewrap and never unconfined; the compositor
+  stays outside the sandbox, as cosmic-comp does today.
+- **Who may connect.** Only the greeter: any other connection is closed at connect and logged at
+  `warning` with the executable and the unit read. How the compositor tells the greeter from
+  another process of the `greetd` user is the grant that the greeter's port decides (decision 41).
+  No line of the session's allow-list can name the greeter today, since a line names one
+  `.service`, one `.scope` or `<prefix>*@.service` (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/identity.rs#AllowList`),
+  and the greeter runs in its logind session scope, `session-<id>.scope`, which logind creates anew
+  for each greeter session.
+- **What the greeter is granted.** `zwlr_layer_shell_v1` with the top and overlay layers, on which
+  the greeter draws its card with the keyboard exclusive
+  (`forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/ui.rs#build_ui`), and the standard
+  globals of OS17. No other privileged or unconfined global is offered in the mode: no session lock,
+  since no session is open; no capture of windows or outputs (OS16); no data control, virtual
+  keyboard or input method; no workspace, toplevel or window-action interface; no EIS (decision 33).
+  No X11: xwayland-satellite is not started, installed or not, where `run` starts it today whenever
+  it is installed (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/lib.rs#run`).
+- **Keys and accessibility before login** (maintainer decision, 2026-11-21). Of OS13's bindings the
+  mode keeps the switch to a text console and Super+Alt+S. Super and the session's other keys are
+  not bound, so the greeter's own keys, Super+Alt+A among them (`doc_accessibility.md` AX13), reach
+  the greeter; the power key stays logind's. The mode serves what AX13 asks of the compositor
+  before login: Super+Alt+S starts and stops the `greetd` user's screen reader, Orca's keyboard
+  monitor (OS4) answers that user's Orca, and the greeter's aids, the magnifier and the keyboard
+  aids that AX13 lists as known limits at the greeter, act there as they do in the session. Each
+  has a stage of the development VM's acceptance (below). Its precondition is open: the compositor
+  runs outside any user manager (above), and how it then finds the `greetd` user's session bus, on
+  which the keyboard monitor answers and `athanor-a11y` runs (AX13), is verified on the development
+  VM and written into this item before the change that takes cosmic-comp's session off the
+  greeter, which serves these keys and aids at the greeter (ADR-0141 decision 3; `doc_session.md`
+  section 6, item 15). Until that change, the screen reader's key, the magnifier and the keyboard aids are known limits
+  at the greeter, as AX13 lists the last two today.
+- **When it cannot start.** A failure before the program runs (no seat, no output drawn, no socket,
+  the program not started) ends the compositor with status 1 and its cause in the journal under
+  `athanor-greeter`. greetd fails with its greeter, and three failures within 60 s start the
+  recovery console of `doc_recovery.md` R1
+  (`forge/specs/athanor-recovery/SOURCES/usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf`).
+  A machine this compositor cannot drive therefore reaches R1's console from the greeter, before
+  anyone signs in, as one that cosmic-comp could not drive does today.
+- **Tests.**
+  - Fixture tests (OS6): in the greeter's mode, the greeter draws an overlay surface with the
+    keyboard exclusive; a client that is not the greeter is disconnected, in the tests that the
+    grant of decision 41 brings with the greeter's port; no session lock, capture, EIS or X11
+    display is offered; the compositor exits with 0 and with 1 as its program does.
+  - The parse test of `--greeter`, beside `--drm`'s (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/lib.rs#options`).
+  - A stage of the development VM's acceptance in which greetd's greeter session starts the
+    compositor and `athanor-greeter-client`, a password typed with the dead keys of US-International
+    signs in, and `pgrep -x cosmic-comp` finds nothing from boot to the desktop (#1356); and, in the
+    change that takes cosmic-comp's session off the greeter, stages in which, before anyone signs in, Super+Alt+S makes Orca speak
+    the password field and stops it, Orca's own commands reach it through the keyboard monitor, and
+    the magnifier and the keyboard aids act.
+  - In the change that moves the greeter, its entry in `OUTSIDE_THE_LIST` of `verify.py allow-list`
+    (`scripts/verify.py#OUTSIDE_THE_LIST`) and of the crate's allow-list test changes as the grant of
+    decision 41 asks, and OS19 item 1's twelve greeter cases are drawn against this compositor from
+    then on.
+- **Owed elsewhere,** each by a revision of its own document: `doc_session.md` SN12 and SN14 (its
+  revision 5); `doc_accessibility.md` AX13, whose known limits say that the greeter runs on
+  cosmic-comp, and which gains the greeter's aids, the keyboard monitor and Super+Alt+S on this
+  compositor; `doc_first_run.md` section 1 and FR4, whose `athanor-first-run-session`, the
+  greeter's twin, runs cosmic-comp with one client too; `docs/architecture/components.toml`, the
+  compositor's entry. `doc_lock_and_prompts.md` needs none.
 
 ## 4. The toolkit
 
@@ -734,7 +829,8 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 3. The rest of the harnesses of OS9.
 4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.1, with
    the GTK4 shell unchanged on top; release 1.0 ships it as the default session of decision 28,
-   with cosmic-comp's as the second choice (ADR-0135). Its acceptance is OS19: every surface 1.0 carries
+   with cosmic-comp's as the second choice (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* the replacement is in
+   release 1.0. Its acceptance is OS19: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
@@ -748,7 +844,10 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    last, because it handles the password (AGENTS.md, "Stop and ask before editing"). *Amended
    2026-11-11 by decision 34:* the dock makes the toolkit its default once this document gains what
    OS20 asks before the dock moves, and the layout chooser, the launcher, the bar and the control centre move at the
-   same time; the greeter stays last.
+   same time; the greeter stays last. *Amended by revision 4 (OS21; maintainer decision, 2026-11-21):* the
+   greeter moves to this compositor's greeter mode with its port to the toolkit, and the grant of
+   that mode is decided with the port (decision 41). The port is a prerequisite of the change that
+   takes cosmic-comp's session off the greeter, which waits for it (ADR-0141 decision 3).
 6. In parallel with steps 4 and 5 and with the rebase to Fedora 45, on the laptop: stage 1 of
    OS10, a toolkit developers outside Athanor can build on. Its widgets, most of which step 5
    needs, pass the gates of OS8 and OS9 in the gallery; the guide and the rustdoc complete it, and
@@ -857,7 +956,7 @@ amendment's audit:
     "No fallback when the preview fails"). The own compositor becomes the image's default session before
     OS19 holds in full, in a pull request that records the evidence of each condition below.
     cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full and
-    the overview and the window switcher on Alt+Tab have come, which release 1.1 waits for (release 1.0 ships with both sessions, ADR-0135), and leaves the greeter then. The switch waits for:
+    the overview and the window switcher on Alt+Tab have come, which release 1.1 waits for (release 1.0 ships with both sessions, ADR-0135), and leaves the greeter then. *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* release 1.0 waits for them, and cosmic-comp's session leaves the greeter before 1.0 ships. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
       under the own compositor, each started by a supervisor inside the logind
@@ -1020,13 +1119,15 @@ amendment's audit:
     The overview, `athanor-overview`, which replaces cosmic-workspaces (`doc_overview.md`), is not
     an item of OS19: it follows the switch, and cosmic-workspaces' retirement goes with it, in 1.1
     (`release-1.0.md`, ADR-0135), and release 1.1 waits for it and for the window switcher on
-    Alt+Tab; release 1.0 ships without either (ADR-0135).
+    Alt+Tab; release 1.0 ships without either (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* the overview
+    and cosmic-workspaces' retirement are in release 1.0 (`doc_overview.md` OV29), and the window
+    switcher on Alt+Tab is in release 1.0 as ADR-0138 places it, so 1.0 ships with both.
     The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
     own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
     and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
     and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
     step 5 are amended to say so in the first pull request of the overview's implementation
-    (`release-1.0.md`, section 3, the work moved to 1.1). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    (`release-1.0.md`, section 3, the work moved to 1.1; *amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* it is in release 1.0). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
@@ -1659,7 +1760,7 @@ compositor and that the own compositor did not yet offer:
             frontend died without `Close` stays listed until Stop;
       - the capture of a workspace for the overview's thumbnails, through
         `ext-image-copy-capture-v1` and a source of `athanor_workspace_manager_v1` (decision 32),
-        for release 1.1.
+        for release 1.1. *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* for release 1.0, with the overview (`doc_overview.md` OV32).
 
     Apart from the bell's blink, none of these changes OS4's border or decision 31's outline. Both
     are drawn at full opacity
@@ -2106,6 +2207,39 @@ compositor and that the own compositor did not yet offer:
     take a Flatpak application's files out of reach of the file manager's drag (`doc_files.md`
     S6).
 
+41. **The greeter on this compositor with its port to Sal** (OS21; section 6, step 5; #1356;
+    ADR-0141 decisions 2 and 3; approved by the maintainer on 2026-11-21 with the pull request that
+    records it). cosmic-comp leaves the image in 1.0, and section 6, step 5 and decision 34 order
+    the greeter's port to the toolkit last. The maintainer decided on 2026-11-21:
+    - the greeter moves to this compositor with its port to Sal, in the mode of OS21, and the grant
+      that admits it to the mode's restricted protocols is decided with that port, by a revision of
+      this document; the port is a prerequisite of the change that takes cosmic-comp's session off
+      the greeter, and cosmic-comp stays in the image, running the greeter, for as long as the port
+      takes;
+    - the mode is a flag of the compositor, `--greeter <program>`, which `athanor-greeter-session`
+      runs as it runs cosmic-comp today, with no user unit, and it serves one client, the greeter;
+    - a machine the compositor cannot drive fails the greeter, and `doc_recovery.md` R1's console
+      follows greetd's failure;
+    - before login the mode serves the greeter's aids, the magnifier and the keyboard aids, with
+      Orca's keyboard monitor and Super+Alt+S (`doc_accessibility.md` AX13), each with a stage of
+      the development VM's acceptance, in the change that takes cosmic-comp's session off the
+      greeter, once it has been verified how the compositor, outside any
+      user manager, finds the `greetd` user's session bus (OS21).
+
+    Not taken now, each left to the revision that the greeter's port brings:
+    - a grant of the mode's own, to the greeter's executable in the compositor's own logind session
+      scope, read from the compositor's cgroup at start, with no allow-list line;
+    - a line of the shipped allow-list naming the greeter in a scope of fixed name, which
+      `athanor-greeter-session` would create with `systemd-run --user --scope` in the `greetd`
+      user's manager: it makes the greeter depend on that manager, which `athanor-greeter-client`
+      treats as optional, and ties the grant to a name any process of the `greetd` user can give a
+      scope;
+    - a unit form for logind's session scopes in OS4's grammar, `session-*.scope`, which would match
+      every user's session, not only the greeter's.
+
+    Not taken: the greeter under `athanor-sulphur.service`, which needs a user manager and the
+    session's units before anyone has signed in.
+
 ## 8. Risks
 
 - **Smithay has no release this year** and its main branch breaks its API; every revision bump is
@@ -2126,12 +2260,13 @@ compositor and that the own compositor did not yet offer:
   maintainer's time from the compositor, for which release 1.0 waits (decision 5).
 - **Release 1.0 waits for the compositor** (decision 5): its date follows the conditions under
   which decision 28 makes the compositor the default session, held on the 1.0 build, and the
-  full acceptance follows in 1.1 (ADR-0135); a defect of the hardware matrix found late moves
+  full acceptance follows in 1.1 (ADR-0135), amended on 2026-11-21 by revision 4 to 1.0
+  (ADR-0141 decisions 3 and 4); a defect of the hardware matrix found late moves
   it, and until then each Fedora rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
 - **Release 1.1 waits for the overview and the window switcher on Alt+Tab** (decision 28);
-  release 1.0 ships without them (ADR-0135).
+  release 1.0 ships without them (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* release 1.0 waits for the overview and ships it, and the window switcher is in release 1.0 as ADR-0138 places it, so 1.0 ships with both.
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.

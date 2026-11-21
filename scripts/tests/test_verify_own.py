@@ -91,6 +91,32 @@ class Own(unittest.TestCase):
     def test_a_listed_crate_reaching_gtk4_passes(self):
         self.assertEqual(self.problems("HEAD"), [])
 
+    def gated_style(self, bar_dependency):
+        """athanor-style reaches gtk-glue only through its `gtk` feature, on by default."""
+        self.write(
+            "style/Cargo.toml",
+            '[package]\nname = "athanor-style"\n\n[features]\ndefault = ["gtk"]\n'
+            'gtk = ["dep:gtk-glue"]\n\n[dependencies]\ngtk-glue = { version = "0.1", optional = true }\n',
+        )
+        self.write(
+            "bar/Cargo.toml",
+            '[package]\nname = "athanor-bar"\n\n[dependencies]\n'
+            f'athanor-style = {{ path = "../style"{bar_dependency} }}\n',
+        )
+        return verify.toolkit_crates(self.root)[0]
+
+    def test_a_dependency_without_its_default_features_does_not_reach_a_toolkit_they_enable(self):
+        hits = self.gated_style(", default-features = false")
+        self.assertNotIn("athanor-bar", hits)
+        self.assertIn("athanor-style", hits)
+
+    def test_a_dependency_with_its_default_features_reaches_the_toolkit(self):
+        self.assertIn("athanor-bar", self.gated_style(""))
+
+    def test_a_feature_asked_of_a_dependency_reaches_the_toolkit(self):
+        hits = self.gated_style(', default-features = false, features = ["gtk"]')
+        self.assertIn("athanor-bar", hits)
+
     def test_a_dev_dependency_does_not_count(self):
         self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root)[0])
 

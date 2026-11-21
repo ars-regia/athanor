@@ -6707,15 +6707,43 @@ def diff_hunks(root, base):
     return out
 
 
-def moved_ranges(ranges, hunks):
+# A backtick span that may cite lines: `path:120`, `path:3, 9-12`, or the short `:120`.
+CITATION_SPAN = re.compile(r"`([^`\s]*):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*`")
+
+
+def without_citation_numbers(line, tracked):
+    """LINE with the numbers of its citations blanked: a span whose path is a tracked file, and a short
+    `:N` that follows such a span on the line. Any other `:N` (`fedora:43`, `quay.io:443`) is text.
+    A `:N` after a tracked file is read as that file's citation, as the grammar says, so a change of
+    such a span alone (a port after `src/x.rs:120`) is not an edit."""
+    cited = False
+
+    def blank(m):
+        nonlocal cited
+        if m[1] and not any(f == m[1] or f.endswith("/" + m[1]) for f in tracked):
+            return m[0]
+        if not m[1] and not cited:
+            return m[0]
+        cited = True
+        return f"`{m[1]}:N`"
+
+    return CITATION_SPAN.sub(blank, line)
+
+
+def moved_ranges(ranges, hunks, same=None):
     """The ranges (first, last) of a citation, as the lines of the file are numbered after the
     HUNKS of `diff_hunks`; None when a hunk edited or removed one of the cited lines, which a reader
-    must place again."""
+    must place again. `same(old, new)`, given the number of a cited line before and after, says that
+    an edit that kept the line count left the line as it was: a line that only renumbers citations."""
     def shifted(n):
         return n + sum(new - old for first, old, new in hunks if (first + old - 1 if old else first) < n)
 
-    if any(old and first <= last and first + old - 1 >= start for start, last in ranges
-           for first, old, _ in hunks):
+    def placed(first, old, new, start, last):
+        return bool(same) and old == new and all(
+            same(n, shifted(n)) for n in range(max(start, first), min(last, first + old - 1) + 1))
+
+    if any(old and first <= last and first + old - 1 >= start and not placed(first, old, new, start, last)
+           for start, last in ranges for first, old, new in hunks):
         return None
     return [(shifted(start), shifted(last)) for start, last in ranges]
 
@@ -7009,7 +7037,7 @@ def symbol_definitions(path, body):
 
 
 def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None,
-                      upstream=None):
+                      base_file=None, upstream=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -7058,7 +7086,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch.
+    the limit: every citation on an edited line is skipped, also one the edit did not touch. A cited
+    line of a Markdown file that the change edited without adding or removing lines, and whose only
+    difference from the revision is the numbers of its own citations (`base_file(path)` is the file
+    there), is not an edit.
 
     A citation by name is `path#symbol`, or `#symbol` for the file named last (a colour, `#e62d42`, is
     none unless the last file defines the symbol, `#add`; an `x#y` whose `x` is no file, a flake
@@ -7196,7 +7227,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
             if not symbol and line in unchanged and path in hunks:
-                new = moved_ranges(ranges, hunks[path])
+                before = base_file(path).split("\n") if base_file else []
+                new = moved_ranges(ranges, hunks[path], lambda old, now: path.endswith(".md")
+                                   and old <= len(before) and now <= len(rows)
+                                   and without_citation_numbers(before[old - 1], tracked)
+                                   == without_citation_numbers(rows[now - 1], tracked))
                 if new is None:
                     out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
                                 "that this change edited or removed: place it again"))
@@ -7311,12 +7346,17 @@ def check_line_citations():
                                capture_output=True, text=True)
         return shown.stdout if shown.returncode == 0 else ""  # a document the change adds has no base text
 
+    def base_file(path):
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{path}"], capture_output=True, text=True)
+        return shown.stdout if shown.returncode == 0 else ""  # a file the change adds has no base text
+
     seen = set()
     for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
                        ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
         for _, path, spec, token, problem in citation_findings(
-                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else ""):
+                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else "",
+                base_file=base_file):
             if spec.startswith("#"):
                 continue  # a citation by name, which symbol-citations checks
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
@@ -7420,19 +7460,50 @@ def manifest_dependencies(manifest, renames, kinds):
     return out
 
 
-def dev_only_dependencies(manifest, renames):
-    """The package names MANIFEST takes as dev-dependencies only."""
-    return (manifest_dependencies(manifest, renames, ("dev-dependencies",))
-            - manifest_dependencies(manifest, renames, ("dependencies", "build-dependencies")))
+def built_dependencies(manifests, workspace_deps, root):
+    """{member: the package names of its dependencies and build-dependencies that are built}, for the
+    members that ROOT builds with its default features: an optional dependency is built when a
+    feature turns it on (enabled_dependencies), and a member gets the features its dependents ask
+    for and its defaults unless they all say `default-features = false`. WORKSPACE_DEPS holds the
+    [workspace.dependencies] tables, for `workspace = true`."""
+    asked = {root: (set(), True)}  # member -> (features requested, defaults requested)
+    built = {}
+    changed = True
+    while changed:
+        changed = False
+        for name, (features, defaults) in list(asked.items()):
+            on, sub = enabled_dependencies(manifests[name], features, defaults)
+            built[name] = set()
+            for _, table in dependency_tables(manifests[name], ("dependencies", "build-dependencies")):
+                for key, dep in table.items():
+                    dep = dep if isinstance(dep, dict) else {}
+                    inherited = workspace_deps.get(key, {}) if dep.get("workspace") else {}
+                    if dep.get("optional") and key not in on:
+                        continue
+                    package = dep.get("package") or inherited.get("package") or key
+                    built[name].add(package)
+                    if package in manifests:
+                        before = asked.get(package, (set(), False))
+                        default = ((inherited.get("default-features", True) or dep.get("default-features", False))
+                                   if dep.get("workspace") else dep.get("default-features", True))
+                        wanted = (before[0] | {*dep.get("features", []), *inherited.get("features", []), *sub[key]},
+                                  before[1] or default)
+                        if wanted != asked.get(package):
+                            asked[package] = wanted
+                            changed = True
+    return built
 
 
 def toolkit_crates(root=None):
     """({crate: the refused toolkits it reaches}, [crates no lockfile holds]), for every crate
     built from the repository, athanor-* or not (xdg-desktop-portal-athanor, calmo-cosmic-theme),
     over every manifest and lockfile of the repository but the vendored and packaged ones. A
-    lockfile holds the optional dependencies of every feature, so a crate counts while any
-    feature reaches a toolkit; the dev-dependencies of a member are left out, as they are not
-    shipped (toolkit-boundary does the same), and a registry crate's never reach the lockfile.
+    lockfile holds the optional dependencies of every feature, so the edges of a member of the
+    repository are read from its manifest instead (built_dependencies): a crate counts while the
+    features it builds with reach a toolkit, `default-features = false` and an optional dependency
+    left off included. A registry crate's features cannot be read, and all its edges count. The
+    dev-dependencies of a member are left out, as they are not shipped (toolkit-boundary does the
+    same), and a registry crate's never reach the lockfile.
     A crate no lockfile holds counts when it names a toolkit directly, and is returned in the
     second list otherwise, as its transitive dependencies cannot be read. A vendored crate that a
     lockfile holds without a source, patched in by path (`[patch.crates-io]`), is no root of its
@@ -7441,10 +7512,11 @@ def toolkit_crates(root=None):
     listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml", "*Cargo.lock"],
                             capture_output=True, text=True, check=True).stdout.split("\0")
     paths = [p for p in listed if p and not third_party_cargo(p)]
-    manifests, renames = {}, {}
+    manifests, renames, workspace_deps = {}, {}, {}
     for path in (p for p in paths if p.endswith("Cargo.toml")):
         data = tomllib.loads(read(root / path))
         for key, dep in data.get("workspace", {}).get("dependencies", {}).items():
+            workspace_deps[key] = dep if isinstance(dep, dict) else {}
             if isinstance(dep, dict) and dep.get("package"):
                 renames[key] = dep["package"]
         if "package" in data:
@@ -7457,20 +7529,20 @@ def toolkit_crates(root=None):
         for package in packages:
             by_name.setdefault(package["name"], []).append(package)
 
-        def dependencies(package):
+        def dependencies(package, built):
             member = "source" not in package and package["name"] in manifests
-            skip = dev_only_dependencies(manifests[package["name"]], renames) if member else set()
             for dep in package.get("dependencies", []):
                 name, *version = dep.split(" ")
-                if name not in skip:
+                if not member or package["name"] not in built or name in built[package["name"]]:
                     yield from (c for c in by_name.get(name, []) if not version or c["version"] == version[0])
 
         for package in packages:
             if "source" in package or package["name"] not in manifests:
                 continue
+            built = built_dependencies(manifests, workspace_deps, package["name"])
             seen, stack = set(), [package]
             while stack:
-                for dep in dependencies(stack.pop()):
+                for dep in dependencies(stack.pop(), built):
                     key = (dep["name"], dep["version"])
                     if key not in seen:
                         seen.add(key)
