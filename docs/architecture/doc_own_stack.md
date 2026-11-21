@@ -1,6 +1,6 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 4 (2026-11-21), approved by the maintainer on 2026-11-21 with the pull request that records it.** Revision 4 adds OS21, the greeter's mode, in which greetd's greeter session runs on this compositor instead of cosmic-comp once the greeter has moved to Sal, before cosmic-comp leaves the image (#1356; ADR-0141 decisions 2 and 3), and decision 41, which records the maintainer's choices of 2026-11-21: the grant that admits the greeter to the mode is decided with the greeter's port to Sal, which becomes a prerequisite of the change that takes cosmic-comp's session off the greeter, and before login the mode serves the greeter's aids, Orca's keyboard monitor and Super+Alt+S once it is verified how the compositor finds the `greetd` user's bus. It amends the opening of OS19, the greeter's clause of OS19 item 1 and section 6, step 5, and moves to release 1.0, by ADR-0141 decisions 3 and 4, what revision 3 placed in release 1.1: the own compositor replacing cosmic-comp, cosmic-comp's session leaving the greeter and cosmic-workspaces' retirement (the list of revision 3's changes, OS5, OS19's opening, section 6 step 4, decision 28 and its note on the overview, and section 8). Its rules carry "(revision 4)" or "(maintainer decision, 2026-11-21)". Revision 3 was decided by the maintainer on 2026-11-05 ([ADR-0135](../decisions/0135-faster-road-to-1-0.md)) and approved with the pull request that records it. Revision 3 changes what release 1.0 waits for: 1.0 ships the own compositor as the default session of decision 28, with cosmic-comp's session as the second choice, and OS19 in full, the overview, the window switcher on Alt+Tab and cosmic-workspaces' retirement are release 1.1's. Revision 2 was approved by the maintainer on 2026-10-23 (#755). Revision 1 was approved by
+Status: **revision 4 (2026-11-21), approved by the maintainer on 2026-11-21 with the pull request that records it.** Revision 4 adds OS21, the greeter's mode, in which greetd's greeter session runs on this compositor instead of cosmic-comp once the greeter has moved to Sal, before cosmic-comp leaves the image (#1356; ADR-0141 decisions 2 and 3), and decision 41, which records the maintainer's choices of 2026-11-21: the grant that admits the greeter to the mode is decided with the greeter's port to Sal, which becomes a prerequisite of the change that takes cosmic-comp's session off the greeter, and before login the mode serves the greeter's aids, Orca's keyboard monitor and Super+Alt+S once it is verified how the compositor finds the `greetd` user's bus. It amends the opening of OS19, the greeter's clause of OS19 item 1 and section 6, step 5, and moves to release 1.0, by ADR-0141 decisions 3 and 4, what revision 3 placed in release 1.1: the own compositor replacing cosmic-comp, cosmic-comp's session leaving the greeter and cosmic-workspaces' retirement (the list of revision 3's changes, OS5, OS19's opening, section 6 step 4, decision 28 and its note on the overview, section 8 and its line on what release 1.1 waits for, and decision 33's capture of a workspace for the overview's thumbnails). Its rules carry "(revision 4)" or "(maintainer decision, 2026-11-21)". Revision 3 was decided by the maintainer on 2026-11-05 ([ADR-0135](../decisions/0135-faster-road-to-1-0.md)) and approved with the pull request that records it. Revision 3 changes what release 1.0 waits for: 1.0 ships the own compositor as the default session of decision 28, with cosmic-comp's session as the second choice, and OS19 in full, the overview, the window switcher on Alt+Tab and cosmic-workspaces' retirement are release 1.1's. Revision 2 was approved by the maintainer on 2026-10-23 (#755). Revision 1 was approved by
 the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
@@ -1126,7 +1126,7 @@ amendment's audit:
     and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
     and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
     step 5 are amended to say so in the first pull request of the overview's implementation
-    (`release-1.0.md`, section 3, the work moved to 1.1). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    (`release-1.0.md`, section 3, the work moved to 1.1; *amended 2026-11-21 by revision 4:* it is in release 1.0). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
@@ -1758,7 +1758,7 @@ compositor and that the own compositor did not yet offer:
             frontend died without `Close` stays listed until Stop;
       - the capture of a workspace for the overview's thumbnails, through
         `ext-image-copy-capture-v1` and a source of `athanor_workspace_manager_v1` (decision 32),
-        for release 1.1.
+        for release 1.1. *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* for release 1.0, with the overview (`doc_overview.md` OV32).
 
     Apart from the bell's blink, none of these changes OS4's border or decision 31's outline. Both
     are drawn at full opacity
@@ -2261,7 +2261,7 @@ compositor and that the own compositor did not yet offer:
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
 - **Release 1.1 waits for the overview and the window switcher on Alt+Tab** (decision 28);
-  release 1.0 ships without them (ADR-0135).
+  release 1.0 ships without them (ADR-0135). *Amended 2026-11-21 by revision 4 (ADR-0141 decisions 3 and 4):* release 1.0 waits for the overview and ships it.
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.
