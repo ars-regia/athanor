@@ -800,9 +800,9 @@ pub enum Event {
     /// The compositor configured a window that takes its size ([`Ui::sized_by_compositor`])
     /// to another one: the size the window takes, in logical pixels, which is the one configured
     /// but never less than its widgets' size, and along an axis configured as 0 (left to the
-    /// window) the size it has. It comes before the window is drawn at that size, so
-    /// that the application lays its widgets out for it: a sidebar and a page that collapse into
-    /// one column below a width.
+    /// window) the size it has. It also follows a change of scale that bounds the size again. It
+    /// comes before the window is drawn at that size, so that the application lays its widgets
+    /// out for it: a sidebar and a page that collapse into one column below a width.
     #[non_exhaustive]
     Resized {
         /// The window's width, never 0.

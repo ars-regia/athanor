@@ -1680,8 +1680,12 @@ fn settle(
 }
 
 /// [`settle`] for a window whose scale changed to `scale`: the size it fills, `was`, bounded
-/// again to what the renderer accepts at the new scale. A window that fills nothing stays so.
+/// again to what the renderer accepts at the new scale. A window that fills nothing, as one not
+/// configured yet, stays so and tells its application nothing.
 fn resettle(ui: &mut Ui, scale: f32, was: (f32, f32)) -> ((f32, f32), Option<Event>) {
+    if was == (0.0, 0.0) {
+        return (was, None);
+    }
     let axis = |n: f32| std::num::NonZeroU32::new(n as u32);
     settle(ui, scale, was, (axis(was.0), axis(was.1)))
 }
@@ -4765,5 +4769,14 @@ mod tests {
         assert!(matches!(resized, Some(Event::Resized { width: 21_845, height: 21_845 })));
         ui.configured = filled(&ui, size);
         assert!(layout(&mut ui, 3.0).is_ok());
+    }
+
+    /// The preferred scale usually comes before the first configure: nothing to tell yet.
+    #[test]
+    fn a_scale_before_the_first_configure_tells_the_application_nothing() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        assert_eq!(resettle(&mut ui, 1.5, (0.0, 0.0)), ((0.0, 0.0), None));
     }
 }
