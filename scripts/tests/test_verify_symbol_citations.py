@@ -256,6 +256,11 @@ class Kinds(unittest.TestCase):
         self.assertEqual(lines("Cargo.toml", "workspace.dependencies.zbus"), [(9, 9)])
         self.assertEqual(lines("Cargo.toml", "members"), [])
 
+    def test_an_invalid_toml_file_is_a_finding(self):
+        out = messages("The `a` is in `bad.toml#a`.", {"bad.toml": "[a\nk = 1\n"})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`bad.toml#a`: the file does not parse as TOML", out[0])
+
     def test_yaml_jobs_and_named_steps(self):
         path = ".github/workflows/ci.yml"
         self.assertEqual(lines(path, "jobs.build"), [(4, 12)])

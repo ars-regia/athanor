@@ -6885,6 +6885,10 @@ def symbol_definitions(path, body):
     if path.endswith((".sh", ".bash")) or re.match(r"#!.*\b(?:ba|da|k|z)?sh\b|# shellcheck shell=", head):
         return shell_definitions(rows)
     if path.endswith(".toml"):
+        try:
+            tomllib.loads(body)
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"does not parse as TOML: {e}") from e
         return toml_definitions(rows)
     if path.endswith((".yml", ".yaml")):
         return yaml_definitions(body)
