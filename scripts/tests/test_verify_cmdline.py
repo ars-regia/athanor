@@ -62,6 +62,17 @@ class Cmdline(unittest.TestCase):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 zswap.compressor=zstd")
         self.assertTrue(any("zswap.compressor=zstd" in p for p in self.problems()))
 
+    def test_a_security_parameter_is_rejected_bare_or_with_any_value(self):
+        for parameter in ["selinux=0", "enforcing=0", "lsm=yama", "init=/bin/sh", "rd.break", "rd.break=pre-mount", "cfi=off"]:
+            with self.subTest(parameter=parameter):
+                self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", f"page_alloc.shuffle=1 {parameter}")
+                self.assertTrue(any(f"{parameter} -> " in p for p in self.problems()), self.problems())
+                self.edit("forge/specs/azoth/cmdline", f"page_alloc.shuffle=1 {parameter}", "page_alloc.shuffle=1")
+
+    def test_a_name_that_only_starts_with_a_rejected_bare_one_passes(self):
+        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 rd.breakpoint xselinux=0 rd.break.x")
+        self.assertEqual(self.problems(), [])
+
     def test_a_parameter_that_only_contains_a_rejected_one_passes(self):
         self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 xiommu=pt not_iommu=pt")
         self.assertEqual(self.problems(), [])

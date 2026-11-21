@@ -3849,7 +3849,8 @@ def check_allow_list():
 # --------------------------------------------------------------------------- #
 
 # Parameters the kernel profile decided against (docs/architecture/doc_kernel_profile.md,
-# "Command line"). A name ending in a dot is a prefix. profile.toml is the single source of
+# "Command line"). A name ending in a dot or an equals sign is a prefix; any other name is the
+# parameter bare or with a value (`rd.break` and `rd.break=pre-mount`). profile.toml is the single source of
 # the base command line and kernel_profile.py check holds its generated files to it; this
 # keeps a contradicting parameter out of the manifest and of the variant files beside it.
 REJECTED_PARAMETERS = {
@@ -3860,6 +3861,12 @@ REJECTED_PARAMETERS = {
     "amd_iommu=on": "not a parameter of the amd_iommu driver, which logs it as unknown",
     "lam=on": "not an x86 parameter",
     "arm64.mte=on": "not an x86 parameter",
+    "selinux=": "switches SELinux off at boot, against D20 and TM7 (section 8 of doc_kernel_profile.md)",
+    "enforcing=": "puts SELinux in permissive mode at boot, against D20 and TM7 (section 8 of doc_kernel_profile.md)",
+    "lsm=": "replaces the compiled-in security module order and can omit SELinux, IPE and Yama (section 8 of doc_kernel_profile.md)",
+    "init=": "replaces PID 1 with another program, outside the image's trust chain (section 8 of doc_kernel_profile.md)",
+    "rd.break": "stops the initramfs at a root shell, against rd.shell=0 (section 8 of doc_kernel_profile.md)",
+    "cfi=": "weakens or disables kCFI at boot; cfi=warn is for one diagnostic boot only (forge/specs/azoth/AGENTS.md)",
 }
 
 # The files that carry the kernel command line: the boot line of azoth and every kargs.d
@@ -3890,7 +3897,11 @@ def cmdline_problems(root=None):
     for site, parameters in found.items():
         for parameter in parameters:
             for rejected, why in REJECTED_PARAMETERS.items():
-                if parameter == rejected or (rejected.endswith(".") and parameter.startswith(rejected)):
+                if rejected.endswith((".", "=")):
+                    matched = parameter.startswith(rejected)
+                else:
+                    matched = parameter == rejected or parameter.startswith(rejected + "=")
+                if matched:
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
 
