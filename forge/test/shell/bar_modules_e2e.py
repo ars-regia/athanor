@@ -40,6 +40,7 @@ from bar_e2e import (  # noqa: E402
     wait_for,
 )
 from gi.repository import Gio, GLib  # noqa: E402
+from input_method_check import capture, capture_after  # noqa: E402
 
 # Typed into the password entries. Searched for in every written file at the end.
 PASSWORDS = ["correct horse battery", "staple-9-orbit"]
@@ -279,9 +280,10 @@ def network(ctx):
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
     )
     check("the wired state is shown", bool(labelled(app, Atspi, "label", "Wired: connected")))
-    # The rows are rebuilt when the signal icon of a network changes, and kept when its
-    # strength moves inside the same icon: a rebuild on every update would take the
-    # keyboard focus off a row. A rebuilt row is a new accessible, at a new path.
+    # A network's new signal icon is set on its row in place, and a strength inside the same icon
+    # changes nothing: a rebuild would take the keyboard focus off a row, and a rebuilt row is a
+    # new accessible, at a new path. So the row keeps its path, and what the person sees is read
+    # from the output: the capture changes with the icon and stays with a strength inside it.
     def lab_row():
         found = buttons(app, Atspi, "Athanor Lab, connected")
         return found[0].path if found else None
@@ -292,15 +294,28 @@ def network(ctx):
             (ACCESS_POINT, "Strength", GLib.Variant("y", strength)),
         )
 
+    # The rig's theme draws the excellent and the good icon alike, so the strengths below are 82,
+    # 40 and 50: the excellent icon, then the ok icon twice.
     shown = lab_row()
-    set_strength("lab", 60)
-    check("a new signal icon rebuilds the rows", wait_for(lambda: lab_row() not in (None, shown), 5))
-    shown = lab_row()
-    set_strength("lab", 70)
+    picture = capture("bar-modules-network-0")
+    set_strength("lab", 40)
+    redrawn = capture_after("bar-modules-network-1", picture)
+    check("a new signal icon is drawn on the row", redrawn is not None)
+    check("and the row stays the same accessible", shown is not None and lab_row() == shown)
+    set_strength("lab", 50)
     time.sleep(1)
-    check("a strength inside the same icon keeps them", shown is not None and lab_row() == shown)
+    check("a strength inside the same icon keeps the row", lab_row() == shown)
+    check(
+        "and the picture",
+        redrawn is not None and capture("bar-modules-network-2") == redrawn,
+    )
     set_strength("lab", 82)
-    check("the strength back, the rows follow", wait_for(lambda: lab_row() not in (None, shown), 5))
+    check(
+        "the strength back, the icon follows on the same row",
+        redrawn is not None
+        and capture_after("bar-modules-network-3", redrawn) is not None
+        and lab_row() == shown,
+    )
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
     check(
