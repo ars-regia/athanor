@@ -9,9 +9,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 defaults:
   run:
@@ -22,6 +20,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: bots
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       # A bots App installation token, not the GITHUB_TOKEN: it may not open pull requests,
       # and PRs it opened would start no checks. The action fails the job when the App id or the
