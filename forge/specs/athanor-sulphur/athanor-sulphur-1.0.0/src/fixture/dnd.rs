@@ -551,9 +551,10 @@ impl Party {
         popup.grab(&seat, serial);
         self.local.client.configure = None;
         surface.commit();
-        self.local.pump(run, "the popup is configured", |client, _| {
-            client.configure.is_some()
-        });
+        self.local
+            .pump(run, "the popup is configured", |client, _| {
+                client.configure.is_some()
+            });
         xdg.ack_configure(self.local.client.configure.take().expect("a configure"));
         let (buffer, _) = self.local.buffer(&shm, 40, 40, [0, 0, 0, 255]);
         surface.attach(Some(&buffer), 0, 0);
@@ -744,7 +745,10 @@ fn the_icon_moves_by_its_offsets() {
     from.local.roundtrip(&mut run);
     let shown = frame(&mut run);
     assert_eq!(at(&shown, 691, 481), RED, "moved by the attach's offset");
-    assert!(background(&at(&shown, 725, 515)), "off the pointer's corner");
+    assert!(
+        background(&at(&shown, 725, 515)),
+        "off the pointer's corner"
+    );
     release(&mut run);
 
     let serial = from.press(&mut run);
