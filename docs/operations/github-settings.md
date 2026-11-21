@@ -340,3 +340,27 @@ A tag on the right commit with a forged Release at it is no recovery case: `gith
 publishes only on a Release that is this promotion's approved one exactly (title, notes hash,
 target, no prerelease, `latest`) and whose every other asset is a signed evidence bundle that
 verifies for that tag and commit, and refuses any other, naming the recovery.
+
+**Recovery from a `github-release` job refused with HTTP 403.** The job's `gh release create`
+can answer 403 "Resource not accessible by integration" although the job token shows
+`Contents: write` (run 44944210948, build run 44614591709); the cause is not known and
+[#1442](https://github.com/ars-regia/athanor/issues/1442) tracks it. The promotion itself is
+done: `:stable` has moved and the approved bundle is on the run. The maintainer publishes the
+Release from their own machine, in a checkout of `iso-v0` with `gh` signed in and `cosign` on
+`PATH`, with the promotion run and the build run it promoted as placeholders:
+
+```sh
+gh run download <promotion run> -R ars-regia/athanor -n promotion-<build run> -D approved
+bash system/evidence-bundle.sh verify-dir approved approved
+GITHUB_REPOSITORY=ars-regia/athanor GITHUB_SERVER_URL=https://github.com \
+  GITHUB_RUN_ID=<promotion run> RUN_ID=<build run> \
+  bash system/github-release.sh publish approved
+```
+
+The artifact is named `promotion-<build run>` (the `Keep the bundle on GitHub` step of
+`.github/workflows/promote-stable.yml`). `verify-dir` checks the bundle against the workflow's
+keyless signature (`system/evidence-bundle.sh`); `publish` checks that the bundle is this
+promotion run's and that the approved choice still holds, then publishes the Release with the
+job's deterministic asset `evidence-<build run>-<promotion run>.tar`
+(`system/github-release.sh`). Do not skip `verify-dir`: `publish` relies on it. The Release is
+then authored by the maintainer, not by `github-actions[bot]`.
