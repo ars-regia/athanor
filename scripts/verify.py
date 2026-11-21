@@ -6975,6 +6975,14 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         """NAME is a tracked file or the end of some tracked files' paths."""
         return name in suffixes or bool(crate and f"{crate}/{name}" in known)
 
+    def defines(path, symbol):
+        """The file PATH holds a definition spelled SYMBOL."""
+        try:
+            return path is not None and any(symbol in names for names, _, _ in symbol_definitions(
+                path, read_file(path)) or ())
+        except ValueError:
+            return False
+
     def counts_as_named(name, crate):
         """NAME is a file of the repository, or code outside it that the document cites by a relative
         path (`glib/gmain.c`), whose lines a bare `:N` may follow; an absolute host path
@@ -6994,10 +7002,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
-            if not m and not COLOUR.fullmatch(span.group(1)):
+            if not m:
                 m = SYMBOL_CITATION.fullmatch(span.group(1))
-                if m and m[1] and not (names_a_file(m[1], crate) or names_a_gone_file(m[1])):
-                    m = None  # `nixpkgs#cosign`, `.#image`: a flake reference, not a file
+                if m and (not (names_a_file(m[1], crate) or names_a_gone_file(m[1])) if m[1] else
+                          COLOUR.fullmatch(span.group(1)) and not defines(last, m[2].strip())):
+                    m = None  # `nixpkgs#cosign`, `.#image`: a flake reference; `#e62d42`: a colour
             if not m:
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
                 named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))

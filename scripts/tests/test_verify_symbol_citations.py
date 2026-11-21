@@ -202,6 +202,15 @@ class Forms(unittest.TestCase):
         self.assertIn("`#grant` cites the file named before it on its line", out[0])
         self.assertEqual(messages("`glib/gmain.c:3`, then `#grant` and `:5`.", lines_kept={}), [])
 
+    def test_a_symbol_written_like_a_colour_is_one_when_its_file_defines_it(self):
+        extra = {"src/x.rs": RUST + "\nfn add() {}\nfn cafe() {}\n"}
+        self.assertEqual(messages("The `add` of `src/x.rs`, at `#add`.", extra), [])
+        out = messages("The `grant` of `src/x.rs`, at `#add`.", extra)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`src/x.rs#add` does not hold `grant`", out[0])
+        self.assertEqual(messages("`src/x.rs` has no `add` at `#add` or `#cafe`."), [])
+        self.assertEqual(messages("Text `#add` and `#cafe`."), [])
+
     def test_a_file_with_no_symbols_cannot_be_cited_by_name(self):
         out = messages("The `ExecStart` is in `unit.service#Service`.")
         self.assertEqual(len(out), 1, out)
