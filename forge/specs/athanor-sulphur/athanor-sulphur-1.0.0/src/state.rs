@@ -311,6 +311,9 @@ pub struct State {
 #[derive(Debug, Default)]
 pub struct GrabSerials {
     pub button: Option<(Serial, ClientId)>,
+    /// The last button press and its button, until that button is released: a drag names a
+    /// press still held (`dnd.rs`).
+    pub held_button: Option<(Serial, u32)>,
     pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
@@ -2269,6 +2272,7 @@ mod tests {
         let s = Serial::from;
         let serials = GrabSerials {
             button: Some((s(7), b.clone())),
+            held_button: None,
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
             touch: Some((s(10), b.clone())),

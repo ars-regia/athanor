@@ -90,8 +90,8 @@ fn requester(source: &dyn Any) -> Option<ClientId> {
 
 impl WaylandDndGrabHandler for State {
     /// Smithay has checked that `serial` is the press or the touch point the seat's grab holds;
-    /// the drag also needs it sent to the client that asks, as a move does (`window_grab`), and
-    /// no lock. A drag refused is cancelled.
+    /// the drag also needs it sent to the client that asks, as a move does (`window_grab`), still
+    /// held, and no lock. A drag refused is cancelled.
     fn dnd_requested<S: Source>(
         &mut self,
         source: S,
@@ -104,7 +104,7 @@ impl WaylandDndGrabHandler for State {
             GrabType::Pointer => self.grab_serials.clicked(serial, &client),
             GrabType::Touch => self.grab_serials.touched(serial, &client),
         });
-        if self.lock.is_some() || !own {
+        if self.lock.is_some() || !own || !self.held(serial, type_) {
             source.cancel();
             return;
         }
@@ -167,6 +167,23 @@ impl DndGrabHandler for State {
 }
 
 impl State {
+    /// Whether the press or the touch point `serial` names is still held: its button not
+    /// released, or its finger not lifted. A popup's grab keeps the serial of the press that
+    /// opened it past the release, and a drag started with that serial is then refused.
+    fn held(&self, serial: Serial, type_: GrabType) -> bool {
+        match type_ {
+            GrabType::Pointer => self
+                .grab_serials
+                .held_button
+                .is_some_and(|(pressed, _)| pressed == serial),
+            GrabType::Touch => self
+                .seat
+                .get_touch()
+                .and_then(|touch| touch.grab_start_data())
+                .is_some_and(|start| self.touch_at(start.slot).is_some()),
+        }
+    }
+
     /// The drag icon, and where its surface goes: at the touch point the drag follows, or at
     /// the pointer.
     pub(crate) fn drag_icon(&self) -> Option<(WlSurface, Point<i32, Logical>)> {
