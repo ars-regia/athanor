@@ -283,7 +283,7 @@ async fn our_session(query: &Connection) -> zbus::Result<Option<OwnedObjectPath>
     let kind = session.kind().await?;
     let (owner, _) = session.user().await?;
     // The uid the bus took from the socket: `/proc/self` belongs to root once the process is
-    // not dumpable, as the lock makes itself before this thread starts.
+    // not dumpable, as the lock makes itself once Sal has connected, while this thread runs.
     let me = query
         .unique_name()
         .ok_or_else(|| zbus::Error::Failure("the connection has no unique name".into()))?;

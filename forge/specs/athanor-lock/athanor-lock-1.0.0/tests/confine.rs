@@ -1,8 +1,8 @@
 //! The lock confines itself only while it has one thread (LP15, plan decision M3). A binary
 //! without libtest's harness, whose `main` is the process's only thread: with a second thread
 //! alive the confinement is refused and nothing is applied; once that thread has gone it is
-//! applied, writes leave only the runtime directory, no core file can be written, and the
-//! process is not dumpable.
+//! applied, writes leave only the runtime directory and no core file can be written. The process
+//! stays dumpable, for Sulphur to identify it at connect; `main.rs` tests the change after.
 
 use std::fs;
 use std::io::ErrorKind;
@@ -92,8 +92,8 @@ fn main() {
         "no core file may be written, by any path"
     );
     assert!(
-        !nix::sys::prctl::get_dumpable().expect("get_dumpable"),
-        "the confined process is not dumpable"
+        nix::sys::prctl::get_dumpable().expect("get_dumpable"),
+        "the confined process stays dumpable until Sal has connected"
     );
     println!("confine: ok");
 }
