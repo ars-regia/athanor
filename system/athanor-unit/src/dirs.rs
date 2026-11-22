@@ -56,12 +56,7 @@ impl AsFd for CheckedNode {
 /// created and opened relative to that descriptor, and is never a link.
 pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
     let dir = runtime.join(name);
-    let refuse = |why: String| {
-        io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!("{} {why}", dir.display()),
-        )
-    };
+    let refuse = |why: String| refused(&dir, &why);
     if Path::new(name).file_name() != Some(OsStr::new(name)) {
         return Err(refuse("is not one name in its directory".to_owned()));
     }
@@ -133,7 +128,8 @@ pub fn existing<T>(paths: &[&Path], open: fn(&Path) -> io::Result<T>) -> Vec<T> 
             Ok(fd) => Some(fd),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => {
-                tracing::warn!(%error, path = %path.display(), "not granted: it fails the check");
+                let path = crate::text::line(&path.display().to_string(), usize::MAX);
+                tracing::warn!(%error, %path, "not granted: it fails the check");
                 None
             }
         })
@@ -515,6 +511,26 @@ mod tests {
                 reached.display(),
                 real.display()
             )
+        );
+    }
+
+    #[test]
+    fn a_private_dir_refusal_is_one_line() {
+        let runtime = runtime("private-newline");
+        let _removed = Removed(runtime.clone());
+        // A runtime path holding a newline and a journal priority, its directory of mode 0755.
+        let inner = runtime.join("a\n<2>b");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&inner)
+            .expect("inner");
+        fs::create_dir(inner.join("d")).expect("d");
+        fs::set_permissions(inner.join("d"), fs::Permissions::from_mode(0o755)).expect("chmod");
+        let message = private_dir(&inner, "d").expect_err("mode 0755").to_string();
+        assert!(!message.contains('\n'), "{message:?}");
+        assert!(
+            message.contains("a<2>b/d does not have mode 0700"),
+            "{message:?}"
         );
     }
 
