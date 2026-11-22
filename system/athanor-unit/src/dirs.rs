@@ -464,6 +464,31 @@ mod tests {
     }
 
     #[test]
+    fn a_link_in_a_directory_another_user_owns_is_refused() {
+        // The holder is 0700, so only its owner decides: the user's own as a user, and, run as
+        // root (the shell rig), handed to nobody, so that a dropped uid test turns this red.
+        let runtime = runtime("other-owner");
+        let _removed = Removed(runtime.clone());
+        let (real, link) = (runtime.join("real"), runtime.join("link"));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&real)
+            .expect("real");
+        fs::create_dir(real.join("d")).expect("mkdir");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        if nix::unistd::geteuid().is_root() {
+            let nobody = (nix::unistd::Uid::from_raw(65534), nix::unistd::Gid::from_raw(65534));
+            // Not checkable where nobody is not mapped (a user namespace that maps root alone).
+            if nix::unistd::chown(&runtime, Some(nobody.0), Some(nobody.1)).is_err() {
+                eprintln!("skipped: cannot hand the holder to nobody here");
+                return;
+            }
+        }
+        let error = owned_dir(&link.join("d")).expect_err("a link in a directory root does not own");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+    }
+
+    #[test]
     fn a_link_in_an_intermediate_component_is_refused() {
         let runtime = runtime("intermediate");
         let _removed = Removed(runtime.clone());
