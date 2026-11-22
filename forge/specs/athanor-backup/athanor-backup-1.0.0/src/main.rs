@@ -64,7 +64,7 @@ fn run(args: &[OsString]) -> Result<()> {
     if !nix::unistd::geteuid().is_root() {
         bail!(
             "snapshots belong to root: run it as `sudo athanor-backup {}`",
-            args[0].to_string_lossy()
+            words.iter().flatten().copied().collect::<Vec<_>>().join(" ")
         );
     }
     match (words.as_slice(), args) {
