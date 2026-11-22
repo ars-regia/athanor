@@ -402,6 +402,29 @@ class Moved(unittest.TestCase):
     def test_a_document_line_the_change_wrote_is_not_read_through_the_hunks(self):
         self.assertEqual(self.found(self.TEXT, {"src/x.rs": [(0, 0, 3)]}, base=""), [])
 
+    def test_a_citation_that_moved_on_a_line_the_change_reworded_fails(self):
+        base = self.TEXT
+        text = "The line `grant`, reworded, is at `src/x.rs:1-4`."
+        out = self.found(text, {"src/x.rs": [(0, 0, 3)]}, base=base)
+        self.assertEqual(len(out), 1)
+        self.assertIn("it should name `src/x.rs:4-7`", out[0])
+
+    def test_the_same_citation_renumbered_on_a_reworded_line_passes(self):
+        text = "The line `grant`, reworded, is at `src/x.rs:4-7`."
+        self.assertEqual(self.found(text, {"src/x.rs": [(0, 0, 3)]}, base=self.TEXT), [])
+
+    def test_a_short_number_after_a_span_that_moved_fails_on_a_reworded_line(self):
+        base = "The line `grant` is at `src/x.rs:1`, and `:4`."
+        text = "The line `grant`, reworded, is at `src/x.rs:1`, and `:4`."
+        out = self.found(text, {"src/x.rs": [(0, 0, 3)]}, base=base)
+        self.assertEqual(len(out), 2)
+        self.assertIn("it should name `src/x.rs:4`", out[0])
+        self.assertIn("it should name `src/x.rs:7`", out[1])
+
+    def test_a_reworded_line_that_cites_a_file_the_change_does_not_touch_is_unaffected(self):
+        text = "The line `grant`, reworded, is at `src/x.rs:1-4`."
+        self.assertEqual(self.found(text, {"other.md": [(0, 0, 3)]}, base=self.TEXT), [])
+
     def test_a_hunk_below_the_range_or_in_another_file_moves_nothing(self):
         self.assertEqual(self.found(self.TEXT, {"src/x.rs": [(4, 0, 3)]}), [])
         self.assertEqual(self.found(self.TEXT, {"other.md": [(0, 0, 3)]}), [])

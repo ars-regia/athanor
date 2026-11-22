@@ -7080,7 +7080,7 @@ def symbol_definitions(path, body):
 
 
 def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None,
-                      base_file=None, upstream=None):
+                      base_file=None, upstream=None, placed=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -7131,7 +7131,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch. A cited
+    a citation of the same file and lines that the document made at the base revision is read, on an edited line too. A cited
     line of a Markdown file that the change edited without adding or removing lines, and whose only
     difference from the revision is the numbers of its own citations (`base_file(path)` is the file
     there), is not an edit.
@@ -7152,9 +7152,16 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
 
     With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
     is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
-    `path:N`."""
+    `path:N`. `placed`, a set, gets the (file, lines) of every `path:N`."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
+    if hunks and base_text:
+        # The citations the document made at the base revision: one that is still made is read through
+        # the hunks on whatever line it stands, so an edit elsewhere in its line does not excuse it.
+        was = set()
+        citation_findings(doc, base_text, tracked, read_file, placed=was, upstream=upstream)
+    else:
+        was = set()
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
     for path in known:
@@ -7245,6 +7252,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 crate = c.group(1)
             if not symbol and cited is not None:
                 cited.add(path)
+            if not symbol and placed is not None:
+                placed.add((path, spec))
             if not symbol and lines_kept is not None and path not in lines_kept:
                 out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites lines: cite a "
                             f"symbol, `{path}#name`, or keep a file with no symbol in CITATION_LINES_KEPT"))
@@ -7277,7 +7286,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
-            if not symbol and line in unchanged and path in hunks:
+            if not symbol and (line in unchanged or (path, spec) in was) and path in hunks:
                 before = base_file(path).split("\n") if base_file else []
                 new = moved_ranges(ranges, hunks[path], lambda old, now: path.endswith(".md")
                                    and old <= len(before) and now <= len(rows)
