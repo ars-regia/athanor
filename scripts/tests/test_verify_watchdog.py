@@ -66,6 +66,13 @@ class WatchdogTest(unittest.TestCase):
             "athanor-idle's main does not call athanor_unit::watchdog::spawn", found[0]
         )
 
+    def test_a_listed_daemon_whose_ping_ignores_its_glib_loop_fails(self):
+        found = verify.watchdog_problems(
+            units(), dict(SENDERS, **{"athanor-idle": "unchecked"})
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("athanor-idle's main runs a GLib main loop", found[0])
+
     def test_a_watchdog_on_a_program_of_no_crate_fails(self):
         other = unit("someone-else", "notify")
         found = verify.watchdog_problems(units(**{"x-other.service": other}), SENDERS)
@@ -119,6 +126,12 @@ class WatchdogTest(unittest.TestCase):
                 "timer": {
                     "main.rs": "fn main() { athanor_unit::notify::notify_watchdog(); }\n"
                 },
+                "glib": {
+                    "main.rs": "fn main() { watchdog::spawn(&c); glib::MainLoop::new(None, false).run(); }\n"
+                },
+                "checked": {
+                    "main.rs": "fn main() { watchdog::spawn_with(&c, f); glib::MainLoop::new(None, false).run(); }\n"
+                },
                 "hidden": {
                     "main.rs": 'fn main() { /* watchdog::spawn(&c) */ let _ = "watchdog::spawn(&c)"; }\n'
                 },
@@ -137,6 +150,8 @@ class WatchdogTest(unittest.TestCase):
                     "library": "ping",
                     "timer": "ping",
                     "hidden": None,
+                    "glib": "unchecked",
+                    "checked": "spawn",
                 },
             )
 

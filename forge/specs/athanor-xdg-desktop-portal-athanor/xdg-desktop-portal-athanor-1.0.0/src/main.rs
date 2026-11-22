@@ -87,8 +87,9 @@ fn serve(
             .build()
             .await?;
         tracing::info!("serving {BUS_NAME}");
-        // On the connection that owns the name, from this runtime's one thread (PT3, SN6).
-        athanor_unit::watchdog::spawn(&conn);
+        // On the connection that owns the name, from this runtime's one thread, and through the
+        // GLib main loop, which runs on the main thread (PT3, SN6).
+        athanor_unit::watchdog::spawn_with(&conn, glib_loop_answers);
         let portal = conn
             .object_server()
             .interface::<_, settings::Portal>(PATH)
@@ -98,4 +99,15 @@ fn serve(
         }
         Err("the settings watcher stopped".into())
     })
+}
+
+/// A closure queued on GLib's default context, which only the main loop of `main` runs: its
+/// answer proves that loop runs, for the watchdog's check (doc_session.md SN6).
+fn glib_loop_answers() -> tokio::sync::oneshot::Receiver<()> {
+    let (answer, answered) = tokio::sync::oneshot::channel();
+    glib::MainContext::default().invoke(move || {
+        // A receiver already dropped had its period end: that ping is skipped already.
+        let _ = answer.send(());
+    });
+    answered
 }

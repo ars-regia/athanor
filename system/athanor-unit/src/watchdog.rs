@@ -1,10 +1,12 @@
 //! The manager's watchdog for a daemon on the session bus (doc_session.md SN6): `WATCHDOG=1`
 //! only after a call the daemon made to the bus on its own connection has been answered through
 //! its own event loop, so that one answer proves that the loop runs and that the connection
-//! serves. A timer alone proves only the first. The answer proves nothing of another thread:
-//! in `athanor-idle` and the portal backend, whose GLib main loop runs on a thread of its own
-//! beside the Tokio thread that serves the bus, a hung GLib loop does not stop the pings.
+//! serves. A timer alone proves only the first. The answer proves nothing of another thread, so
+//! `athanor-idle` and the portal backend, whose GLib main loop runs on a thread of its own beside
+//! the Tokio thread that serves the bus, pass `spawn_with` a check that only the GLib loop
+//! answers: a hang of either loop stops the pings.
 
+use std::convert::Infallible;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fmt::Display;
@@ -22,6 +24,17 @@ use crate::notify;
 /// only while the runtime polls it, so a loop that blocks stops the pings as a wedged
 /// connection does.
 pub fn spawn(connection: &zbus::Connection) {
+    spawn_with(connection, || std::future::ready(Ok::<(), Infallible>(())));
+}
+
+/// As `spawn`, and each ping also waits, within the same period, for `check`: for a daemon whose
+/// work runs on a loop beside the one that serves the bus, a check that only that loop answers.
+pub fn spawn_with<C, R, E>(connection: &zbus::Connection, mut check: C)
+where
+    C: FnMut() -> R + Send + 'static,
+    R: Future<Output = Result<(), E>> + Send + 'static,
+    E: Display + Send + 'static,
+{
     if env::var_os("WATCHDOG_USEC").is_none() {
         return;
     }
@@ -37,7 +50,9 @@ pub fn spawn(connection: &zbus::Connection) {
         return;
     };
     let connection = connection.clone();
-    tokio::spawn(serve(period, socket, move || roundtrip(connection.clone())));
+    tokio::spawn(serve(period, socket, move || {
+        both(roundtrip(connection.clone()), check())
+    }));
     tracing::info!(
         ?period,
         "the manager's watchdog is pinged after each roundtrip on the bus"
@@ -59,6 +74,17 @@ async fn roundtrip(connection: zbus::Connection) -> zbus::Result<()> {
         .map(drop)
 }
 
+/// `bus`, then `check`; the first that fails names itself.
+async fn both<B, C, E>(bus: B, check: C) -> Result<(), String>
+where
+    B: Future<Output = zbus::Result<()>>,
+    C: Future<Output = Result<(), E>>,
+    E: Display,
+{
+    bus.await.map_err(|error| format!("the bus: {error}"))?;
+    check.await.map_err(|error| format!("the check: {error}"))
+}
+
 /// Every `period`, one roundtrip, and `WATCHDOG=1` to `socket` once it has succeeded. A roundtrip
 /// that fails, or that has not returned when the next ping is due, sends no ping for that period.
 async fn serve<F, R, E>(period: Duration, socket: OsString, mut roundtrip: F)
@@ -74,12 +100,9 @@ where
         match time::timeout(period, roundtrip()).await {
             Ok(Ok(())) => ping(&socket),
             Ok(Err(error)) => {
-                tracing::warn!(%error, "the roundtrip on the bus failed: no WATCHDOG=1")
+                tracing::warn!(%error, "the roundtrip failed: no WATCHDOG=1")
             }
-            Err(_) => tracing::warn!(
-                ?period,
-                "the roundtrip on the bus did not return: no WATCHDOG=1"
-            ),
+            Err(_) => tracing::warn!(?period, "the roundtrip did not return: no WATCHDOG=1"),
         }
     }
 }
@@ -226,6 +249,40 @@ mod tests {
         assert_eq!(
             next(&listener, PERIOD * 5).await.as_deref(),
             Some(&b"WATCHDOG=1"[..])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_check_that_does_not_answer_stops_the_pings_of_an_answered_bus() {
+        let (path, listener) = notify_socket("check");
+        let bus = Bus::start(path.parent().expect("dir"));
+        let connection = zbus::connection::Builder::address(bus.address.as_str())
+            .build()
+            .await
+            .expect("connect");
+        let answered = connection.clone();
+        tokio::spawn(serve(PERIOD, path.clone().into(), move || {
+            both(
+                roundtrip(answered.clone()),
+                std::future::ready(Ok::<(), Infallible>(())),
+            )
+        }));
+        assert_eq!(
+            next(&listener, PERIOD * 5).await.as_deref(),
+            Some(&b"WATCHDOG=1"[..])
+        );
+
+        let (path, listener) = notify_socket("hung");
+        tokio::spawn(serve(PERIOD, path.clone().into(), move || {
+            both(
+                roundtrip(connection.clone()),
+                std::future::pending::<Result<(), Infallible>>(),
+            )
+        }));
+        assert_eq!(
+            next(&listener, PERIOD * 5).await,
+            None,
+            "a ping while the check does not answer"
         );
     }
 

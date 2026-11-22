@@ -386,8 +386,9 @@ async fn daemon(
     )
     .await?;
     let system = bus::System::new(system_query);
-    // On the connection that owns the names, from this runtime's one thread (doc_session.md SN6).
-    athanor_unit::watchdog::spawn(&session);
+    // On the connection that owns the names, from this runtime's one thread, and through the GLib
+    // main loop, which runs on the main thread (doc_session.md SN6).
+    athanor_unit::watchdog::spawn_with(&session, glib_loop_answers);
 
     let mut changes = bus::upower_changes(&system_watch).await?;
     let mut owners = bus::upower_owners(&system_watch).await?;
@@ -478,6 +479,17 @@ async fn sleep_until(deadline: Option<Instant>) {
     if let Some(at) = deadline {
         tokio::time::sleep_until(at.into()).await;
     }
+}
+
+/// A closure queued on GLib's default context, which only the main loop of `main` runs: its
+/// answer proves that loop runs, for the watchdog's check (doc_session.md SN6).
+fn glib_loop_answers() -> tokio::sync::oneshot::Receiver<()> {
+    let (answer, answered) = tokio::sync::oneshot::channel();
+    glib::MainContext::default().invoke(move || {
+        // A receiver already dropped had its period end: that ping is skipped already.
+        let _ = answer.send(());
+    });
+    answered
 }
 
 #[cfg(test)]
