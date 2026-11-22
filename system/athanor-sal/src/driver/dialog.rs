@@ -23,7 +23,7 @@ pub(super) enum CloseRequest {
     Ignored,
     /// The dialog's application is asked, as at its Close button.
     Dialog,
-    /// The run ends.
+    /// The run ends, or the application is asked ([`super::Application::close_ends_run`]).
     Exit,
 }
 

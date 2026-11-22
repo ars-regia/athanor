@@ -223,6 +223,17 @@ pub trait Application {
         Vec::new()
     }
 
+    /// Whether closing a window that is not a dialog ends the run: its Close button, or the
+    /// compositor's request to close it. The default, `true`, ends it whatever else is open.
+    /// `false` hands that Close to the application as a dialog's: [`Event::Window`] with
+    /// [`WindowButton::Close`] reaches [`Application::event`], and the application answers it,
+    /// with [`Shell::close`], say. The run then outlives its last window, for a resident process
+    /// that opens the next one with [`Shell::open_window`], until [`Shell::quit`]. Read at each
+    /// Close.
+    fn close_ends_run(&self) -> bool {
+        true
+    }
+
     /// The layer surface for `output`, asked when the output is announced, and when it changes
     /// while it has none; `None` leaves it without one. The driver keeps at most one on each
     /// output and closes it when the output leaves, and asks again for an output that comes
@@ -357,7 +368,8 @@ pub fn run_window(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> 
     })
 }
 
-/// Runs `application` until its window closes, or until an error.
+/// Runs `application` until a window closes ([`Application::close_ends_run`]), until
+/// [`Shell::quit`], or until an error.
 pub fn run(application: impl Application + 'static) -> Result<(), Error> {
     run_on(application, |_| Ok(()))
 }
@@ -932,6 +944,13 @@ impl Shell {
         self.open(ui, Role::Layer(options), output.as_ref())
     }
 
+    /// Opens `ui` in a window, as [`Application::start`] opens one, at any time of the run, with
+    /// the application id of [`Role::Window`]. It is drawn at its first configure.
+    pub fn open_window(&mut self, ui: Ui, app_id: &str) -> Result<SurfaceId, Error> {
+        let app_id = app_id.to_owned();
+        self.open(ui, Role::Window { app_id }, None)
+    }
+
     /// Closes the surface `id`, and the popup open from it first; the application is not told
     /// through [`Application::closed`]. A surface of [`Application::output`] closed so is not
     /// asked for again on that output until the output leaves and comes back. Closing a window
@@ -1014,9 +1033,9 @@ impl Shell {
     /// pointer, nor the keyboard, nor the input method, nor an assistive technology's action.
     /// Escape, its Close button and the compositor's request to close it reach the application
     /// as [`Event::Window`] with [`WindowButton::Close`], which closes the run for any other
-    /// window: the application answers it, at least with [`Shell::close`]. It closes with its
-    /// parent. It is drawn at its first configure; a parent that is not an open window is
-    /// refused.
+    /// window by default ([`Application::close_ends_run`]): the application answers it, at least
+    /// with [`Shell::close`]. It closes with its parent. It is drawn at its first configure; a
+    /// parent that is not an open window is refused.
     pub fn open_dialog(&mut self, parent: SurfaceId, mut ui: Ui) -> Result<SurfaceId, Error> {
         let Some(Surface {
             shown: Shown::Window(parent_window),
@@ -1092,6 +1111,11 @@ impl Shell {
     /// Ends the run with `error`, which [`run`] returns once the turn is over.
     pub fn fail(&mut self, error: Error) {
         self.failure.get_or_insert(error);
+        self.exit = true;
+    }
+
+    /// Ends the run once the turn is over, and [`run`] returns `Ok`.
+    pub fn quit(&mut self) {
         self.exit = true;
     }
 
@@ -2245,6 +2269,12 @@ fn route(ui: &Ui, event: Event, own: bool) -> Route {
     }
 }
 
+/// Whether a Close of a window ends the run: never a dialog's, and a window's unless its
+/// application answers it ([`Application::close_ends_run`]).
+fn closes_run(dialog: bool, close_ends_run: bool) -> bool {
+    !dialog && close_ends_run
+}
+
 /// What an item of a menu the driver opened does.
 enum Choice {
     /// A field's context menu: the edit of this key.
@@ -2324,8 +2354,10 @@ impl App {
                     window.set_minimized();
                 }
             }
-            // A dialog's Close is the application's to answer.
-            Some(Event::Window(WindowButton::Close)) if !dialog => {
+            // A dialog's Close is the application's to answer, and a window's where it asks.
+            Some(Event::Window(WindowButton::Close))
+                if closes_run(dialog, self.application.close_ends_run()) =>
+            {
                 self.shell.exit = true;
                 return;
             }
@@ -3124,17 +3156,19 @@ impl SessionLockHandler for App {
 }
 
 impl WindowHandler for App {
-    /// Ends the run, but for a dialog, whose application is asked as at its Close button, and
-    /// for a window a dialog blocks, which stays open with the dialog unanswered, as GTK's.
+    /// As the window's Close button: ends the run, or asks the application
+    /// ([`Application::close_ends_run`]), as for a dialog; a window a dialog blocks stays open
+    /// with the dialog unanswered, as GTK's.
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
         let Some(id) = self.shell.find(window.wl_surface()).map(|s| s.id) else {
-            self.shell.exit = true;
+            self.shell.exit |= self.application.close_ends_run();
             return;
         };
         match self.shell.dialogs.close_request(id) {
-            CloseRequest::Dialog => self.update(id, Some(Event::Window(WindowButton::Close))),
+            CloseRequest::Dialog | CloseRequest::Exit => {
+                self.update(id, Some(Event::Window(WindowButton::Close)))
+            }
             CloseRequest::Ignored => {}
-            CloseRequest::Exit => self.shell.exit = true,
         }
     }
 
@@ -3791,6 +3825,23 @@ mod tests {
         assert_eq!(max_size(&ui, (420, 300)), None, "a window is resizable by default");
         ui.resizable = false;
         assert_eq!(max_size(&ui, (420, 300)), Some((420, 300)));
+    }
+
+    /// A window's Close ends the run by default, as for every application before SL1, and never
+    /// a dialog's; an application that answers its windows' Close keeps the run after the last
+    /// one (toolkit_window_check.py runs both under a compositor).
+    #[test]
+    fn a_windows_close_ends_the_run_unless_its_application_answers_it() {
+        struct Plain;
+        impl Application for Plain {
+            fn event(&mut self, _: &mut Shell, _: SurfaceId, _: Event) {}
+        }
+        assert!(Plain.close_ends_run(), "the default is unchanged");
+        assert!(closes_run(false, true));
+        // A dialog's Close is its application's, and so is a window's of a resident one.
+        assert!(!closes_run(true, true));
+        assert!(!closes_run(false, false));
+        assert!(!closes_run(true, false));
     }
 
     #[test]
