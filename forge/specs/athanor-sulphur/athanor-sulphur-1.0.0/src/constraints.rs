@@ -430,6 +430,7 @@ impl State {
                     time,
                 },
             );
+            self.follow_drags();
         }
         // Smithay sends it to the pointer's focus.
         let focus = pointer

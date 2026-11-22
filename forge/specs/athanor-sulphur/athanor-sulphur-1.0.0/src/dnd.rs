@@ -122,6 +122,7 @@ impl WaylandDndGrabHandler for State {
             source.cancel();
             return;
         }
+        let data_source = (&source as &dyn Any).downcast_ref::<WlDataSource>().cloned();
         let ended = Arc::new(AtomicBool::new(false));
         let source = AtDrop {
             source,
@@ -158,6 +159,9 @@ impl WaylandDndGrabHandler for State {
                 Some(slot)
             }
         };
+        if let Some(data_source) = data_source {
+            self.toplevel_drag_started(&data_source, slot, &ended);
+        }
         if let Some(surface) = icon {
             self.drag_icons.push(DragIcon {
                 surface,
@@ -170,7 +174,8 @@ impl WaylandDndGrabHandler for State {
 }
 
 /// A drag ends at its drop, or cancelled, the lock's included (`lock.rs` ends the seat's grabs):
-/// its icon goes with it, and the icon of a drag still held stays.
+/// its icon goes with it, and the icon of a drag still held stays; its toplevel drag, if any,
+/// leaves the window it moved there (`toplevel_drag.rs`).
 impl DndGrabHandler for State {
     fn dropped(
         &mut self,
@@ -181,12 +186,14 @@ impl DndGrabHandler for State {
     ) {
         self.drag_icons
             .retain(|icon| !icon.ended.load(Ordering::SeqCst));
+        self.toplevel_drags_ended();
         self.request_redraw();
     }
 
     fn cancelled(&mut self, _seat: Seat<Self>, _location: Point<f64, Logical>) {
         self.drag_icons
             .retain(|icon| !icon.ended.load(Ordering::SeqCst));
+        self.toplevel_drags_ended();
         self.request_redraw();
     }
 }
@@ -244,7 +251,12 @@ impl State {
         if !icon.surface.alive() {
             return None;
         }
-        match icon.slot {
+        self.drag_point(icon.slot)
+    }
+
+    /// Where a drag is: at the touch point `slot` while it is held, or at the pointer.
+    pub(crate) fn drag_point(&self, slot: Option<TouchSlot>) -> Option<Point<f64, Logical>> {
+        match slot {
             Some(slot) => self.touch_at(slot),
             None => Some(self.seat.get_pointer()?.current_location()),
         }

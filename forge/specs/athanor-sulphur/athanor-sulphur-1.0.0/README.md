@@ -216,6 +216,12 @@ terminal and logs the lease's connectors as an error.
 Until then the lock is shown and the leases tried again once a second, at each scan and at the
 resume. While the session is paused the GPU is not touched.
 
+Decision 37 adds `xdg_toplevel_drag_manager_v1`, standard: a toplevel a client attaches to a drag
+it started with its own `wl_data_source` follows the pointer or the touch point of that drag, less
+the offset the client gives, takes no part in choosing the drop target, is detached when it
+unmaps, and stays where the drop or a lock's cancel leaves it (`src/toplevel_drag.rs`,
+`src/fixture/dnd/toplevel_drag.rs`).
+
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
 every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse

@@ -287,6 +287,7 @@ impl State {
             },
         );
         pointer.frame(self);
+        self.follow_drags();
         self.refresh_constraint();
     }
 
