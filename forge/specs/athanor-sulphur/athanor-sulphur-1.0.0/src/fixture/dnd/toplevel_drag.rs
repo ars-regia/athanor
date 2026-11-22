@@ -427,3 +427,110 @@ fn a_toplevel_drag_is_kept_until_its_drag_ends() {
     release(&mut run);
     run.stop();
 }
+
+/// A toplevel destroyed during the drag is no error, and nothing of it is kept once the drag
+/// has ended.
+#[test]
+fn a_toplevel_destroyed_during_the_drag_is_forgotten() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let serial = from.press(&mut run);
+    let carry = from.carry(&mut run);
+    carry.drag.attach(&from.toplevel, 20, 20);
+    from.start(&mut run, &carry.source, serial);
+    run.state
+        .pointer_to((600.0, 400.0).into(), InputTime::now());
+    assert_eq!(location_of(&run, &from.id), (580, 380).into());
+
+    from.toplevel.destroy();
+    from.local.roundtrip(&mut run);
+    run.state
+        .pointer_to((700.0, 500.0).into(), InputTime::now());
+    release(&mut run);
+    from.local.roundtrip(&mut run);
+    assert!(
+        from.local.connection.protocol_error().is_none(),
+        "a toplevel destroyed while attached"
+    );
+    let [drags, attached, started, _, _] = run.state.toplevel_drags.sizes();
+    assert_eq!((drags, attached, started), (1, 0, 0), "the drag object alone");
+    carry.drag.destroy();
+    from.local.roundtrip(&mut run);
+    assert!(from.local.connection.protocol_error().is_none());
+    assert_eq!(run.state.toplevel_drags.sizes()[0], 0, "no drag object");
+    run.stop();
+}
+
+/// A source destroyed during the drag ends nothing in error, and the drag in progress is
+/// forgotten once it has ended.
+#[test]
+fn a_source_destroyed_during_the_drag_is_forgotten() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let serial = from.press(&mut run);
+    let carry = from.carry(&mut run);
+    carry.drag.attach(&from.toplevel, 20, 20);
+    from.start(&mut run, &carry.source, serial);
+    run.state
+        .pointer_to((600.0, 400.0).into(), InputTime::now());
+    assert_eq!(location_of(&run, &from.id), (580, 380).into());
+
+    carry.source.destroy();
+    from.local.roundtrip(&mut run);
+    run.state
+        .pointer_to((700.0, 500.0).into(), InputTime::now());
+    release(&mut run);
+    from.local.roundtrip(&mut run);
+    assert!(
+        from.local.connection.protocol_error().is_none(),
+        "a source destroyed during its drag"
+    );
+    let [_, attached, started, _, _] = run.state.toplevel_drags.sizes();
+    assert_eq!((attached, started), (0, 0), "no drag in progress");
+    run.stop();
+}
+
+/// The same source set as the selection again and again, and many sources each set and gone,
+/// or each given to a toplevel drag and gone, leave a bounded number of marks: a client cannot
+/// make a request cost more than the last.
+#[test]
+fn the_marks_of_sources_stay_bounded() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut from = party(&mut run, (100, 100), None);
+    let serial = from.press(&mut run);
+    let (source, _log) = from.source();
+    for _ in 0..1000 {
+        from.device.set_selection(Some(&source), serial);
+    }
+    from.local.roundtrip(&mut run);
+    assert_eq!(
+        run.state.toplevel_drags.sizes()[4],
+        1,
+        "one mark for one source"
+    );
+
+    let manager: XdgToplevelDragManagerV1 = from.local.bind(1);
+    for _ in 0..500 {
+        let (selected, _log) = from.source();
+        from.device.set_selection(Some(&selected), serial);
+        selected.destroy();
+        let (used, _log) = from.source();
+        let drag = manager.get_xdg_toplevel_drag(&used, &from.local.queue.handle(), ());
+        drag.destroy();
+        used.destroy();
+    }
+    from.local.roundtrip(&mut run);
+    assert!(
+        from.local.connection.protocol_error().is_none(),
+        "every source and drag object was its own"
+    );
+    let [drags, _, _, used, selected] = run.state.toplevel_drags.sizes();
+    assert_eq!(drags, 0, "no drag object left");
+    assert!(used <= 64, "the marks of used sources gone are dropped: {used}");
+    assert!(selected <= 64, "the marks of selected sources gone are dropped: {selected}");
+    release(&mut run);
+    run.stop();
+}

@@ -7,7 +7,10 @@
 //!
 //! Smithay has no implementation at 62ec78d, and keeps which sources were set as the selection
 //! to itself: the compositor answers the manager, and sees each `wl_data_device.set_selection`
-//! before Smithay's handler does (`handlers.rs`, the blanket `Dispatch`).
+//! before Smithay's handler does (`handlers.rs`, the blanket `Dispatch`). Every request costs
+//! the same however many sources, drag objects and toplevels a client holds: each is found by
+//! its id, and only the drags in progress, one for each pointer or touch point at most, are
+//! gone through on a motion.
 
 use crate::state::State;
 use smithay::backend::input::TouchSlot;
@@ -17,13 +20,14 @@ use smithay::reexports::wayland_protocols::xdg::toplevel_drag::v1::server::{
     xdg_toplevel_drag_manager_v1::{self, XdgToplevelDragManagerV1},
     xdg_toplevel_drag_v1::{self, XdgToplevelDragV1},
 };
-use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
 use smithay::reexports::wayland_server::protocol::wl_data_device;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource, Weak};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -33,20 +37,60 @@ pub struct DragManagers;
 /// The toplevel drags of every client, and the sources the protocol's `invalid_source` names.
 #[derive(Default)]
 pub struct ToplevelDrags {
-    drags: Vec<ToplevelDrag>,
-    /// Each source given to `get_xdg_toplevel_drag`, with the manager it was given to, for as
-    /// long as the source lives: it serves one toplevel drag, the drag object's life aside.
-    used: Vec<(Weak<WlDataSource>, XdgToplevelDragManagerV1)>,
-    /// Each source given to `wl_data_device.set_selection`, for as long as it lives.
-    selected: Vec<Weak<WlDataSource>>,
+    /// Every drag object, by its id.
+    drags: HashMap<ObjectId, ToplevelDrag>,
+    /// Each attached toplevel, by its id, with the drag object it is attached to: a toplevel
+    /// follows one drag at a time.
+    attached: HashMap<ObjectId, ObjectId>,
+    /// The drag objects whose drag started, until its end is seen.
+    started: Vec<ObjectId>,
+    /// Each source given to `get_xdg_toplevel_drag`, with the manager it was given to and the
+    /// drag object made of it: it serves one toplevel drag, the drag object's life aside.
+    used: Marks<(XdgToplevelDragManagerV1, ObjectId)>,
+    /// Each source given to `wl_data_device.set_selection`.
+    selected: Marks<()>,
+}
+
+/// Sources marked, by their id, for as long as each lives. An id is never given again to
+/// another object (its serial differs), so a mark left by a source gone never names a live one;
+/// those marks are dropped once the map has doubled since it was last pruned, so that marking
+/// costs the same, amortised, and the map holds at most twice the sources that live.
+struct Marks<T> {
+    by_source: HashMap<ObjectId, (Weak<WlDataSource>, T)>,
+    /// How many marks were left at the last prune.
+    kept: usize,
+}
+
+impl<T> Default for Marks<T> {
+    fn default() -> Self {
+        Self {
+            by_source: HashMap::new(),
+            kept: 0,
+        }
+    }
+}
+
+impl<T> Marks<T> {
+    /// The mark of `source`.
+    fn get(&self, source: &WlDataSource) -> Option<&T> {
+        self.by_source.get(&source.id()).map(|(_, mark)| mark)
+    }
+
+    /// Marks `source`, in place of its mark if it has one.
+    fn mark(&mut self, source: &WlDataSource, mark: T) {
+        self.by_source
+            .insert(source.id(), (source.downgrade(), mark));
+        if self.by_source.len() >= 2 * self.kept.max(32) {
+            self.by_source.retain(|_, (source, _)| source.is_alive());
+            self.kept = self.by_source.len();
+        }
+    }
 }
 
 struct ToplevelDrag {
-    object: XdgToplevelDragV1,
-    source: Weak<WlDataSource>,
     /// The toplevel attached, and where the drag's point is on it, from its geometry's top left.
     attached: Option<(XdgToplevel, Point<i32, Logical>)>,
-    /// Once the drag of `source` started: the touch point it follows, or the pointer when
+    /// Once the drag of its source started: the touch point it follows, or the pointer when
     /// `None`, and its end (`dnd.rs`'s `AtDrop`).
     started: Option<(Option<TouchSlot>, Arc<AtomicBool>)>,
 }
@@ -61,10 +105,26 @@ impl ToplevelDrag {
 }
 
 impl ToplevelDrags {
-    /// Forgets the sources that are gone.
-    fn prune(&mut self) {
-        self.used.retain(|(source, _)| source.is_alive());
-        self.selected.retain(Weak::is_alive);
+    /// Detaches the toplevel of the drag object `id`, if it has one.
+    fn detach(&mut self, id: &ObjectId) -> Option<(XdgToplevel, Point<i32, Logical>)> {
+        let (toplevel, offset) = self.drags.get_mut(id)?.attached.take()?;
+        if self.attached.get(&toplevel.id()) == Some(id) {
+            self.attached.remove(&toplevel.id());
+        }
+        Some((toplevel, offset))
+    }
+
+    /// How many drag objects, attached toplevels, drags in progress, sources used by a toplevel
+    /// drag and sources set as the selection are kept, in that order.
+    #[cfg(test)]
+    pub(crate) fn sizes(&self) -> [usize; 5] {
+        [
+            self.drags.len(),
+            self.attached.len(),
+            self.started.len(),
+            self.used.by_source.len(),
+            self.selected.by_source.len(),
+        ]
     }
 }
 
@@ -97,33 +157,28 @@ impl Dispatch2<XdgToplevelDragManagerV1, State> for DragManagers {
         data_init: &mut DataInit<'_, State>,
     ) {
         use xdg_toplevel_drag_manager_v1::Request;
-        match request {
-            Request::GetXdgToplevelDrag { id, data_source } => {
-                let drags = &mut state.toplevel_drags;
-                drags.prune();
-                let id_of = data_source.id();
-                if drags.used.iter().any(|(used, _)| used.id() == id_of) {
-                    manager.post_error(
-                        xdg_toplevel_drag_manager_v1::Error::InvalidSource,
-                        "the data source already serves a toplevel drag",
-                    );
-                } else if drags.selected.iter().any(|selected| selected.id() == id_of) {
-                    manager.post_error(
-                        xdg_toplevel_drag_manager_v1::Error::InvalidSource,
-                        "the data source was set as the selection",
-                    );
-                }
-                let object = data_init.init(id, DragManagers);
-                drags.used.push((data_source.downgrade(), manager.clone()));
-                drags.drags.push(ToplevelDrag {
-                    object,
-                    source: data_source.downgrade(),
+        if let Request::GetXdgToplevelDrag { id, data_source } = request {
+            let drags = &mut state.toplevel_drags;
+            if drags.used.get(&data_source).is_some() {
+                manager.post_error(
+                    xdg_toplevel_drag_manager_v1::Error::InvalidSource,
+                    "the data source already serves a toplevel drag",
+                );
+            } else if drags.selected.get(&data_source).is_some() {
+                manager.post_error(
+                    xdg_toplevel_drag_manager_v1::Error::InvalidSource,
+                    "the data source was set as the selection",
+                );
+            }
+            let id = data_init.init(id, DragManagers).id();
+            drags.used.mark(&data_source, (manager.clone(), id.clone()));
+            drags.drags.insert(
+                id,
+                ToplevelDrag {
                     attached: None,
                     started: None,
-                });
-            }
-            Request::Destroy => {}
-            _ => {}
+                },
+            );
         }
     }
 }
@@ -139,12 +194,9 @@ impl Dispatch2<XdgToplevelDragV1, State> for DragManagers {
         _data_init: &mut DataInit<'_, State>,
     ) {
         use xdg_toplevel_drag_v1::Request;
-        let Some(drag) = state
-            .toplevel_drags
-            .drags
-            .iter_mut()
-            .find(|drag| drag.object == *object)
-        else {
+        let drags = &mut state.toplevel_drags;
+        let id = object.id();
+        let Some(drag) = drags.drags.get(&id) else {
             return;
         };
         match request {
@@ -165,7 +217,14 @@ impl Dispatch2<XdgToplevelDragV1, State> for DragManagers {
                     );
                     return;
                 }
-                drag.attached = Some((toplevel, Point::from((x_offset, y_offset))));
+                drags.detach(&id);
+                // Taken from the drag it followed, if any.
+                if let Some(other) = drags.attached.insert(toplevel.id(), id.clone()) {
+                    drags.detach(&other);
+                }
+                if let Some(drag) = drags.drags.get_mut(&id) {
+                    drag.attached = Some((toplevel, Point::from((x_offset, y_offset))));
+                }
                 state.follow_drags();
             }
             // A drag never started has not to end.
@@ -178,16 +237,17 @@ impl Dispatch2<XdgToplevelDragV1, State> for DragManagers {
     }
 
     fn destroyed(&self, state: &mut State, _client: ClientId, object: &XdgToplevelDragV1) {
-        state
-            .toplevel_drags
-            .drags
-            .retain(|drag| drag.object != *object);
+        let drags = &mut state.toplevel_drags;
+        let id = object.id();
+        drags.detach(&id);
+        drags.drags.remove(&id);
+        drags.started.retain(|started| *started != id);
     }
 }
 
 /// Whether `request` is a `wl_data_device.set_selection` of the source of a toplevel drag:
 /// refused, its client ended with `invalid_source` on the manager that took the source. Any
-/// other source set as the selection is kept, so that no toplevel drag takes it.
+/// other source set as the selection is marked, so that no toplevel drag takes it.
 pub fn refused_selection(state: &mut State, request: &dyn Any) -> bool {
     let Some(wl_data_device::Request::SetSelection {
         source: Some(source),
@@ -197,15 +257,14 @@ pub fn refused_selection(state: &mut State, request: &dyn Any) -> bool {
         return false;
     };
     let drags = &mut state.toplevel_drags;
-    drags.prune();
-    if let Some((_, manager)) = drags.used.iter().find(|(used, _)| used.id() == source.id()) {
+    if let Some((manager, _)) = drags.used.get(source) {
         manager.post_error(
             xdg_toplevel_drag_manager_v1::Error::InvalidSource,
             "the source of a toplevel drag set as the selection",
         );
         return true;
     }
-    drags.selected.push(source.downgrade());
+    drags.selected.mark(source, ());
     false
 }
 
@@ -218,11 +277,19 @@ impl State {
         slot: Option<TouchSlot>,
         ended: &Arc<AtomicBool>,
     ) {
-        for drag in &mut self.toplevel_drags.drags {
-            if drag.started.is_none() && drag.source.id() == source.id() {
-                drag.started = Some((slot, ended.clone()));
-            }
+        let drags = &mut self.toplevel_drags;
+        let Some((_, id)) = drags.used.get(source) else {
+            return;
+        };
+        let id = id.clone();
+        let Some(drag) = drags.drags.get_mut(&id) else {
+            return;
+        };
+        if drag.started.is_some() {
+            return;
         }
+        drag.started = Some((slot, ended.clone()));
+        drags.started.push(id);
         self.follow_drags();
     }
 
@@ -230,12 +297,12 @@ impl State {
     /// (`workspace.rs`'s `settle`), and takes the pointer again once the grab that ends is gone,
     /// since this runs inside it.
     pub(crate) fn toplevel_drags_ended(&mut self) {
-        let mut dropped = Vec::new();
-        for drag in &mut self.toplevel_drags.drags {
-            if drag.started.is_some() && !drag.going() {
-                dropped.extend(drag.attached.take());
-            }
-        }
+        let drags = &mut self.toplevel_drags;
+        let (ended, going): (Vec<_>, Vec<_>) = std::mem::take(&mut drags.started)
+            .into_iter()
+            .partition(|id| drags.drags.get(id).is_none_or(|drag| !drag.going()));
+        drags.started = going;
+        let dropped: Vec<_> = ended.iter().filter_map(|id| drags.detach(id)).collect();
         if dropped.is_empty() {
             return;
         }
@@ -253,14 +320,29 @@ impl State {
         self.window_for(surface.wl_surface())
     }
 
+    /// The drags that go on, each with its toplevel attached, its offset and the touch point
+    /// it follows, or the pointer when `None`.
+    fn carrying(
+        &self,
+    ) -> impl Iterator<Item = (&XdgToplevel, Point<i32, Logical>, Option<TouchSlot>)> {
+        let drags = &self.toplevel_drags;
+        drags
+            .started
+            .iter()
+            .filter_map(|id| drags.drags.get(id))
+            .filter(|drag| drag.going())
+            .filter_map(|drag| {
+                let (toplevel, offset) = drag.attached.as_ref()?;
+                let (slot, _) = drag.started.as_ref()?;
+                Some((toplevel, *offset, *slot))
+            })
+    }
+
     /// Whether `window` is attached to a drag that goes on: it takes no part in choosing the
     /// drop target, nor in what is under a point until the drag ends.
     pub(crate) fn carried(&self, window: &Window) -> bool {
-        self.toplevel_drags
-            .drags
-            .iter()
-            .filter(|drag| drag.going())
-            .filter_map(|drag| self.window_of_toplevel(&drag.attached.as_ref()?.0))
+        self.carrying()
+            .filter_map(|(toplevel, _, _)| self.window_of_toplevel(toplevel))
             .any(|attached| attached == *window)
     }
 
@@ -269,17 +351,14 @@ impl State {
     /// commit that places it; a maximised, full-screen or tiled one stays where its layout puts
     /// it.
     pub(crate) fn follow_drags(&mut self) {
-        // The windows attached to a drag that goes on, with the point each follows and its offset.
         let carried: Vec<_> = self
-            .toplevel_drags
-            .drags
-            .iter()
-            .filter(|drag| drag.going())
-            .filter_map(|drag| {
-                let (toplevel, offset) = drag.attached.as_ref()?;
-                let (slot, _) = drag.started.as_ref()?;
-                let window = self.window_of_toplevel(toplevel)?;
-                Some((window, self.drag_point(*slot)?, *offset))
+            .carrying()
+            .filter_map(|(toplevel, offset, slot)| {
+                Some((
+                    self.window_of_toplevel(toplevel)?,
+                    self.drag_point(slot)?,
+                    offset,
+                ))
             })
             .collect();
         let mut moved = false;
@@ -305,23 +384,14 @@ impl State {
         }
     }
 
-    /// A window that unmapped is detached from every toplevel drag it was attached to.
+    /// A window that unmapped is detached from the toplevel drag it was attached to.
     pub(crate) fn detach_unmapped(&mut self, window: &Window) {
-        let Some(surface) = window
-            .toplevel()
-            .map(|toplevel| toplevel.wl_surface().clone())
-        else {
+        let Some(toplevel) = window.toplevel() else {
             return;
         };
-        let shell = &self.xdg_shell_state;
-        for drag in &mut self.toplevel_drags.drags {
-            let attached = drag
-                .attached
-                .as_ref()
-                .and_then(|(toplevel, _)| shell.get_toplevel(toplevel));
-            if attached.is_some_and(|attached| *attached.wl_surface() == surface) {
-                drag.attached = None;
-            }
+        let drags = &mut self.toplevel_drags;
+        if let Some(id) = drags.attached.get(&toplevel.xdg_toplevel().id()).cloned() {
+            drags.detach(&id);
         }
     }
 }
