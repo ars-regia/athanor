@@ -338,12 +338,12 @@ impl State {
             })
     }
 
-    /// Whether `window` is attached to a drag that goes on: it takes no part in choosing the
-    /// drop target, nor in what is under a point until the drag ends.
-    pub(crate) fn carried(&self, window: &Window) -> bool {
+    /// The windows attached to a drag that goes on, one for each drag at most: they take no
+    /// part in choosing the drop target, nor in what is under a point until the drag ends.
+    pub(crate) fn carried_windows(&self) -> Vec<Window> {
         self.carrying()
             .filter_map(|(toplevel, _, _)| self.window_of_toplevel(toplevel))
-            .any(|attached| attached == *window)
+            .collect()
     }
 
     /// Moves each window attached to a drag that goes on to the point the drag follows, less
