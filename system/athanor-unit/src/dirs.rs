@@ -486,6 +486,8 @@ mod tests {
         }
         let error = owned_dir(&link.join("d")).expect_err("a link in a directory root does not own");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        // The link rule refused it, not a search permission the walk lacked.
+        assert!(error.to_string().contains("passes through"), "{error}");
     }
 
     #[test]
