@@ -78,7 +78,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mode = parse_mode(env::args().nth(1).as_deref());
+    let mode = parse_mode(env::args_os().nth(1).map(|arg| arg.to_string_lossy().into_owned()).as_deref());
     if mode == Mode::BindShortcut {
         // The login oneshot (CC9): no crash-loop record, no surface, no bus name.
         let Some(state) = loader::state_home().map(|home| home.join("athanor/control-center")) else {

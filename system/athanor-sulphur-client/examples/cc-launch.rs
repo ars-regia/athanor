@@ -54,7 +54,7 @@ fn run(id: &str) -> Result<Value, String> {
 }
 
 fn main() -> ExitCode {
-    let Some(id) = std::env::args().nth(1) else {
+    let Some(id) = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).nth(1) else {
         eprintln!("usage: cc-launch DESKTOP_ID");
         return ExitCode::from(2);
     };

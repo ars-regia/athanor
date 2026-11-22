@@ -101,6 +101,12 @@ class PanickingMacrosTest(unittest.TestCase):
         src = "".join(f"fn f{i}() {{ {m}(x); }}\n" for i, m in enumerate(MACROS))
         self.assertEqual(self.counts(src), sorted(MACROS))
 
+    def test_env_args_and_vars_count_and_the_os_forms_do_not(self):
+        self.assertLessEqual({"env::args(", "env::vars("}, set(verify.BUDGET))
+        self.assertEqual(self.counts("fn f() { let a = std::env::args(); let v = env::vars(); }"),
+                         ["env::args(", "env::vars("])
+        self.assertEqual(self.counts("fn f() { let a = std::env::args_os(); let v = env::vars_os(); }"), [])
+
     def test_a_macro_counts_with_any_delimiter_and_space(self):
         src = "fn f() { assert! (a); unreachable! {}; todo![]; }\n"
         self.assertEqual(self.counts(src), ["assert!(", "todo!(", "unreachable!("])
