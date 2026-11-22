@@ -7988,8 +7988,8 @@ IMPLICIT_PANIC_CLIPPY_KEY = re.compile(
 # The `cfg(not(feature = ...))` bodies of the members, by file and the line that holds the
 # attribute, whitespace collapsed: `--all-features` does not compile them and the image ships
 # them when the feature is off. Each is a stub that returns `None` or asserts. Any difference
-# from the tree fails the check, so a body swapped for another is read again and the list only
-# goes down (#1403).
+# from the tree fails the check, so a new body or a swapped attribute is read and the list only
+# goes down (#1403). The code inside a listed body is still not measured: a reader reviews those few bodies.
 IMPLICIT_PANIC_NOT_FEATURE = {
     ("system/athanor-sal/src/driver.rs", '#[cfg(not(feature = "gpu"))]'): 1,
     ("system/athanor-sulphur-client/src/connection.rs", '#[cfg(not(feature = "gtk"))]'): 2,
