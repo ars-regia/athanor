@@ -8630,7 +8630,8 @@ def trusted_ref_problems(scripts):
 
 
 # Files that run signing or publishing on a branch: `main` is not one of the branches that start
-# them. A line holds it when a `branches: [...]` list or a `refs/heads/main` condition names it.
+# them. A line holds it when a `branches: [...]` list, a `- main` block-list item, a
+# `refs/heads/main` condition or a `ref_name == 'main'` condition names it.
 MAIN_BRANCH_FILES = (
     ".github/workflows/azoth-signer.yml",
     ".github/workflows/kernel-build.yml",
