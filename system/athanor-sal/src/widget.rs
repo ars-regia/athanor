@@ -2448,6 +2448,7 @@ impl Ui {
         };
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
+        let second_line = self.switch_line(id).is_some();
         let children = self.visible_children(id);
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
@@ -2627,9 +2628,10 @@ impl Ui {
             | Kind::Toggle { label, radio: true, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
                 let layout = self.text.layout(label, size, rtl, &style);
-                // A preference row's second line, under the label (Ui::switch_row).
+                // A preference row's second line, under the label (Ui::switch_row); a blank
+                // one is no line, as a plain switch's.
                 let (line_w, line_h) = match sizes.first() {
-                    Some(&line) if is_switch => line,
+                    Some(&line) if second_line => line,
                     _ => (0.0, 0.0),
                 };
                 let wh = (
@@ -2687,7 +2689,8 @@ impl Ui {
             // wrapping label fills its column, and breaks its lines at that width, never below
             // its longest word nor its least width, as in a column.
             Kind::Switch { .. } => {
-                let Some(&line) = children.first() else {
+                let Some(&line) = children.first().filter(|_| self.switch_line(id).is_some())
+                else {
                     return;
                 };
                 let (mark_w, _) = mark_size(true, self.theme.font_size);
@@ -4040,6 +4043,23 @@ mod tests {
             assert!(ui.widget(row).children.is_empty(), "{detail:?}: no second line");
             assert_eq!(ui.switch_line(row), None);
             assert_eq!(ui.measure(row), ui.measure(plain), "{detail:?}: a plain switch's size");
+            let (r, p) = (ui.widget(row).rect, ui.widget(plain).rect);
+            assert_eq!((r.w, r.h), (p.w, p.h));
+        }
+    }
+
+    #[test]
+    fn a_second_line_blanked_later_leaves_a_plain_switch() {
+        let mut ui = Ui::new("Preferences", Theme::default(), false);
+        let row = ui.switch_row(Ui::ROOT, "Wi-Fi", "Connect to known networks", true);
+        let plain = ui.switch(Ui::ROOT, "Wi-Fi", true);
+        ui.layout();
+        let line = ui.widget(row).children[0];
+        for blank in ["", " \t "] {
+            ui.set_text(line, blank);
+            ui.layout();
+            assert_eq!(ui.switch_line(row), None, "{blank:?}");
+            assert_eq!(ui.measure(row), ui.measure(plain), "{blank:?}: a plain switch's size");
             let (r, p) = (ui.widget(row).rect, ui.widget(plain).rect);
             assert_eq!((r.w, r.h), (p.w, p.h));
         }
