@@ -59,6 +59,9 @@ struct Marks<T> {
     by_source: HashMap<ObjectId, (Weak<WlDataSource>, T)>,
     /// How many marks were left at the last prune.
     kept: usize,
+    /// How many prunes there were.
+    #[cfg(test)]
+    prunes: usize,
 }
 
 impl<T> Default for Marks<T> {
@@ -66,6 +69,8 @@ impl<T> Default for Marks<T> {
         Self {
             by_source: HashMap::new(),
             kept: 0,
+            #[cfg(test)]
+            prunes: 0,
         }
     }
 }
@@ -83,6 +88,10 @@ impl<T> Marks<T> {
         if self.by_source.len() >= 2 * self.kept.max(32) {
             self.by_source.retain(|_, (source, _)| source.is_alive());
             self.kept = self.by_source.len();
+            #[cfg(test)]
+            {
+                self.prunes += 1;
+            }
         }
     }
 }
@@ -115,15 +124,17 @@ impl ToplevelDrags {
     }
 
     /// How many drag objects, attached toplevels, drags in progress, sources used by a toplevel
-    /// drag and sources set as the selection are kept, in that order.
+    /// drag and sources set as the selection are kept, in that order, and how many times the
+    /// marks of the selection were pruned.
     #[cfg(test)]
-    pub(crate) fn sizes(&self) -> [usize; 5] {
+    pub(crate) fn sizes(&self) -> [usize; 6] {
         [
             self.drags.len(),
             self.attached.len(),
             self.started.len(),
             self.used.by_source.len(),
             self.selected.by_source.len(),
+            self.selected.prunes,
         ]
     }
 }

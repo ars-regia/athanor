@@ -462,6 +462,33 @@ fn an_attached_full_screen_window_is_not_the_target() {
     run.stop();
 }
 
+/// A full-screen window attached to its own drag, with another window above it, hides nothing
+/// with its black: the window below it, under the pointer, is the target.
+#[test]
+fn an_attached_full_screen_window_below_another_hides_nothing() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut to = party(&mut run, (500, 100), None);
+    let mut from = party(&mut run, (100, 100), None);
+    from.local.roundtrip(&mut run);
+    from.local.client.configure = None;
+    from.toplevel.set_fullscreen(None);
+    from.local.redraw(&mut run);
+    let serial = from.press(&mut run);
+    let carry = from.carry(&mut run);
+    carry.drag.attach(&from.toplevel, 20, 20);
+    from.start(&mut run, &carry.source, serial);
+    // Above the full-screen window, so that it is not lifted, and away from the pointer.
+    let _above = party(&mut run, (900, 600), None);
+
+    run.state
+        .pointer_to((550.0, 150.0).into(), InputTime::now());
+    let (surface, _, _) = to.entered(&mut run, 1);
+    assert_eq!(surface, to.surface.id(), "the window below the full-screen one");
+    release(&mut run);
+    run.stop();
+}
+
 /// A toplevel destroyed during the drag is no error, and nothing of it is kept once the drag
 /// has ended.
 #[test]
@@ -487,7 +514,7 @@ fn a_toplevel_destroyed_during_the_drag_is_forgotten() {
         from.local.connection.protocol_error().is_none(),
         "a toplevel destroyed while attached"
     );
-    let [drags, attached, started, _, _] = run.state.toplevel_drags.sizes();
+    let [drags, attached, started, _, _, _] = run.state.toplevel_drags.sizes();
     assert_eq!((drags, attached, started), (1, 0, 0), "the drag object alone");
     carry.drag.destroy();
     from.local.roundtrip(&mut run);
@@ -521,14 +548,16 @@ fn a_source_destroyed_during_the_drag_is_forgotten() {
         from.local.connection.protocol_error().is_none(),
         "a source destroyed during its drag"
     );
-    let [_, attached, started, _, _] = run.state.toplevel_drags.sizes();
+    let [_, attached, started, _, _, _] = run.state.toplevel_drags.sizes();
     assert_eq!((attached, started), (0, 0), "no drag in progress");
     run.stop();
 }
 
 /// The same source set as the selection again and again, and many sources each set and gone,
-/// or each given to a toplevel drag and gone, leave a bounded number of marks: a client cannot
-/// make a request cost more than the last.
+/// or each given to a toplevel drag and gone, leave a bounded number of marks, also while 200
+/// sources set as the selection live: the marks stay within twice the sources alive, and are
+/// pruned once each time they double, so that a client cannot make a request cost more than the
+/// last.
 #[test]
 fn the_marks_of_sources_stay_bounded() {
     let mut run = Running::start(None);
@@ -546,8 +575,21 @@ fn the_marks_of_sources_stay_bounded() {
         "one mark for one source"
     );
 
+    let live: Vec<_> = (0..200)
+        .map(|_| {
+            let (selected, log) = from.source();
+            from.device.set_selection(Some(&selected), serial);
+            (selected, log)
+        })
+        .collect();
+    from.local.roundtrip(&mut run);
+    let before = run.state.toplevel_drags.sizes()[5];
     let manager: XdgToplevelDragManagerV1 = from.local.bind(1);
-    for _ in 0..500 {
+    for round in 0..2000 {
+        // The server reads as the client writes, so that the socket never fills.
+        if round % 100 == 0 {
+            from.local.roundtrip(&mut run);
+        }
         let (selected, _log) = from.source();
         from.device.set_selection(Some(&selected), serial);
         selected.destroy();
@@ -561,10 +603,21 @@ fn the_marks_of_sources_stay_bounded() {
         from.local.connection.protocol_error().is_none(),
         "every source and drag object was its own"
     );
-    let [drags, _, _, used, selected] = run.state.toplevel_drags.sizes();
+    let [drags, _, _, used, selected, prunes] = run.state.toplevel_drags.sizes();
     assert_eq!(drags, 0, "no drag object left");
     assert!(used <= 64, "the marks of used sources gone are dropped: {used}");
-    assert!(selected <= 64, "the marks of selected sources gone are dropped: {selected}");
+    let alive = live.len() + 1;
+    assert!(
+        // The source being marked counts at the prune, and goes after it.
+        (alive..=2 * (alive + 1)).contains(&selected),
+        "within twice the {alive} sources alive: {selected}"
+    );
+    // 2000 marks over about 200 kept: one prune for each 200 or so.
+    assert!(
+        prunes - before <= 2000 / live.len() + 1,
+        "a prune for each doubling: {}",
+        prunes - before
+    );
     release(&mut run);
     run.stop();
 }
