@@ -11,6 +11,7 @@ still gets one, and the log line then links to it.
 A line has the form `YYYY-MM-DD: what was decided. Where.` Documents cite a decision as
 "maintainer decision, <date>", and the date of that citation is the date of the line.
 
+- 2026-11-22: the units of `athanor-shelld`, `athanor-sessiond`, `athanor-idle` and the portal backend set `WatchdogSec=30s`, so each pings every 15 s after a roundtrip on its own bus connection. [doc_session](../architecture/doc_session.md) SN6.
 - 2026-11-22: a Landlock write grant whose path passes through a link in a directory that root alone does not write is refused with an error that names the link and its target, and `athanor-shelld` and `athanor-update-notify` exit; the link is not canonicalised (#1061). [doc_notification_center](../architecture/doc_notification_center.md), the history's storage.
 - 2026-11-21: the RemoteDesktop portal holds at most 8 sessions for one owner, and a ninth request is refused with a clear error (the refusal's form is a proposal of PT15's amendment). [doc_portal](../architecture/doc_portal.md) PT15.
 - 2026-11-21: `athanor-shelld`, `athanor-sessiond`, `athanor-idle` and the portal backend send `WATCHDOG=1` only after a roundtrip on their own bus connection has succeeded, so that a daemon whose loop runs and whose connection is wedged is restarted. [doc_session](../architecture/doc_session.md) SN6.
