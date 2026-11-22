@@ -445,7 +445,7 @@ class Moved(unittest.TestCase):
         files = {"src/x.rs": "fn a() {}\nfn b() {}\n"}
         self.assertEqual(self.found(text, {"src/x.rs": [(1, 1, 0)]}, base=base, extra=files), [])
 
-    def test_a_kept_citation_whose_range_a_size_changing_hunk_edits_is_left_to_a_reader(self):
+    def test_a_kept_citation_whose_range_a_size_changing_hunk_edits_must_be_placed_again(self):
         base = "The line `grant` is at `src/x.rs:1-2`."
         text = "The line `grant`, reworded, is at `src/x.rs:1-2`."
         out = self.found(text, {"src/x.rs": [(1, 1, 3)]}, base=base, extra={})
