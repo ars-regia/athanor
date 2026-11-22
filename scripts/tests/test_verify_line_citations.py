@@ -439,6 +439,19 @@ class Moved(unittest.TestCase):
         self.assertEqual(self.found(text, hunks, base=self.TEXT, extra={}), [])
         self.assertEqual(len(self.found(self.TEXT, hunks, extra={})), 1)
 
+    def test_a_line_in_a_replaced_block_of_unequal_size_is_not_paired(self):
+        base = "`a` is at `src/x.rs:2`.\n`b` is at `src/x.rs:3`."
+        text = "`b` now is at `src/x.rs:2`."
+        files = {"src/x.rs": "fn a() {}\nfn b() {}\n"}
+        self.assertEqual(self.found(text, {"src/x.rs": [(1, 1, 0)]}, base=base, extra=files), [])
+
+    def test_a_kept_citation_whose_range_a_size_changing_hunk_edits_is_left_to_a_reader(self):
+        base = "The line `grant` is at `src/x.rs:1-2`."
+        text = "The line `grant`, reworded, is at `src/x.rs:1-2`."
+        out = self.found(text, {"src/x.rs": [(1, 1, 3)]}, base=base, extra={})
+        self.assertEqual(len(out), 1)
+        self.assertIn("edited or removed: place it again", out[0])
+
     def test_a_hunk_below_the_range_or_in_another_file_moves_nothing(self):
         self.assertEqual(self.found(self.TEXT, {"src/x.rs": [(4, 0, 3)]}), [])
         self.assertEqual(self.found(self.TEXT, {"other.md": [(0, 0, 3)]}), [])

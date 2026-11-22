@@ -7132,11 +7132,12 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    on a line that replaces a base line (difflib pairs the lines of a replaced block by position), the
+    on a line that replaces a base line (difflib pairs the lines of a replaced block of equal size by position), the
     k-th citation of a file is kept when the base line's k-th citation of that file has the same lines:
     it is read through the hunks for a shift only, as the author re-confirmed it by rewording the line (a
-    cited line edited in place is not a finding there). A citation whose lines the edit changed, and a new one,
-    is the author's own placing. A cited
+    cited line edited in place, with the line count kept, is not a finding there). The author's own placing,
+    checked only by the token check, is: an edited line with no pair (an inserted line, a split or merged line,
+    a block of unequal size), a new citation, and a citation whose lines the edit changed. A cited
     line of a Markdown file that the change edited without adding or removing lines, and whose only
     difference from the revision is the numbers of its own citations (`base_file(path)` is the file
     there), is not an edit.
@@ -7171,7 +7172,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         new_rows = [backtick_plain_paths(row) for row in text.split("\n")]
         pair = {}
         for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_rows, new_rows, autojunk=False).get_opcodes():
-            if tag == "replace":
+            if tag == "replace" and i2 - i1 == j2 - j1:
                 pair.update({j + 1: i + 1 for i, j in zip(range(i1, i2), range(j1, j2))})
     else:
         was, pair = {}, {}
@@ -7308,7 +7309,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 reworded = k < len(kept) and kept[k] == spec
             if not symbol and reworded:
                 new = moved_ranges(ranges, hunks[path], lambda old, now: True)
-                if new is not None and new != ranges:
+                if new is None:
+                    out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
+                                "that this change edited or removed: place it again"))
+                    continue
+                if new != ranges:
                     named = ", ".join(f"{a}-{b}" if "-" in part else str(a) for part, (a, b)
                                       in zip(re.split(r",\s*", spec), new))
                     out.append((number, path, spec, "moved", f"{doc}:{number}: `{path}:{spec}` is moved by "
