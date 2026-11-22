@@ -1384,6 +1384,7 @@ impl Shell {
             scale: 1.0,
             size,
             stretch,
+            fill: (0.0, 0.0),
             layer: None,
             output: None,
             configured: false,
@@ -1627,8 +1628,133 @@ fn max_size(ui: &Ui, size: (u32, u32)) -> Option<(u32, u32)> {
 
 /// The widgets' size in whole logical pixels, never empty.
 fn logical_size(ui: &Ui) -> (u32, u32) {
-    let (w, h) = ui.size();
+    whole(ui.size())
+}
+
+/// The widgets' size without the size configured ([`Ui::sized_by_compositor`]), in whole
+/// logical pixels, never empty: a window's minimum.
+fn natural_size(ui: &Ui) -> (u32, u32) {
+    whole(ui.natural)
+}
+
+/// `(w, h)` rounded up to whole logical pixels, never empty.
+fn whole((w, h): (f32, f32)) -> (u32, u32) {
     ((w.ceil() as u32).max(1), (h.ceil() as u32).max(1))
+}
+
+/// The size a window fills after a configure of `new_size`, and the [`Event::Resized`] that
+/// tells its application when that size is not the one it filled, `was`. It is `new_size`,
+/// bounded to what the renderer accepts at `scale` ([`largest_logical`] along an axis, then
+/// [`within_pixel_ceiling`] for the frame), and then never less than its widgets' size: where the
+/// widgets' size exceeds the bound, it wins. Along an axis the compositor leaves to the window (a
+/// configure of 0) the size is the one it has, `was`, and its widgets' size before it has one.
+/// Never 0. It is for a resizable window that takes the size
+/// configured ([`Ui::sized_by_compositor`]); 0 on both for any other, which hears nothing.
+fn fill(
+    ui: &Ui,
+    was: (f32, f32),
+    new_size: (Option<std::num::NonZeroU32>, Option<std::num::NonZeroU32>),
+    scale: f32,
+) -> ((f32, f32), Option<Event>) {
+    if !(ui.sized_by_compositor && ui.resizable) {
+        return ((0.0, 0.0), None);
+    }
+    let (min_w, min_h) = natural_size(ui);
+    let max = largest_logical(scale);
+    let axis = |n: Option<std::num::NonZeroU32>, was: f32| {
+        n.map_or(was as u32, |n| n.get()).min(max)
+    };
+    let (width, height) =
+        within_pixel_ceiling((axis(new_size.0, was.0), axis(new_size.1, was.1)), scale);
+    let (width, height) = (width.max(min_w), height.max(min_h));
+    let fill = (width as f32, height as f32);
+    (fill, (fill != was).then_some(Event::Resized { width, height }))
+}
+
+/// The largest logical size along an axis whose physical size at `scale` the renderer accepts:
+/// `render::physical` counts in 16 bits.
+fn largest_logical(scale: f32) -> u32 {
+    // `physical` at the largest 16-bit size: 65535 * 120 + 59, in 120ths of a pixel.
+    const LARGEST: u64 = 7_864_259;
+    let scale120 = ((scale * 120.0).round() as u64).max(1);
+    LARGEST.checked_div(scale120).and_then(|n| u32::try_from(n).ok()).map_or(u32::MAX, |n| n.max(1))
+}
+
+/// The most physical pixels a frame has: 2^26, 256 MB at 4 bytes a pixel, and an 8K square fits.
+const PIXEL_CEILING: u64 = 1 << 26;
+
+/// `(w, h)` logical pixels, scaled down, keeping their proportions, to the largest size whose
+/// frame at `scale` has at most [`PIXEL_CEILING`] physical pixels, and unchanged when it has
+/// that many or fewer. Integer arithmetic in the scale's 120ths, as [`crate::render::physical`]:
+/// a side of `n` logical pixels is `(n * scale120 + 60) / 120` physical ones, rounded down. A
+/// size over the ceiling is shrunk so that the product of its sides in 120ths, rounding included,
+/// is under `PIXEL_CEILING * 120^2`. Sizes are at most [`largest_logical`] along an axis, so no
+/// product overflows.
+fn within_pixel_ceiling((w, h): (u32, u32), scale: f32) -> (u32, u32) {
+    let scale120 = ((scale * 120.0).round() as u64).max(1);
+    let side = |n: u32| u64::from(n).saturating_mul(scale120).saturating_add(60);
+    let (sw, sh) = (side(w), side(h));
+    if (sw / 120).saturating_mul(sh / 120) <= PIXEL_CEILING {
+        return (w, h);
+    }
+    let area = sw.saturating_mul(sh);
+    // The geometric mean of the sides, rounded up so the product stays under the ceiling, brought
+    // to `sqrt(PIXEL_CEILING)` physical pixels (in 120ths); a side keeps its share of it.
+    let mean = area.isqrt().saturating_add(1);
+    let target = PIXEL_CEILING.isqrt().saturating_mul(120);
+    let shrink = |s: u64| {
+        let n = s.saturating_mul(target).checked_div(mean).unwrap_or(0).saturating_sub(60);
+        u32::try_from(n.checked_div(scale120).unwrap_or(0)).map_or(u32::MAX, |n| n.max(1))
+    };
+    (shrink(sw), shrink(sh))
+}
+
+/// [`fill`] for a configure of a window drawn at `scale`: the size is clamped to the widgets'
+/// size as it is after a layout at that size, so that a title bar added by this configure, or a
+/// height that follows the width, is in the minimum the size reported is clamped to.
+fn settle(
+    ui: &mut Ui,
+    scale: f32,
+    was: (f32, f32),
+    new_size: (Option<std::num::NonZeroU32>, Option<std::num::NonZeroU32>),
+) -> ((f32, f32), Option<Event>) {
+    let (mut size, mut event) = fill(ui, was, new_size, scale);
+    // The minimum moves with the width and settles within a few layouts; a layout that fails
+    // fails again at the draw, which ends the run through `fail`. A size that has not settled
+    // after the last layout is not adopted: the size reported is always one that was laid out.
+    for round in 0..4 {
+        ui.configured = filled(ui, size);
+        if layout(ui, scale).is_err() {
+            break;
+        }
+        let (next, next_event) = fill(ui, was, new_size, scale);
+        if next == size || round == 3 {
+            break;
+        }
+        (size, event) = (next, next_event);
+    }
+    (size, event)
+}
+
+/// [`settle`] for a window whose scale changed to `scale`: the size it fills, `was`, bounded
+/// again to what the renderer accepts at the new scale. A window that fills nothing, as one not
+/// configured yet, stays so and tells its application nothing.
+fn resettle(ui: &mut Ui, scale: f32, was: (f32, f32)) -> ((f32, f32), Option<Event>) {
+    if was == (0.0, 0.0) {
+        return (was, None);
+    }
+    let axis = |n: f32| std::num::NonZeroU32::new(n as u32);
+    settle(ui, scale, was, (axis(was.0), axis(was.1)))
+}
+
+/// The size `ui` fills of `fill`, the size its window was last configured: `fill` while it takes
+/// the size configured and is resizable, nothing once it no longer does.
+fn filled(ui: &Ui, fill: (f32, f32)) -> (f32, f32) {
+    if ui.sized_by_compositor && ui.resizable {
+        fill
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 enum Shown {
@@ -1693,6 +1819,10 @@ struct Surface {
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
     stretch: (bool, bool),
+    /// The size the compositor configured a window that takes it ([`Ui::sized_by_compositor`]),
+    /// 0 along an axis it leaves to the window: kept here, so that a [`Ui`] the application
+    /// puts in its place fills it too.
+    fill: (f32, f32),
     /// A layer surface's layer and namespace.
     layer: Option<(Layer, String)>,
     /// The output a layer surface was opened on, when one was named: always for the surfaces of
@@ -1755,6 +1885,7 @@ impl Surface {
 
     fn draw(&mut self, pool: &mut SlotPool, qh: &QueueHandle<App>) -> Result<(), Error> {
         self.dirty = false;
+        self.ui.configured = filled(&self.ui, self.fill);
         if !self.configured {
             return Ok(());
         }
@@ -1821,6 +1952,7 @@ impl Surface {
     /// layer surface's size, or a window's minimum size, when its widgets' changed.
     fn place(&mut self) {
         let size = logical_size(&self.ui);
+        let min = natural_size(&self.ui);
         match &self.shown {
             Shown::Layer(surface) => {
                 let asked = requested(size, self.stretch);
@@ -1829,10 +1961,10 @@ impl Surface {
                     self.size = asked;
                 }
             }
-            Shown::Window(window) if size != self.size => {
-                window.set_min_size(Some(size));
-                window.set_max_size(max_size(&self.ui, size));
-                self.size = size;
+            Shown::Window(window) if min != self.size => {
+                window.set_min_size(Some(min));
+                window.set_max_size(max_size(&self.ui, min));
+                self.size = min;
             }
             _ => {}
         }
@@ -2034,8 +2166,10 @@ impl Dispatch2<WpFractionalScaleV1, App> for Scaling {
             // The protocol's unit: 120ths.
             surface.scale = scale as f32 / 120.0;
             surface.dirty = true;
+            let resized;
+            (surface.fill, resized) = resettle(&mut surface.ui, surface.scale, surface.fill);
             let id = surface.id;
-            app.changed(id, None);
+            app.changed(id, resized);
         }
     }
 }
@@ -2978,8 +3112,10 @@ impl CompositorHandler for App {
         // The fractional scale, when there is one, is the scale.
         if surface.fractional.is_none() {
             surface.scale = factor.max(1) as f32;
+            let resized;
+            (surface.fill, resized) = resettle(&mut surface.ui, surface.scale, surface.fill);
             let id = surface.id;
-            self.changed(id, None);
+            self.changed(id, resized);
         }
     }
 
@@ -3188,11 +3324,14 @@ impl WindowHandler for App {
         if configure.decoration_mode == DecorationMode::Client {
             surface.ui.add_title_bar();
         }
-        // ponytail: the window keeps the widgets' natural size whatever the compositor
-        // suggests; stretching to the configured size comes with the layout milestone.
+        // A window that takes the size configured fills it from its next layout, and its
+        // application hears of a new size before the window is drawn at it.
+        let resized;
+        let scale = surface.scale;
+        (surface.fill, resized) = settle(&mut surface.ui, scale, surface.fill, configure.new_size);
         surface.configured = true;
         let id = surface.id;
-        self.changed(id, None);
+        self.changed(id, resized);
     }
 }
 
@@ -4555,5 +4694,243 @@ mod tests {
             "{error:?}"
         );
         Ok(())
+    }
+
+    use std::num::NonZeroU32;
+
+    /// A size of a configure, 0 for an axis left to the window, as `WindowConfigure::new_size`.
+    fn suggested(width: u32, height: u32) -> (Option<NonZeroU32>, Option<NonZeroU32>) {
+        (NonZeroU32::new(width), NonZeroU32::new(height))
+    }
+
+    #[test]
+    fn a_window_sized_by_the_compositor_fills_the_size_configured_over_its_widgets_minimum() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        ui.layout();
+        let widgets = ui.size();
+        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(900, 700), 1.0);
+        assert_eq!(size, (900.0, 700.0));
+        assert!(matches!(resized, Some(Event::Resized { width: 900, height: 700 })));
+        // As the driver draws: the size filled, then a layout at it.
+        ui.configured = filled(&ui, size);
+        ui.layout();
+        assert_eq!(ui.size(), (900.0, 700.0), "the window takes the size configured");
+        assert_eq!(natural_size(&ui), whole(widgets), "its minimum stays its widgets' size");
+    }
+
+    /// A configure below the widgets' size: the window keeps theirs, and its application hears
+    /// the size the window has, never one it cannot take.
+    #[test]
+    fn a_window_configured_below_its_widgets_size_reports_the_size_it_has() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        ui.layout();
+        let (w, h) = natural_size(&ui);
+        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(1, 1), 1.0);
+        assert_eq!(size, (w as f32, h as f32));
+        assert!(matches!(resized, Some(Event::Resized { width, height }) if (width, height) == (w, h)));
+        ui.configured = filled(&ui, size);
+        ui.layout();
+        assert_eq!(whole(ui.size()), (w, h), "drawn at its widgets' size");
+    }
+
+    #[test]
+    fn a_window_hears_of_a_size_only_when_it_changes_and_keeps_its_own_along_an_axis_left_to_it() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.sized_by_compositor = true;
+        ui.min_width = 400.0;
+        ui.layout();
+        let (size, resized) = fill(&ui, (0.0, 0.0), suggested(0, 0), 1.0);
+        let (w, h) = natural_size(&ui);
+        assert_eq!(size, (w as f32, h as f32), "nothing configured, the widgets' size");
+        assert_eq!(w, 400);
+        assert!(matches!(resized, Some(Event::Resized { width, height }) if (width, height) == (w, h)));
+        let (size, resized) = fill(&ui, (900.0, 700.0), suggested(900, 700), 1.0);
+        assert_eq!((size, resized), ((900.0, 700.0), None), "the same size again");
+        let (size, resized) = fill(&ui, (900.0, 700.0), suggested(0, 500), 1.0);
+        assert_eq!(size, (900.0, 500.0), "0 keeps the size the window has along that axis");
+        assert!(matches!(resized, Some(Event::Resized { width: 900, height: 500 })));
+        ui.configured = filled(&ui, size);
+        ui.layout();
+        assert_eq!(ui.size(), (900.0, 500.0));
+        // The application reads it as any event of its widgets'.
+        let resized = Event::Resized { width: 900, height: 500 };
+        assert!(matches!(route(&ui, resized.clone(), false), Route::Application(e) if e == resized));
+    }
+
+    #[test]
+    fn a_window_keeps_its_widgets_size_unless_it_takes_the_size_configured_and_is_resizable() {
+        let mut ui = Ui::new("Chooser", crate::Theme::default(), false);
+        assert!(!ui.sized_by_compositor, "the widgets' size by default");
+        assert_eq!(fill(&ui, (0.0, 0.0), suggested(900, 700), 1.0), ((0.0, 0.0), None));
+        ui.sized_by_compositor = true;
+        ui.resizable = false;
+        assert_eq!(fill(&ui, (0.0, 0.0), suggested(900, 700), 1.0), ((0.0, 0.0), None));
+        ui.add(Ui::ROOT, Kind::Button("Open".into()));
+        ui.layout();
+        assert_eq!(natural_size(&ui), logical_size(&ui), "unfilled, its minimum is its size");
+    }
+
+    /// A window that stops taking the size configured after a configure is drawn at its widgets'
+    /// size from its next draw, though the surface keeps the size configured.
+    #[test]
+    fn a_window_that_stops_taking_the_size_configured_returns_to_its_widgets_size() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        ui.layout();
+        let widgets = ui.size();
+        let (size, _) = fill(&ui, (0.0, 0.0), suggested(900, 700), 1.0);
+        ui.sized_by_compositor = false;
+        ui.configured = filled(&ui, size);
+        ui.layout();
+        assert_eq!(ui.size(), widgets);
+    }
+
+    /// The title bar a configure adds is in the minimum the size reported is clamped to.
+    #[test]
+    fn a_window_with_client_side_decorations_reports_the_size_it_will_have() {
+        let mut bare = Ui::new("Settings", crate::Theme::default(), false);
+        bare.add(Ui::ROOT, Kind::Button("Network".into()));
+        bare.add_title_bar();
+        bare.layout();
+        let (_, with_bar) = natural_size(&bare);
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        ui.layout();
+        let (_, without_bar) = natural_size(&ui);
+        assert!(without_bar < with_bar, "the bar has a height");
+        // As the configure does: the bar, then the size.
+        ui.add_title_bar();
+        let suggested_height = with_bar - 1;
+        assert!(suggested_height > without_bar);
+        let (size, resized) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(900, suggested_height));
+        assert_eq!(size, (900.0, with_bar as f32));
+        assert!(matches!(resized, Some(Event::Resized { height, .. }) if height == with_bar));
+        ui.configured = filled(&ui, size);
+        ui.layout();
+        assert_eq!(ui.size(), size, "the window has the size reported");
+    }
+
+    /// A configure wider than the renderer's 16-bit buffers is bounded along that axis, not a
+    /// failure of the run. The height is small, so only the per-axis bound is in play.
+    #[test]
+    fn a_window_configured_beyond_the_renderers_largest_size_is_bounded() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        let (size, _) = settle(&mut ui, 2.0, (0.0, 0.0), suggested(40_000, 100));
+        assert_eq!(size, (32_767.0, 100.0));
+        ui.configured = filled(&ui, size);
+        assert!(layout(&mut ui, 2.0).is_ok(), "the renderer takes the size reported");
+        assert_eq!(largest_logical(1.0), 65_535);
+    }
+
+    /// The bound is the largest size `physical` takes, at integer and fractional scales alike.
+    #[test]
+    fn the_largest_logical_size_is_the_largest_the_renderer_accepts() {
+        for scale in [1.0, 1.25, 1.5, 2.0, 3.0, 1.0 / 3.0] {
+            let largest = largest_logical(scale);
+            assert!(crate::render::physical(largest as f32, scale).is_ok(), "{largest} at {scale}");
+            assert!(crate::render::physical((largest + 1) as f32, scale).is_err(), "{} at {scale}", largest + 1);
+        }
+    }
+
+    /// A window configured at one scale and moved to a larger one is bounded again, and its
+    /// application hears the size it has.
+    #[test]
+    fn a_window_moved_to_a_larger_scale_is_bounded_again() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        let (size, _) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(30_000, 100));
+        assert_eq!(size, (30_000.0, 100.0));
+        let (size, resized) = resettle(&mut ui, 3.0, size);
+        assert_eq!(size, (21_845.0, 100.0));
+        assert!(matches!(resized, Some(Event::Resized { width: 21_845, height: 100 })));
+        ui.configured = filled(&ui, size);
+        assert!(layout(&mut ui, 3.0).is_ok());
+    }
+
+    /// The physical pixels of a frame of `size` logical pixels at `scale`, as the renderer counts.
+    fn pixels((w, h): (f32, f32), scale: f32) -> u64 {
+        let side = |n: f32| u64::from(crate::render::physical(n, scale).unwrap_or(u16::MAX));
+        side(w) * side(h)
+    }
+
+    /// A configure of the largest size the renderer accepts would be a 17 GB frame: it ends
+    /// within 2^26 physical pixels, keeps its proportions, and the application hears of it.
+    #[test]
+    fn a_window_configured_beyond_the_pixel_ceiling_is_scaled_down_and_reported() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        let (size, resized) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(65_535, 65_535));
+        assert_eq!(size, (8_191.0, 8_191.0));
+        assert!(pixels(size, 1.0) <= 1 << 26);
+        assert!(matches!(resized, Some(Event::Resized { width: 8_191, height: 8_191 })));
+        // Proportions: 4 to 1 stays 4 to 1, to a pixel.
+        let (size, _) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(65_535, 16_383));
+        assert!(pixels(size, 1.0) <= 1 << 26);
+        assert!((size.0 - 4.0 * size.1).abs() <= 4.0, "{size:?}");
+        assert!(size.0 > 16_000.0, "the largest size within the ceiling: {size:?}");
+    }
+
+    /// A size within the ceiling is the size configured: 8K square fits exactly.
+    #[test]
+    fn a_window_just_under_the_pixel_ceiling_is_unchanged() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        for (w, h) in [(8_192, 8_192), (16_384, 4_096), (65_535, 1_024)] {
+            let (size, _) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(w, h));
+            assert_eq!(size, (w as f32, h as f32));
+            assert!(pixels(size, 1.0) <= 1 << 26);
+        }
+        let (size, _) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(8_193, 8_192));
+        assert!(size.0 < 8_193.0, "one pixel over the ceiling: {size:?}");
+    }
+
+    /// At a fractional scale the ceiling counts physical pixels, the renderer's rounding included,
+    /// and it holds again when the scale changes.
+    #[test]
+    fn the_pixel_ceiling_holds_at_a_fractional_scale() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        for scale in [1.25, 1.5, 1.0 / 3.0] {
+            let (size, _) = settle(&mut ui, scale, (0.0, 0.0), suggested(30_000, 20_000));
+            assert!(pixels(size, scale) <= 1 << 26, "{size:?} at {scale}");
+            assert!(pixels(size, scale) > (1 << 26) - (1 << 20), "{size:?} at {scale}");
+        }
+        let (size, _) = settle(&mut ui, 1.0, (0.0, 0.0), suggested(8_000, 8_000));
+        assert_eq!(size, (8_000.0, 8_000.0));
+        let (size, resized) = resettle(&mut ui, 1.25, size);
+        assert!(pixels(size, 1.25) <= 1 << 26);
+        assert!(size.0 < 8_000.0 && matches!(resized, Some(Event::Resized { .. })));
+    }
+
+    /// The widgets' size wins over the ceiling, as over the per-axis bound.
+    #[test]
+    fn the_widgets_size_wins_over_the_pixel_ceiling() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        ui.natural = (10_000.0, 9_000.0);
+        let (size, _) = fill(&ui, (0.0, 0.0), suggested(65_535, 65_535), 1.0);
+        assert_eq!(size, (10_000.0, 9_000.0), "the ceiling is 8191, the widgets need more");
+    }
+
+    /// The preferred scale usually comes before the first configure: nothing to tell yet.
+    #[test]
+    fn a_scale_before_the_first_configure_tells_the_application_nothing() {
+        let mut ui = Ui::new("Settings", crate::Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Network".into()));
+        ui.sized_by_compositor = true;
+        assert_eq!(resettle(&mut ui, 1.5, (0.0, 0.0)), ((0.0, 0.0), None));
     }
 }

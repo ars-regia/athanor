@@ -73,7 +73,7 @@ fn notify_ready_to(socket: &OsStr) -> io::Result<()> {
 }
 
 /// `socket` is a path, or an abstract name when it starts with '@' (sd_notify(3)).
-fn notify_to(socket: &OsStr, message: &[u8]) -> io::Result<()> {
+pub(crate) fn notify_to(socket: &OsStr, message: &[u8]) -> io::Result<()> {
     let address = match socket.as_bytes().strip_prefix(b"@") {
         Some(name) => SocketAddr::from_abstract_name(name)?,
         None => SocketAddr::from_pathname(socket)?,
