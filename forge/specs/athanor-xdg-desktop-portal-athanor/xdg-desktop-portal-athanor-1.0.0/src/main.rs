@@ -101,13 +101,10 @@ fn serve(
     })
 }
 
-/// A closure queued on GLib's default context, which only the main loop of `main` runs: its
-/// answer proves that loop runs, for the watchdog's check (doc_session.md SN6).
-fn glib_loop_answers() -> tokio::sync::oneshot::Receiver<()> {
-    let (answer, answered) = tokio::sync::oneshot::channel();
-    glib::MainContext::default().invoke(move || {
-        // A receiver already dropped had its period end: that ping is skipped already.
-        let _ = answer.send(());
-    });
-    answered
+/// An empty task spawned on GLib's default context at the default priority, for the watchdog's
+/// check (doc_session.md SN6). A spawned task never runs in place, even before the main loop of
+/// `main` starts: only an iteration of that context runs it, so its completion proves that the
+/// loop runs. A task left by a period that timed out runs once the loop resumes, and answers no one.
+fn glib_loop_answers() -> glib::JoinHandle<()> {
+    glib::MainContext::default().spawn(async {})
 }

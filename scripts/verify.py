@@ -5781,7 +5781,9 @@ WATCHDOG_UNITS = (
 WATCHDOG_SECONDS = 30
 # The ping SN6 asks of a session daemon, after a roundtrip on its bus: athanor-unit's helper.
 WATCHDOG_SPAWN = re.compile(r"\bwatchdog::spawn(?:_with)?\s*\(")
-# A GLib main loop beside the bus: its ping must also wait on that loop, through spawn_with.
+# A GLib main loop beside the bus: its ping must also wait on that loop, through spawn_with. Only
+# the literal call in main's own file is seen; a loop started elsewhere, or a check that proves
+# nothing, passes, as a static reading cannot judge them.
 WATCHDOG_GLIB_LOOP = re.compile(r"\bglib::MainLoop::new\s*\(")
 WATCHDOG_SPAWN_WITH = re.compile(r"\bwatchdog::spawn_with\s*\(")
 # Any other ping in Rust: athanor-unit's notify call or the datagram itself, never a definition.

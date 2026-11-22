@@ -3,8 +3,8 @@
 //! its own event loop, so that one answer proves that the loop runs and that the connection
 //! serves. A timer alone proves only the first. The answer proves nothing of another thread, so
 //! `athanor-idle` and the portal backend, whose GLib main loop runs on a thread of its own beside
-//! the Tokio thread that serves the bus, pass `spawn_with` a check that only the GLib loop
-//! answers: a hang of either loop stops the pings.
+//! the Tokio thread that serves the bus, pass `spawn_with` a check that only an iteration of the
+//! GLib loop answers: a loop that never started, or that hangs, stops the pings.
 
 use std::convert::Infallible;
 use std::env;
