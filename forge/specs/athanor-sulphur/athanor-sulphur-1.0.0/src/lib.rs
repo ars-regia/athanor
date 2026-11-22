@@ -52,6 +52,7 @@ mod state;
 mod tablet;
 mod tearing;
 mod tiling;
+mod toplevel_drag;
 mod toplevel_icon;
 mod toplevel_tag;
 mod toplevel_state;
