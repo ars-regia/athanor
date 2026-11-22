@@ -476,7 +476,10 @@ impl Application for Settings {
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
         if event == Event::Window(WindowButton::Close) {
             shell.close(surface);
-            self.close_window();
+            // The window has no id before its first frame; any other surface is not it.
+            if self.window.is_none_or(|window| window == surface) {
+                self.close_window();
+            }
             return;
         }
         let Some(ui) = shell.ui_mut(surface) else {
@@ -511,7 +514,10 @@ impl Application for Settings {
                 return;
             };
             // Read again, as each start read them: they may have changed while no window was open.
+            // The last window's answers go first, so the new one never draws a trust state or a
+            // name read before it, and shows "Not verified" until the service answers again.
             self.look = look::look(&Appearance::read());
+            *self.info.borrow_mut() = Info::default();
             info::fetch(&self.info);
             let ui = self.window_at(target);
             match shell.open_window(ui, APP_ID) {
