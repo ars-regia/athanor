@@ -36,44 +36,69 @@ const USAGE: &str =
 fn main() -> ExitCode {
     athanor_unit::panic::install();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    // A snapshot name is ASCII (`parse_id`): one that is not UTF-8 is a usage error.
-    if let [cmd, id, _] = args.as_slice() {
-        if cmd == "restore" && id.to_str().is_none() {
-            eprintln!("athanor-backup: the snapshot name is not UTF-8\n{USAGE}");
-            return ExitCode::from(2);
-        }
-    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("athanor-backup: {err:#}");
-            ExitCode::FAILURE
+            if err.is::<Usage>() {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }
 
-/// The words of the command are text; the path of `restore` stays the bytes the user typed.
-fn run(args: &[OsString]) -> Result<()> {
-    let words: Vec<Option<&str>> = args.iter().map(|arg| arg.to_str()).collect();
-    if !matches!(
-        words.as_slice(),
-        [Some("init" | "create" | "prune" | "list")] | [Some("restore"), Some(_), Some(_)]
-    ) {
-        bail!("{USAGE}");
+/// A command line that is not one of the five commands, or whose snapshot name is not text.
+#[derive(Debug)]
+struct Usage(String);
+
+impl std::fmt::Display for Usage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
+}
+
+impl std::error::Error for Usage {}
+
+enum Action<'a> {
+    Init,
+    Create,
+    Prune,
+    List,
+    Restore(&'a str, &'a Path),
+}
+
+/// The words of the command are text, and so is a snapshot name (`parse_id`); the path of
+/// `restore` stays the bytes the user typed.
+fn parse(args: &[OsString]) -> Result<Action<'_>, Usage> {
+    match args {
+        [cmd] if cmd == "init" => Ok(Action::Init),
+        [cmd] if cmd == "create" => Ok(Action::Create),
+        [cmd] if cmd == "prune" => Ok(Action::Prune),
+        [cmd] if cmd == "list" => Ok(Action::List),
+        [cmd, id, path] if cmd == "restore" => id
+            .to_str()
+            .map(|id| Action::Restore(id, Path::new(path)))
+            .ok_or_else(|| Usage(format!("the snapshot name is not UTF-8\n{USAGE}"))),
+        _ => Err(Usage(USAGE.to_owned())),
+    }
+}
+
+fn run(args: &[OsString]) -> Result<()> {
+    let action = parse(args)?;
     if !nix::unistd::geteuid().is_root() {
         bail!(
             "snapshots belong to root: run it as `sudo athanor-backup {}`",
-            words.iter().flatten().copied().collect::<Vec<_>>().join(" ")
+            args.iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>().join(" ")
         );
     }
-    match (words.as_slice(), args) {
-        ([Some("init")], _) => init(),
-        ([Some("create")], _) => create(),
-        ([Some("prune")], _) => prune(),
-        ([Some("list")], _) => list(),
-        ([Some("restore"), Some(id), Some(_)], [_, _, path]) => restore(id, Path::new(path)),
-        _ => bail!("{USAGE}"),
+    match action {
+        Action::Init => init(),
+        Action::Create => create(),
+        Action::Prune => prune(),
+        Action::List => list(),
+        Action::Restore(id, path) => restore(id, path),
     }
 }
 
@@ -471,5 +496,20 @@ mod tests {
             let err = run(&[OsString::from("list")]).expect_err("not root");
             assert!(err.to_string().contains("sudo athanor-backup list"));
         }
+    }
+
+    #[test]
+    fn a_restore_path_keeps_its_bytes_and_a_snapshot_name_must_be_text() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let path = OsString::from_vec(b"/var/home/ada/caf\xe9".to_vec());
+        let line = [OsString::from("restore"), OsString::from("2026-01-01_00-00-00"), path.clone()];
+        let Ok(Action::Restore(id, got)) = parse(&line) else {
+            panic!("a non-UTF-8 path is a restore");
+        };
+        assert_eq!((id, got.as_os_str().as_bytes()), ("2026-01-01_00-00-00", path.as_bytes()));
+        let bad_id = [OsString::from("restore"), OsString::from_vec(vec![0xff]), path];
+        assert!(parse(&bad_id).is_err_and(|usage| usage.0.contains("not UTF-8")));
+        assert!(parse(&[OsString::from("restore")]).is_err());
+        assert!(run(&bad_id).unwrap_err().is::<Usage>());
     }
 }
