@@ -156,9 +156,11 @@ pub fn private_dirs(runtime: &Path, names: &[&str]) -> Vec<Checked> {
 }
 
 fn refused(path: &Path, why: &str) -> io::Error {
+    // The path, a link's name and its target are the user's to choose: one line, so that a
+    // newline in them cannot forge a record of the journal the refusal is logged to.
     io::Error::new(
         io::ErrorKind::PermissionDenied,
-        format!("{} {why}", path.display()),
+        crate::text::line(&format!("{} {why}", path.display()), usize::MAX),
     )
 }
 
@@ -511,6 +513,23 @@ mod tests {
                 real.display()
             )
         );
+    }
+
+    #[test]
+    fn a_refusal_naming_a_link_is_one_line() {
+        let runtime = runtime("newline");
+        let _removed = Removed(runtime.clone());
+        // A link whose name and target hold a newline and a journal priority.
+        let link = runtime.join("li\n<2>nk");
+        std::os::unix::fs::symlink("x\n<2>forged", &link).expect("symlink");
+        if nix::unistd::geteuid().is_root() {
+            fs::set_permissions(&runtime, fs::Permissions::from_mode(0o770)).expect("chmod");
+        }
+        let message = owned_dir(&link.join("d"))
+            .expect_err("the link")
+            .to_string();
+        assert!(!message.contains('\n'), "{message:?}");
+        assert!(message.contains("li<2>nk -> x<2>forged"), "{message:?}");
     }
 
     #[test]
