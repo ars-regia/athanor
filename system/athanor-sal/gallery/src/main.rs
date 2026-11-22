@@ -477,7 +477,7 @@ impl Application for App {
 
 fn main() -> ExitCode {
     let run = || -> Result<(), String> {
-        let options = Options::parse(std::env::args().skip(1))?;
+        let options = Options::parse(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1))?;
         let (ui, gallery) = build(&options)?;
         let app = App {
             options,

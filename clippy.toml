@@ -1,0 +1,7 @@
+# `env::args` and `env::vars` panic on a non-UTF-8 argument or variable, which under
+# `panic = "abort"` is a SIGABRT (verify.py panics, #1430). clippy has no test exemption for
+# `disallowed_methods`: a test that needs one reads `args_os` too.
+disallowed-methods = [
+    { path = "std::env::args", reason = "panics on non-UTF-8; use args_os/vars_os" },
+    { path = "std::env::vars", reason = "panics on non-UTF-8; use args_os/vars_os" },
+]

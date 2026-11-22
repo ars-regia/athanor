@@ -217,7 +217,7 @@ impl Application for Moves {
 }
 
 fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1);
     let extra = match (args.next().as_deref(), args.next(), args.next()) {
         (None, _, _) => None,
         (Some("--extra"), Some(output), None) => Some(output),

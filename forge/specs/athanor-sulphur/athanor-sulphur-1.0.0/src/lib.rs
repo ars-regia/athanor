@@ -69,6 +69,7 @@ use headless::VirtualOutput;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use state::State;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub type Error = Box<dyn std::error::Error>;
@@ -122,21 +123,30 @@ fn virtual_output(value: &str) -> Result<VirtualOutput, Error> {
     })
 }
 
-fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
+/// The text of an argument value: only `--render-node` keeps the bytes it was given.
+fn text(value: OsString) -> Result<String, Error> {
+    value
+        .into_string()
+        .map_err(|value| format!("{value:?} is not UTF-8\n{USAGE}").into())
+}
+
+fn options(mut args: impl Iterator<Item = OsString>) -> Result<Options, Error> {
     let (mut headless, mut drm, mut scale, mut node, mut outputs) =
         (false, false, None, None, Vec::new());
     while let Some(arg) = args.next() {
         let mut value = || {
             args.next()
-                .ok_or_else(|| format!("{arg} needs a value\n{USAGE}"))
+                .ok_or_else(|| format!("{} needs a value\n{USAGE}", arg.to_string_lossy()))
         };
-        match arg.as_str() {
+        match arg.to_str().unwrap_or_default() {
             "--headless" => headless = true,
             "--drm" => drm = true,
-            "--scale" => scale = Some(factor(&value()?)?),
+            "--scale" => scale = Some(factor(&text(value()?)?)?),
             "--render-node" => node = Some(PathBuf::from(value()?)),
-            "--output" => outputs.push(virtual_output(&value()?)?),
-            other => return Err(format!("unknown argument {other}\n{USAGE}").into()),
+            "--output" => outputs.push(virtual_output(&text(value()?)?)?),
+            _ => {
+                return Err(format!("unknown argument {}\n{USAGE}", arg.to_string_lossy()).into())
+            }
         }
     }
     match (headless, scale) {
@@ -164,7 +174,7 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
 
 /// Runs the compositor as its arguments say, until SIGTERM, SIGINT or a fatal error.
 pub fn run() -> Result<(), Error> {
-    let options = options(std::env::args().skip(1))?;
+    let options = options(std::env::args_os().skip(1))?;
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     // First, before any thread: see `shutdown::watch`.
     let signals = shutdown::watch(&event_loop)?;
@@ -229,10 +239,12 @@ mod fixture;
 #[cfg(test)]
 mod tests {
     use super::{options, Options, VirtualOutput};
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
     fn parse(args: &[&str]) -> Result<Options, String> {
-        options(args.iter().map(|a| a.to_string())).map_err(|e| e.to_string())
+        options(args.iter().map(OsString::from)).map_err(|e| e.to_string())
     }
 
     #[test]
@@ -247,6 +259,19 @@ mod tests {
         }
         assert!(parse(&["--scale"]).is_err());
         assert!(parse(&["--other"]).is_err());
+    }
+
+    #[test]
+    fn a_render_node_keeps_the_bytes_it_was_given() {
+        let node = OsString::from_vec(b"/dev/dri/render\xffD128".to_vec());
+        let args = ["--headless", "--render-node"].map(OsString::from).into_iter().chain([node.clone()]);
+        assert_eq!(
+            options(args).map_err(|e| e.to_string()),
+            Ok(Options::Headless {
+                node: Some(PathBuf::from(node)),
+                outputs: vec![VirtualOutput { width: 1920, height: 1080, scale: 1.0 }]
+            })
+        );
     }
 
     #[test]

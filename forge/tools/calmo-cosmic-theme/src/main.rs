@@ -158,12 +158,12 @@ fn remove_empty_dirs(dir: &Path) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     let [_, inputs_path, out] = args.as_slice() else {
         bail!("usage: calmo-cosmic-theme <cosmic-inputs.json> <out-dir>");
     };
     let out = PathBuf::from(out);
-    let raw = std::fs::read(inputs_path).with_context(|| format!("reading {inputs_path}"))?;
+    let raw = std::fs::read(inputs_path).with_context(|| format!("reading {}", inputs_path.to_string_lossy()))?;
     let inputs: Inputs = serde_json::from_slice(&raw).context("parsing the inputs")?;
 
     if out.join("cosmic").exists() {

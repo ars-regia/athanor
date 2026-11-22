@@ -209,7 +209,7 @@ fn main() -> ExitCode {
     glib::spawn_future_local({
         let (main_loop, result) = (main_loop.clone(), result.clone());
         async move {
-            let mut steps = std::env::args().skip(1);
+            let mut steps = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1);
             let mut draining = false;
             while let Some(verb) = steps.next() {
                 if verb == "drain" {

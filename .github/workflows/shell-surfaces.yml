@@ -254,6 +254,8 @@ jobs:
         run: bash forge/test/shell/rig.sh toolkit-popup
       - name: A layer surface's motion on its frame callbacks
         run: bash forge/test/shell/rig.sh toolkit-motion
+      - name: Windows opened and closed at run time, and a run that outlives them
+        run: bash forge/test/shell/rig.sh toolkit-window
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
