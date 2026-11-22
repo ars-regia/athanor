@@ -28,6 +28,8 @@ athanor-sal 356
 athanor-search 9
 athanor-services 24
 athanor-sessiond 0
+athanor-settings 0
+athanor-settings-core 1
 athanor-shelld 29
 athanor-style 10
 athanor-sulphur 315

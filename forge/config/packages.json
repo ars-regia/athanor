@@ -35,7 +35,8 @@
     "greenboot-rs",
     "polkit",
     "unlockd",
-    "lock"
+    "lock",
+    "settings"
   ],
   "custom_tier0": [
     "base-config",
@@ -79,7 +80,8 @@
     "recovery",
     "xdg-desktop-portal-athanor",
     "unlockd",
-    "lock"
+    "lock",
+    "settings"
   ],
   "cachyos_addons": [],
   "upstream_core": [

@@ -753,6 +753,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-settings"
+version = "1.0.0"
+dependencies = [
+ "athanor-i18n",
+ "athanor-sal",
+ "athanor-settings-core",
+ "athanor-style",
+ "athanor-sulphur-client",
+ "athanor-trust-state",
+ "athanor-unit",
+ "gio",
+ "glib",
+ "nix 0.32.0",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "athanor-settings-core"
+version = "1.0.0"
+dependencies = [
+ "athanor-i18n",
+]
+
+[[package]]
 name = "athanor-shelld"
 version = "1.0.0"
 dependencies = [
