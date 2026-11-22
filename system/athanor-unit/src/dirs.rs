@@ -620,8 +620,13 @@ mod tests {
             eprintln!("skipped: / is not root's here");
             return;
         }
-        // /proc is root's, mode 0555, and /proc/self a link in it: on every Linux host.
-        owned_dir(Path::new("/proc/self/fd")).expect("through /proc/self");
+        // /proc is root's, mode 0555, and /proc/self a link in it, on every Linux host; a
+        // container whose user namespace does not map root shows it as another user's.
+        if fs::metadata("/proc").map(|m| m.uid()).ok() == Some(0) {
+            owned_dir(Path::new("/proc/self/fd")).expect("through /proc/self");
+        } else {
+            eprintln!("skipped: /proc is not root's here");
+        }
         // On Athanor /home is a link to var/home, and $HOME lies beneath it.
         let home = std::env::var_os("HOME").map(PathBuf::from);
         match home.filter(|home| home.starts_with("/home/")) {
