@@ -6,14 +6,10 @@ Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture
 After=graphical-session.target athanor-desktop.service
 Requisite=athanor-desktop.service
 PartOf=graphical-session.target
-# Not the surface class's ten starts in ten minutes (doc_session.md, SN6): until Sal keeps a
-# run without a window (doc_settings.md, SL1), every opening starts the unit, and an eleventh
-# opening in ten minutes would be refused. Twenty starts in a minute stop a crash loop at
-# RestartSec=200ms within about four seconds, and one that crashes a second after each start
-# within twenty, and no person opens Settings twenty times in a minute. Set the class's
-# limits with SL1.
-StartLimitBurst=20
-StartLimitIntervalSec=60s
+# The surface class's limits (doc_session.md, SN6): the process outlives its window
+# (doc_settings.md, SE5), so only the first Show and a crash start the unit.
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 [Service]
 Type=notify
@@ -24,8 +20,8 @@ ExecStart=/usr/bin/athanor-settings
 ExecStopPost=/usr/bin/athanor-settings --stopped
 TimeoutStartSec=20s
 # SE5: a crashed Settings comes back at once and reopens its window at the target it left in
-# %t/athanor-settings/state. A window the user closed ends the run cleanly, until Sal keeps
-# a run without a window (SL1).
+# %t/athanor-settings/state. A window the user closed clears that state, and the process
+# stays for the next Show.
 Restart=on-failure
 RestartSec=200ms
 Slice=session.slice

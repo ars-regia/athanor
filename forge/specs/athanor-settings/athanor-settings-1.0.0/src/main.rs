@@ -1,6 +1,7 @@
 //! athanor-settings: Settings (doc_settings.md). Inside `athanor-settings.service` it owns
 //! `os.athanor.Settings1` and opens its window at the first `Show`, or at the target a crashed
-//! run left in its state file (SE5). Started anywhere else, by the bar's application unit or a
+//! run left in its state file, and stays when the window closes, to open the next at the next
+//! `Show` (SE5). Started anywhere else, by the bar's application unit or a
 //! command line, it forwards `--show=<target>` to that name and exits (SE4).
 
 mod bus;
@@ -71,12 +72,11 @@ fn forward() -> ExitCode {
     }
 }
 
-/// `ExecStopPost=`: a run that ended well, its window closed or the unit stopped, leaves no
-/// window to reopen; a run that failed keeps its state for the restart (SE5). A stop that
+/// `ExecStopPost=`: a run that ended well, its unit stopped, leaves no window to reopen; a run that failed keeps its state for the restart (SE5). A stop that
 /// also kills this process, a SIGKILL of the whole unit say, leaves the state, and the next
 /// start reopens the page as after a crash. A clear that fails is logged and still exits 0:
-/// a failed `ExecStopPost=` would fail the run, and `Restart=on-failure` would bring back the
-/// window the user closed. It runs before every other step of `main`, which could fail, and
+/// a failed `ExecStopPost=` would fail the run, and `Restart=on-failure` would bring the
+/// window back. It runs before every other step of `main`, which could fail, and
 /// needs only the directory systemd names in `RUNTIME_DIRECTORY`.
 fn stopped() -> ExitCode {
     if env::var("SERVICE_RESULT").as_deref() != Ok("success") {
@@ -158,44 +158,31 @@ fn main() -> ExitCode {
         }),
     };
 
-    let mut first = first;
-    // A `Show` dispatched while the last window was closing is still queued when the run ends,
-    // so the next run opens it. One that reaches the bus between the last dispatch and the exit
-    // is lost, and its caller sees the name vanish; SL1, which keeps the run, removes that gap.
-    loop {
-        let glib = match GlibSource::new() {
-            Ok(glib) => glib,
-            Err(error) => {
-                tracing::error!(%error, "cannot run GLib's main context");
-                return ExitCode::FAILURE;
-            }
-        };
-        let info = Rc::default();
-        info::fetch(&info);
-        let settings = Settings::new(
-            Registry::new(),
-            look::look(&Appearance::read()),
-            i18n::is_rtl(),
-            first,
-            info,
-            shows.clone(),
-            Some(state_dir.clone()),
-        );
-        // ponytail: the run ends with the window until Sal keeps a run without one (SL1); each
-        // opening is then a cold start, and the unit is started again by the bus.
-        if let Err(error) = driver::run_with(settings, glib) {
-            tracing::error!(%error, "Settings stopped");
+    let glib = match GlibSource::new() {
+        Ok(glib) => glib,
+        Err(error) => {
+            tracing::error!(%error, "cannot run GLib's main context");
             return ExitCode::FAILURE;
         }
-        if let Err(error) = window_state::clear(&state_dir) {
-            tracing::warn!(%error, "cannot clear the window state; a restart reopens it");
-        }
-        // Dispatch the calls the bus has already read, so the queue is complete.
-        let context = glib::MainContext::default();
-        while context.iteration(false) {}
-        match window::take_show(&Registry::new(), &shows) {
-            Some(target) => first = First::Show(target),
-            None => return ExitCode::SUCCESS,
+    };
+    let info = Rc::default();
+    info::fetch(&info);
+    let settings = Settings::new(
+        registry,
+        look::look(&Appearance::read()),
+        i18n::is_rtl(),
+        first,
+        info,
+        shows,
+        Some(state_dir),
+    );
+    // Resident (SE5): the run outlives the window, which the next `Show` builds again in this
+    // process, and ends with the unit.
+    match driver::run_with(settings, glib) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(%error, "Settings stopped");
+            ExitCode::FAILURE
         }
     }
 }
