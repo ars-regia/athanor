@@ -5790,8 +5790,9 @@ def watchdog_problems(units, senders):
             problems.append(f"{unit}: sets WatchdogSec= and runs {program}, no binary of a crate under system/ or forge/specs, so no check sees it send WATCHDOG=1")
         elif not senders[program]:
             problems.append(f"{unit}: sets WatchdogSec= and the crate of {program} sends no WATCHDOG=1, so the manager ends it at every timeout (athanor_unit::watchdog::spawn)")
-        if service.get("Type", "simple") not in ("notify", "notify-reload") and service.get("NotifyAccess", "none") == "none":
-            problems.append(f"{unit}: sets WatchdogSec= in a Type={service.get('Type', 'simple')} unit without NotifyAccess=, so the manager may drop every WATCHDOG=1 (doc_portal.md PT3)")
+        # Unset, NotifyAccess= is implied as main by WatchdogSec= (systemd.service(5)); only none drops the pings.
+        if service.get("NotifyAccess") == "none":
+            problems.append(f"{unit}: sets WatchdogSec= and NotifyAccess=none, so the manager drops every WATCHDOG=1 and ends the unit at each timeout (systemd.service(5))")
     return problems
 
 

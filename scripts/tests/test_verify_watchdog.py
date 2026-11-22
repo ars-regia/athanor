@@ -65,13 +65,22 @@ class WatchdogTest(unittest.TestCase):
             "x-other.service: sets WatchdogSec= and runs someone-else", found[0]
         )
 
-    def test_a_dbus_unit_without_notify_access_fails(self):
-        portal = unit("xdg-desktop-portal-athanor", "dbus", access="")
+    def test_a_unit_that_refuses_notifications_fails(self):
+        portal = unit(
+            "xdg-desktop-portal-athanor", "dbus", access="NotifyAccess=none\n"
+        )
         found = verify.watchdog_problems(
             units(**{"xdg-desktop-portal-athanor.service": portal}), SENDERS
         )
         self.assertEqual(len(found), 1)
-        self.assertIn("without NotifyAccess=", found[0])
+        self.assertIn("NotifyAccess=none", found[0])
+
+    def test_a_dbus_unit_with_the_implied_notify_access_passes(self):
+        portal = unit("xdg-desktop-portal-athanor", "dbus", access="")
+        found = verify.watchdog_problems(
+            units(**{"xdg-desktop-portal-athanor.service": portal}), SENDERS
+        )
+        self.assertEqual(found, [])
 
     def test_a_watchdog_that_is_no_time_span_fails(self):
         other = unit("athanor-bar", "notify", watchdog="WatchdogSec=0\n")
