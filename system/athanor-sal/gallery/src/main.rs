@@ -147,7 +147,7 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<Wid
         "choices" => {
             ui.check(group, t("check1")?, true);
             ui.check(group, t("check2")?, false);
-            ui.switch(group, t("switch")?, true);
+            ui.switch_row(group, t("switch")?, t("switch.detail")?, true);
         }
         "values" => {
             ui.slider(group, t("slider")?, 0.0, 100.0, 1.0, 50.0)

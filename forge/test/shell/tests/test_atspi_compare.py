@@ -206,6 +206,28 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertIn("note: role 'toggle button'", lines[0])
 
+    def test_gtks_switch_role_is_a_gallery_switchs_toggle_button_and_no_other(self):
+        # Fedora 45's GTK says a GtkSwitch a switch (maintainer, 2026-11-22).
+        reference = [
+            node("panel", ""),
+            dict(node("label", "A switch"), depth=1),
+            dict(node("switch", "A switch", ["checkable", "checked"]), depth=1),
+        ]
+        lines, failures = compare.compare(reference, [node("toggle button", "A switch", ["pressed"])])
+        self.assertEqual(failures, [])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("note: role 'toggle button'", lines[0])
+        # A switch that names none of the named switches stays a switch, its label its own.
+        reference = [
+            node("panel", ""),
+            dict(node("label", "Speakers"), depth=1),
+            dict(node("switch", "Speakers"), depth=1),
+        ]
+        _, failures = compare.compare(reference, [node("toggle button", "Speakers")])
+        self.assertEqual(
+            failures, ["label 'Speakers': role 'toggle button'", "switch 'Speakers': missing"]
+        )
+
     def test_a_gallery_switch_may_lack_checkable_and_a_check_box_may_not(self):
         # AccessKit gives a toggle button no checkable state (node.rs:336; maintainer, 2026-11-05).
         lines, failures = compare.compare(

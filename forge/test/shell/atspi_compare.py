@@ -71,19 +71,20 @@ DARK_TILE = ("toggle button", "Dark mode")
 # label the same way. A label under any other parent is its own element, as the title under the
 # window.
 BUTTONS = {"button", "push button", "toggle button", "check box", "radio button"}
-# A switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
-# button, as orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
+# A switch: GTK's GtkSwitch reaches AT-SPI as a check box, and Fedora 45's GTK says it a switch
+# (maintainer, 2026-11-22); AccessKit's Role::Switch reaches it as a toggle button, as
+# orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
 # switch, a sibling that repeats its name, where the toolkit's switch draws both as one widget:
-# that label counts as part of the switch. Both rules hold only for a check box that names a
-# switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the control
+# that label counts as part of the switch. Both rules hold only for a check box or a switch that
+# names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the control
 # center (orca_compare.CONTROL_CENTER_SWITCHES and CONTROL_CENTER_FIXTURE_SWITCHES; maintainer,
 # 2026-11-14) or of the bar (orca_compare.BAR_SWITCHES), whose toggle button is the
-# role W3C Core-AAM 1.2 maps ARIA's switch to: a real check box, whatever its label, said as a
-# toggle button still fails. Nor does AccessKit give a toggle button
+# role W3C Core-AAM 1.2 maps ARIA's switch to: a real check box or switch, whatever its label, said as
+# a toggle button still fails. Nor does AccessKit give a toggle button
 # the `checkable` state (accesskit_atspi_common 0.21.0, node.rs:336, which adds it only to a
 # toggled node of another role): for a gallery's switch its absence is a note (maintainer,
 # 2026-11-05, #648; docs/spikes/t1-own-toolkit.md, "AccessKit gaps").
-SWITCH = ("check box", "toggle button")
+SWITCH = (("check box", "switch"), "toggle button")
 # GTK 4.20's PopoverMenu says each entry of its menu a menu item, a check or a radio entry with
 # the `checkable` state, where W3C Core-AAM 1.2 maps ARIA's menuitemcheckbox and menuitemradio to
 # AT-SPI's check menu item and radio menu item. The maintainer decided on 2026-11-15 that a
@@ -173,7 +174,7 @@ def spoken(nodes):
     switches = {
         (parent, node["name"])
         for node, parent in zip(nodes, parent_of)
-        if node["role"] == SWITCH[0] and node["name"] and node["name"] in switch_labels()
+        if node["role"] in SWITCH[0] and node["name"] and node["name"] in switch_labels()
     }
     beside = {
         id(node)
@@ -203,8 +204,9 @@ def for_variant(reference, variant):
 
 
 def gallery_switch(reference_role, role, name):
-    """A check box of the reference that names a gallery's switch, said as a toggle button."""
-    return (reference_role, role) == SWITCH and name in switch_labels()
+    """A check box or a switch of the reference that names a gallery's switch, said as a toggle
+    button."""
+    return reference_role in SWITCH[0] and role == SWITCH[1] and name in switch_labels()
 
 
 def known_absence(state, ref, node):

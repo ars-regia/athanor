@@ -53,6 +53,7 @@ tab
 Option two check box not checked
 tab
 A switch on switch
+Its second line describes it
 tab
 Screen reader off.
 Screen reader on.

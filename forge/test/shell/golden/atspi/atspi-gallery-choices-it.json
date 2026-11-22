@@ -393,7 +393,18 @@
  },
  {
   "depth": 5,
-  "role": "check box",
+  "role": "label",
+  "name": "La sua seconda riga lo descrive",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "switch",
   "name": "Un interruttore",
   "states": [
    "checkable",
