@@ -147,7 +147,7 @@ Screen reader on.
 A dialog A dialog holds its window until it is closed.
 Close button
 space
-Gallery frame
+Gallery
 Dialogs toggle button pressed
 Menus toggle button not pressed
 tab
