@@ -534,7 +534,7 @@ pub fn paint<C: Canvas>(
         let second_line = ui
             .switch_line(id)
             .and_then(|_| ui.visible_children(id).first().copied());
-        let second_line = second_line.map(|line| ui.widgets[line].rect.y);
+        let second_line = second_line.and_then(|line| ui.widgets.get(line)).map(|w| w.rect.y);
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {

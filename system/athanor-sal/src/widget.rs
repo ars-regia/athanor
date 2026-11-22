@@ -1354,11 +1354,11 @@ impl Ui {
     /// The second line of switch `id`, the text of the label it holds, when it is a preference
     /// row ([`Ui::switch_row`]), the label is shown and its text is not blank.
     pub(crate) fn switch_line(&self, id: WidgetId) -> Option<&str> {
-        if !matches!(self.widgets[id].kind, Kind::Switch { .. }) {
+        if !matches!(self.widgets.get(id)?.kind, Kind::Switch { .. }) {
             return None;
         }
         let first = self.visible_children(id).into_iter().next()?;
-        match &self.widgets[first].kind {
+        match &self.widgets.get(first)?.kind {
             Kind::Label(text) if !text.trim().is_empty() => Some(text),
             _ => None,
         }
@@ -2694,10 +2694,13 @@ impl Ui {
                     return;
                 };
                 let (mark_w, _) = mark_size(true, self.theme.font_size);
-                let title = self.widgets[id].text.as_ref().map_or(0.0, |l| l.height());
-                let least = self.widgets[line].wrap.as_ref().map_or(0.0, |w| w.2);
-                let floor = least.max(self.widgets[line].min_w);
-                let r = &mut self.widgets[line].rect;
+                let title = self.widgets.get(id).and_then(|w| w.text.as_ref());
+                let title = title.map_or(0.0, |l| l.height());
+                let Some(widget) = self.widgets.get_mut(line) else {
+                    return;
+                };
+                let floor = widget.wrap.as_ref().map_or(0.0, |w| w.2).max(widget.min_w);
+                let r = &mut widget.rect;
                 r.w = (outer.w - mark_w - gap).max(floor);
                 let (w, h) = (r.w, r.h);
                 let cx = if self.rtl { x + outer.w - w } else { x };
