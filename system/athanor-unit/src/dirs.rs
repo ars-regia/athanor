@@ -197,7 +197,7 @@ fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
     // resolved here, so `..` takes off the last name.
     let mut reached = PathBuf::from(if path.has_root() { "/" } else { "" });
     let mut rest = components(path);
-    let mut links = 0;
+    let mut links: usize = 0;
     while let Some(name) = rest.pop() {
         let next = open_last(&dir, &name, OFlag::empty())?;
         if !next.metadata()?.file_type().is_symlink() {
@@ -222,7 +222,7 @@ fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
                 ),
             ));
         }
-        links += 1;
+        links = links.saturating_add(1);
         if links > MAX_LINKS {
             return Err(Errno::ELOOP.into());
         }
