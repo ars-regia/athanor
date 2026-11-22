@@ -10,12 +10,12 @@ BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel l
 Requires:       athanor-calmo hwdata
 
 %description
-Settings, drawn with Sal on Sulphur (doc_settings.md): one window with a searchable sidebar of
-pages grouped as Connections, Device, Personalisation and System, a landing page with the
-user's and the device's cards, and the About page. The window runs only in its user unit,
+Settings, drawn with Sal on Sulphur (doc_settings.md): one window with a searchable sidebar,
+a landing page with the user's and the device's cards, and the read-only About page, the one
+page this build draws; the other pages come in later steps of SE26. The window runs only in its user unit,
 started by the session bus through os.athanor.Settings1.Show; the binary started anywhere
 else forwards its --show=<target> to that name and exits. A crash restarts the unit, which
-reopens the window at the page it showed. Confined with Landlock (no writes outside its
+reopens the window at the page it showed; a window closed or a unit stopped reopens nothing. Confined with Landlock (no writes outside its
 runtime and cache directories, no TCP). Hidden from the launcher until cosmic-settings
 retires (SE23).
 
