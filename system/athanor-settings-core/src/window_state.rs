@@ -1,6 +1,7 @@
 //! The window state of SE5 (doc_settings.md): `$XDG_RUNTIME_DIR/athanor-settings/state` holds
 //! the target of the open window, written on every navigation and removed when the window
-//! closes, so that a Settings restarted after a crash reopens at that target. It is the only
+//! closes or a run ends well (the unit's `ExecStopPost=`), so that a Settings restarted after a
+//! crash reopens at that target. It is the only
 //! preference Settings keeps of its own (SE1).
 
 use std::fs;
@@ -19,6 +20,8 @@ pub const MARKER: &str = "reopening";
 const OPEN: &str = "open ";
 /// More than any target the registry holds; a longer file is not Settings'.
 const MAX_BYTES: u64 = 256;
+/// The longest target whose state fits in [`MAX_BYTES`]: a longer one is no target of Settings.
+pub const MAX_TARGET: usize = MAX_BYTES as usize - OPEN.len() - "\n".len();
 
 /// The text the file holds while the window shows `target`.
 pub fn encode(target: Target) -> String {
@@ -42,12 +45,14 @@ pub fn save(dir: &Path, target: Target) -> io::Result<()> {
 
 /// Removes the state, and the marker of a reopened page still being drawn, when the window
 /// closes or the unit stops. A file already gone is no error.
+/// Both are tried, and the first error is returned.
 pub fn clear(dir: &Path) -> io::Result<()> {
-    match fs::remove_file(dir.join(FILE)) {
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        other => other?,
-    }
-    unmark(dir)
+    let state = match fs::remove_file(dir.join(FILE)) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    };
+    let marker = unmark(dir);
+    state.and(marker)
 }
 
 /// Marks the reopened page as being drawn ([`MARKER`]).

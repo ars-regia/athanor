@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 
+use athanor_settings_core::window_state::MAX_TARGET;
 use gio::glib;
 use gio::prelude::*;
 
@@ -16,8 +17,6 @@ pub const ACTIVATION_TOKEN: &str = "activation-token";
 /// More `Show` calls than a person makes before the window draws once: a caller that sends
 /// more is told so, rather than growing the queue.
 const MAX_QUEUED: usize = 16;
-/// Longer than any target the registry holds (the window state's own bound).
-const MAX_TARGET: usize = 250;
 
 const XML: &str = r#"<node><interface name="os.athanor.Settings1">
 <method name="Show"><arg type="s" name="target" direction="in"/><arg type="a{sv}" name="platform_data" direction="in"/></method>

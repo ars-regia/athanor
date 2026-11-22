@@ -71,19 +71,17 @@ fn forward() -> ExitCode {
 
 /// `ExecStopPost=`: a run that ended well, its window closed or the unit stopped, leaves no
 /// window to reopen; a run that failed keeps its state for the restart (SE5). A stop that
-/// also kills this process, `systemctl kill` say, leaves the state, and the next start
-/// reopens the page as after a crash.
+/// also kills this process, a SIGKILL of the whole unit say, leaves the state, and the next
+/// start reopens the page as after a crash. A clear that fails is logged and still exits 0:
+/// a failed `ExecStopPost=` would fail the run, and `Restart=on-failure` would bring back the
+/// window the user closed.
 fn stopped(dirs: &Dirs) -> ExitCode {
-    if env::var("SERVICE_RESULT").as_deref() != Ok("success") {
-        return ExitCode::SUCCESS;
-    }
-    match window_state::clear(&dirs.unit_runtime) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
+    if env::var("SERVICE_RESULT").as_deref() == Ok("success") {
+        if let Err(error) = window_state::clear(&dirs.unit_runtime) {
             tracing::error!(%error, "cannot clear the window state; the next start reopens it");
-            ExitCode::FAILURE
         }
     }
+    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
