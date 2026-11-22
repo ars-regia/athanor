@@ -70,7 +70,7 @@ impl Application for Resident {
 }
 
 fn main() -> ExitCode {
-    let default = std::env::args().any(|arg| arg == "--default");
+    let default = std::env::args_os().any(|arg| arg == "--default");
     let lines = Arc::new(Mutex::new(Vec::new()));
     let result = make_ping().map_err(Into::into).and_then(|(ping, source)| {
         let read = Arc::clone(&lines);
