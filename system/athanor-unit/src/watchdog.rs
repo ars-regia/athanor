@@ -1,7 +1,9 @@
 //! The manager's watchdog for a daemon on the session bus (doc_session.md SN6): `WATCHDOG=1`
 //! only after a call the daemon made to the bus on its own connection has been answered through
 //! its own event loop, so that one answer proves that the loop runs and that the connection
-//! serves. A timer alone proves only the first.
+//! serves. A timer alone proves only the first. The answer proves nothing of another thread:
+//! in `athanor-idle` and the portal backend, whose GLib main loop runs on a thread of its own
+//! beside the Tokio thread that serves the bus, a hung GLib loop does not stop the pings.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -15,14 +17,23 @@ use crate::notify;
 
 /// Pings the manager's watchdog from a task of the current Tokio runtime, at half of
 /// `WATCHDOG_USEC`, each ping after `org.freedesktop.DBus.GetId` on `connection` has been
-/// answered. Spawns nothing without `WatchdogSec=` in the unit or outside systemd. The task runs
+/// answered. Spawns nothing without `WatchdogSec=` in the unit or outside systemd, and warns,
+/// spawning nothing, when the manager set a watchdog that this process cannot ping. The task runs
 /// only while the runtime polls it, so a loop that blocks stops the pings as a wedged
 /// connection does.
 pub fn spawn(connection: &zbus::Connection) {
+    if env::var_os("WATCHDOG_USEC").is_none() {
+        return;
+    }
+    // From here the manager has set a watchdog: one this process cannot ping ends the unit.
     let Some(period) = notify::watchdog_timeout().and_then(|timeout| timeout.checked_div(2)) else {
+        tracing::warn!(
+            "WATCHDOG_USEC is set but names no timeout for this process (WATCHDOG_PID names another, or the value is not positive): no WATCHDOG=1"
+        );
         return;
     };
     let Some(socket) = env::var_os("NOTIFY_SOCKET") else {
+        tracing::warn!("WATCHDOG_USEC is set and NOTIFY_SOCKET is not: no WATCHDOG=1");
         return;
     };
     let connection = connection.clone();
