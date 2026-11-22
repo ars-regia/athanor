@@ -30,13 +30,23 @@ async fn reset_appearance() {
     }
 }
 
-/// The reset, then nothing until the session stops the unit. The battery notices (SD14,
-/// `athanor_sessiond::bus::run`) start at SD22 step 8 (S3), when cosmic-settings-daemon and
-/// its own notices leave, so that one process notifies at a time (NC13; maintainer decision,
-/// 2026-11-07).
-async fn serve() {
+/// The watchdog and the reset, then nothing until the session stops the unit. The battery
+/// notices (SD14, `athanor_sessiond::bus::run`) start at SD22 step 8 (S3), when
+/// cosmic-settings-daemon and its own notices leave, so that one process notifies at a time
+/// (NC13; maintainer decision, 2026-11-07). Until then the daemon's connection to the session
+/// bus serves only the watchdog's roundtrip (doc_session.md SN6); without it the manager would
+/// end the daemon for want of a ping, so a failed connection is a failed run.
+async fn serve() -> ExitCode {
+    let connection = match zbus::Connection::session().await {
+        Ok(connection) => connection,
+        Err(err) => {
+            tracing::error!(%err, "cannot connect to the session bus, which the watchdog pings through");
+            return ExitCode::FAILURE;
+        }
+    };
+    athanor_unit::watchdog::spawn(&connection);
     reset_appearance().await;
-    std::future::pending::<()>().await;
+    std::future::pending::<ExitCode>().await
 }
 
 fn main() -> ExitCode {
@@ -66,6 +76,5 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(serve());
-    ExitCode::SUCCESS
+    runtime.block_on(serve())
 }

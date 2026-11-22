@@ -9,7 +9,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 [dependencies]
 athanor-i18n = { path = "../athanor-i18n" }
 athanor-services = { path = "../athanor-services" }
-athanor-unit = { path = "../athanor-unit" }
+athanor-unit = { path = "../athanor-unit", features = ["watchdog"] }
 futures-util = { workspace = true }
 gio = { workspace = true }
 serde = { workspace = true }
