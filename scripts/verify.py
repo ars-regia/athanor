@@ -5464,6 +5464,7 @@ SESSION_UNITS = {
     "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
+    "athanor-settings.service": ("surface", True, "activated"),
     # Started by nothing until its bus service file comes with doc_osd.md's retirement step
     # (OD15, OD17 step 5).
     "athanor-osd.service": ("surface", True, "activated"),
@@ -5540,6 +5541,12 @@ SESSION_EXEMPT = {
         "enabled by hand until the switch (doc_launcher.md, LA12)",
     ("athanor-control-center.service", ACTIVATED_INSTALL):
         "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
+    ("athanor-settings.service", f"RestartSec=200ms, {SURFACE_WANTS} 0.1"):
+        "doc_settings.md SE5 sets RestartSec=200ms",
+    ("athanor-settings.service", f"StartLimitBurst=20, {SURFACE_WANTS} 10"):
+        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; 20 starts in a minute stop a crash loop",
+    ("athanor-settings.service", f"StartLimitIntervalSec=60s, {SURFACE_WANTS} 600"):
+        "until SL1 (doc_settings.md, section 7) every opening of Settings starts its unit; 20 starts in a minute stop a crash loop",
     (
         "athanor-control-center-shortcut.service",
         f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
@@ -6791,7 +6798,7 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
+    ("doc_software.md", "forge/config/packages.json", "2-86", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 # Another project's file that a document cites by a path a tracked file also ends with, each

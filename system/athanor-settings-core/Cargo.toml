@@ -1,0 +1,10 @@
+[package]
+name = "athanor-settings-core"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+license = "GPL-3.0-or-later"
+description = "The logic of Athanor's Settings with no toolkit type: the page registry and its search, the deep-link grammar, the writable keys, the display-revert state machine and the shortcut-conflict check (doc_settings.md SE2)"
+
+[dependencies]
+athanor-i18n = { path = "../athanor-i18n" }
