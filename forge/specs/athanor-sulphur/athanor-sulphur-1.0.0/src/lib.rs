@@ -267,7 +267,10 @@ mod tests {
         let args = ["--headless", "--render-node"].map(OsString::from).into_iter().chain([node.clone()]);
         assert_eq!(
             options(args).map_err(|e| e.to_string()),
-            Ok(Options::Headless { node: Some(PathBuf::from(node)), outputs: Vec::new() })
+            Ok(Options::Headless {
+                node: Some(PathBuf::from(node)),
+                outputs: vec![VirtualOutput { width: 1920, height: 1080, scale: 1.0 }]
+            })
         );
     }
 

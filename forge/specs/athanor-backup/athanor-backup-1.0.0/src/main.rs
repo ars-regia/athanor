@@ -465,10 +465,10 @@ mod tests {
 
     #[test]
     fn a_non_root_caller_is_told_to_use_sudo_and_a_bad_command_gets_the_usage() {
-        let err = run(&["frobnicate".to_owned()]).expect_err("unknown command");
+        let err = run(&[OsString::from("frobnicate")]).expect_err("unknown command");
         assert!(err.to_string().starts_with("usage:"));
         if !nix::unistd::geteuid().is_root() {
-            let err = run(&["list".to_owned()]).expect_err("not root");
+            let err = run(&[OsString::from("list")]).expect_err("not root");
             assert!(err.to_string().contains("sudo athanor-backup list"));
         }
     }
