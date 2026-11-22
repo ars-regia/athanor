@@ -7,10 +7,6 @@
         {
           "name": "iso-v0",
           "type": "branch"
-        },
-        {
-          "name": "main",
-          "type": "branch"
         }
       ],
       "protected_branches": false
@@ -32,10 +28,6 @@
       "policies": [
         {
           "name": "iso-v0",
-          "type": "branch"
-        },
-        {
-          "name": "main",
           "type": "branch"
         }
       ],
@@ -59,10 +51,6 @@
       "policies": [
         {
           "name": "iso-v0",
-          "type": "branch"
-        },
-        {
-          "name": "main",
           "type": "branch"
         }
       ],
@@ -92,10 +80,6 @@
         {
           "name": "iso-v0",
           "type": "branch"
-        },
-        {
-          "name": "main",
-          "type": "branch"
         }
       ],
       "protected_branches": false
@@ -121,10 +105,6 @@
       "policies": [
         {
           "name": "iso-v0",
-          "type": "branch"
-        },
-        {
-          "name": "main",
           "type": "branch"
         }
       ],

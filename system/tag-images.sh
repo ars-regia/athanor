@@ -23,7 +23,7 @@
 # The registry login is the caller's business.
 #
 # It moves a tag only for a run of a trusted branch: GITHUB_REF must be refs/heads/<b> with <b>
-# in KERNEL_TRUSTED_REFS (default "iso-v0 main", as system/kernel-artifacts.sh). A
+# in KERNEL_TRUSTED_REFS (default "iso-v0", as system/kernel-artifacts.sh). A
 # workflow_dispatch can be started from any branch, and the tag is what machines follow.
 set -euo pipefail
 
@@ -42,7 +42,7 @@ case $# in
 esac
 
 trusted=false
-for b in ${KERNEL_TRUSTED_REFS:-iso-v0 main}; do
+for b in ${KERNEL_TRUSTED_REFS:-iso-v0}; do
     [[ ${GITHUB_REF:-} == "refs/heads/$b" ]] && trusted=true
 done
 $trusted || {

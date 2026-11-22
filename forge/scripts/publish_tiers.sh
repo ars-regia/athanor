@@ -10,7 +10,7 @@
 # the same content label but no such signature is pushed again, never adopted and signed here.
 # The rolling aggregate (repo-cache/repo) is published as well; no build consumes it.
 #
-# The tag comes from $GITHUB_REF: `latest` on refs/heads/iso-v0 and refs/heads/main, and
+# The tag comes from $GITHUB_REF: `latest` on refs/heads/iso-v0, and
 # `branch-<name>` on any other ref, <name> being the ref without refs/heads/ (or refs/),
 # lower-cased, with every character outside [a-z0-9._-] replaced by `-`. A branch run so
 # never moves a tier `latest`. An unset or empty GITHUB_REF exits 2: it never means `latest`.
@@ -31,7 +31,7 @@ OUT=$1
     exit 2
 }
 case $GITHUB_REF in
-    refs/heads/iso-v0 | refs/heads/main) TAG=latest ;;
+    refs/heads/iso-v0) TAG=latest ;;
     *)
         ref=${GITHUB_REF#refs/heads/}
         ref=${ref#refs/}

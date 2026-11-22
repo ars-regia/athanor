@@ -3840,7 +3840,8 @@ def check_allow_list():
 # --------------------------------------------------------------------------- #
 
 # Parameters the kernel profile decided against (docs/architecture/doc_kernel_profile.md,
-# "Command line"). A name ending in a dot is a prefix. profile.toml is the single source of
+# "Command line"). A name ending in a dot or an equals sign is a prefix; any other name is the
+# parameter bare or with a value (`rd.break` and `rd.break=pre-mount`). profile.toml is the single source of
 # the base command line and kernel_profile.py check holds its generated files to it; this
 # keeps a contradicting parameter out of the manifest and of the variant files beside it.
 REJECTED_PARAMETERS = {
@@ -3851,6 +3852,14 @@ REJECTED_PARAMETERS = {
     "amd_iommu=on": "not a parameter of the amd_iommu driver, which logs it as unknown",
     "lam=on": "not an x86 parameter",
     "arm64.mte=on": "not an x86 parameter",
+    "selinux=": "switches SELinux off at boot, against D20 and TM7",
+    "enforcing=": "puts SELinux in permissive mode at boot, against D20 and TM7",
+    "security=": "selects one legacy major security module at boot and can switch SELinux off, against D20 and TM7",
+    "lsm=": "replaces the compiled-in security module order and can omit SELinux, IPE and Yama (doc_kernel_profile.md section 5)",
+    "init=": "replaces PID 1 with another program, outside the image's trust chain (doc_kernel_profile.md section 7)",
+    "rdinit=": "replaces the initramfs' first program with another one, outside the image's trust chain (doc_kernel_profile.md section 7)",
+    "rd.break": "stops the initramfs at a root shell, against rd.shell=0 (doc_kernel_profile.md section 6)",
+    "cfi=": "weakens or disables kCFI at boot; cfi=warn is for one diagnostic boot only (forge/specs/azoth/AGENTS.md)",
 }
 
 # The files that carry the kernel command line: the boot line of azoth and every kargs.d
@@ -3860,6 +3869,23 @@ KARGS_FILES = [
     "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml",
     "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml",
 ]
+
+
+def cmdline_words(text):
+    """The parameters of a kernel command line: split on whitespace outside double quotes, as the
+    kernel's next_arg does (a quoted run is one parameter, an unclosed quote runs to the end), with
+    the quotes dropped so that `"selinux=0"` is read as selinux=0 (it can only reject more). The kernel
+    counts bytes such as 0xA0 as whitespace, so a character outside printable ASCII, tab and line
+    breaks is refused (ValueError) instead of being read as part of a word."""
+    if re.search(r"[^\x20-\x7e\t\n\r]", text):
+        raise ValueError("non-ASCII byte in the command line")
+    return [word.replace('"', "").strip() for word in re.findall(r'(?:[^\s"]|"[^"]*"?)+', text)]
+
+
+def cmdline_name(parameter):
+    """PARAMETER with `-` read as `_` in its name, as the kernel's parameqn does (not in its value)."""
+    name, equals, value = parameter.partition("=")
+    return name.replace("-", "_") + equals + value
 
 
 def cmdline_problems(root=None):
@@ -3874,14 +3900,27 @@ def cmdline_problems(root=None):
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as err:
             problems.append(f"{relative}: cannot read the command line ({err})")
 
-    read_site(CMDLINE_FILE, str.split)
+    def kargs(text):
+        elements = tomllib.loads(text)["kargs"]
+        if not isinstance(elements, list):
+            raise ValueError("kargs is not an array")
+        if not all(isinstance(element, str) for element in elements):
+            raise ValueError("a kargs element is not a string")
+        return [parameter for element in elements for parameter in cmdline_words(element)]
+
+    read_site(CMDLINE_FILE, cmdline_words)
     for relative in KARGS_FILES:
-        read_site(relative, lambda text: tomllib.loads(text)["kargs"])
+        read_site(relative, kargs)
 
     for site, parameters in found.items():
         for parameter in parameters:
             for rejected, why in REJECTED_PARAMETERS.items():
-                if parameter == rejected or (rejected.endswith(".") and parameter.startswith(rejected)):
+                name, rejected = cmdline_name(parameter), cmdline_name(rejected)
+                if rejected.endswith((".", "=")):
+                    matched = name.startswith(rejected)
+                else:
+                    matched = name == rejected or name.startswith(rejected + "=")
+                if matched:
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
 
@@ -6604,6 +6643,9 @@ def check_agent_docs():
 
 # What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path named last.
 LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
+# A path abbreviation that a document defines, "(`forge/specs/x/x-1.0.0`, below `S`)", after which
+# `S/src/a.rs:12` cites `forge/specs/x/x-1.0.0/src/a.rs:12` (#1428).
+PATH_ABBREVIATION = re.compile(r"\(`([^`\s]+)`, below `([^`\s/]+)`\)")
 # What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
 # `cosmic-osd.service`), or a bare snake_case or `::` path.
 CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
@@ -7052,7 +7094,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
     file is a finding, as is a bare `*.md` name that no tracked file ends with. A path that
     `upstream` ({(document, path)}, LINE_CITATIONS_UPSTREAM by default) lists for `doc` is another
-    project's and resolves to no file. A range is no line range when it starts at 0, ends before it starts,
+    project's and resolves to no file. A span `S/rest` whose `S` the document defines as a path
+    abbreviation (PATH_ABBREVIATION) is read as the defined path followed by `/rest`, in every line
+    of the document. A range is no line range when it starts at 0, ends before it starts,
     reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
     document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
     sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
@@ -7119,6 +7163,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             suffixes.setdefault("/".join(parts[i:]), []).append(path)
 
     foreign = {path for d, path in (LINE_CITATIONS_UPSTREAM if upstream is None else upstream) if d == doc}
+    abbreviations = {m[2]: m[1] for m in PATH_ABBREVIATION.finditer(text)}
+
+    def expand(name):
+        head, slash, rest = name.partition("/")
+        return f"{abbreviations[head]}/{rest}" if slash and head in abbreviations else name
 
     def resolve(name, crate):
         if name in foreign:
@@ -7159,19 +7208,20 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
         named_any = False
         line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
-            m = LINE_CITATION.fullmatch(span.group(1))
+            cite = expand(span.group(1))
+            m = LINE_CITATION.fullmatch(cite)
             if not m:
-                m = SYMBOL_CITATION.fullmatch(span.group(1))
+                m = SYMBOL_CITATION.fullmatch(cite)
                 if m and (not (names_a_file(m[1], crate) or names_a_gone_file(m[1])) if m[1] else
-                          COLOUR.fullmatch(span.group(1)) and not defines(last, m[2].strip())):
+                          COLOUR.fullmatch(cite) and not defines(last, m[2].strip())):
                     m = None  # a flake reference, or a colour that its file does not define
             if not m:
-                head = span.group(1).partition("#")[0]
-                if SCHEME.match(span.group(1)) or (
-                        "#" in span.group(1) and not (names_a_file(head, crate) or names_a_gone_file(head))):
+                head = cite.partition("#")[0]
+                if SCHEME.match(cite) or (
+                        "#" in cite and not (names_a_file(head, crate) or names_a_gone_file(head))):
                     continue  # a URL or a flake reference, which is no file of the repository
-                last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
-                named_any = named_any or bool(FILE_LIKE.search(span.group(1)) and counts_as_named(span.group(1), crate))
+                last = resolve(cite, crate) if FILE_LIKE.search(cite) else last
+                named_any = named_any or bool(FILE_LIKE.search(cite) and counts_as_named(cite, crate))
                 continue
             named, spec = m.groups()
             symbol = spec.strip() if m.re is SYMBOL_CITATION else None
@@ -8601,6 +8651,69 @@ def take_option(argv, name):
     value = argv[at + 1]
     del argv[at : at + 2]
     return value
+
+
+# The branches whose runs may sign or move a tag, by the variable that overrides the default and
+# the script that holds it (issue #1346). ADR-0125 keeps rebase/* out of every one of them.
+TRUSTED_REF_DEFAULTS = (
+    ("system/tier-digests.sh", "TIER_TRUSTED_REFS"),
+    ("system/kernel-artifacts.sh", "KERNEL_TRUSTED_REFS"),
+    ("system/tag-images.sh", "KERNEL_TRUSTED_REFS"),
+)
+
+
+def trusted_ref_problems(scripts):
+    """`scripts` maps a path to its text. A default of a trusted-ref variable, `${VAR:-a b}`,
+    names exactly the branch iso-v0; the retired main and any rebase/* branch are not signers."""
+    out = []
+    for path, var in TRUSTED_REF_DEFAULTS:
+        text = scripts.get(path)
+        if text is None:
+            out.append(f"{path}: cannot be read")
+            continue
+        defaults = re.findall(r"\$\{" + var + r":-([^}]*)\}", text)
+        if not defaults:
+            out.append(f"{path}: has no default for {var}")
+        out.extend(f"{path}: the default of {var} is '{d}', not 'iso-v0' (ADR-0125, issue #1346)"
+                   for d in defaults if d.split() != ["iso-v0"])
+    return out
+
+
+# Files that run signing or publishing on a branch: `main` is not one of the branches that start
+# them. A line holds it when a `branches: [...]` list, a `- main` block-list item, a
+# `refs/heads/main` condition or a `ref_name == 'main'` condition names it.
+MAIN_BRANCH_FILES = (
+    ".github/workflows/azoth-signer.yml",
+    ".github/workflows/kernel-build.yml",
+    "forge/scripts/publish_tiers.sh",
+)
+MAIN_BRANCH_LINE = re.compile(
+    r"branches:\s*\[[^\]]*(?<![\w-])main(?![\w-])[^\]]*\]|refs/heads/main(?![\w-])"
+    r"""|^\s*-\s*['"]?main['"]?\s*(#.*)?$|ref_name\s*==\s*['"]main['"]""")
+
+
+def main_branch_problems(files):
+    """`files` maps a path to its text; a comment line is not read."""
+    out = []
+    for path in MAIN_BRANCH_FILES:
+        text = files.get(path)
+        if text is None:
+            out.append(f"{path}: cannot be read")
+            continue
+        out.extend(f"{path}:{n}: names the retired main branch (issue #1346)"
+                   for n, line in enumerate(text.splitlines(), 1)
+                   if not line.lstrip().startswith("#") and MAIN_BRANCH_LINE.search(line))
+    return out
+
+
+@check("trusted-refs", "Every trusted-ref default of the signing scripts names only iso-v0, and no signing or publishing trigger names main (issue #1346)")
+def check_trusted_refs():
+    r = Result()
+    texts = {path: (ROOT / path).read_text() if (ROOT / path).is_file() else None
+             for path in [path for path, _ in TRUSTED_REF_DEFAULTS] + list(MAIN_BRANCH_FILES)}
+    for problem in trusted_ref_problems(texts) + main_branch_problems(texts):
+        r.fail(problem)
+    return r
 
 
 def main(argv):

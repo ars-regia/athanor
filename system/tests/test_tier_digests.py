@@ -127,6 +127,7 @@ class TierDigests(unittest.TestCase):
             "https://github.com/fork/athanor/.github/workflows/call-system-image.yml@refs/heads/iso-v0",
             "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0",
             f"{WORKFLOW}@refs/heads/iso-v0x",
+            f"{WORKFLOW}@refs/heads/main",
             f"{WORKFLOW}@refs/heads/main-evil",
             f"{WORKFLOW}@refs/heads/rebase/fedora-45",
             f"{WORKFLOW}@refs/heads/rebase",
@@ -143,7 +144,7 @@ class TierDigests(unittest.TestCase):
 
     def test_the_trusted_branches_and_the_run_s_own_branch_are_signed(self):
         for identity, ref in (
-            (f"{WORKFLOW}@refs/heads/main", None),
+            (f"{WORKFLOW}@refs/heads/iso-v0", None),
             (f"{WORKFLOW}@refs/heads/rebase/fedora-45", "refs/heads/rebase/fedora-45"),
             (f"{WORKFLOW}@refs/heads/feature/x", "refs/heads/feature/x"),
         ):
@@ -197,7 +198,7 @@ class TierDigests(unittest.TestCase):
             (f"{dag}@refs/heads/feature", "call-dag-compile.yml", "unsigned"),
             (f"{dag}@refs/heads/iso-v0", "call-system-image.yml", "unsigned"),
             (f"{builder}@refs/heads/iso-v0", "call-build-builder.yml", "signed"),
-            (f"{builder}@refs/heads/main", "call-build-builder.yml", "signed"),
+            (f"{builder}@refs/heads/main", "call-build-builder.yml", "unsigned"),
             (f"{dag}@refs/heads/iso-v0", "call-build-builder.yml", "unsigned"),
             (f"{builder}@refs/heads/feature", "call-build-builder.yml", "unsigned"),
             (f"{builder}@refs/pull/7/merge", "call-build-builder.yml", "unsigned"),
@@ -291,6 +292,7 @@ class TierDigests(unittest.TestCase):
             "https://github.com/fork/athanor/.github/workflows/call-system-image.yml@refs/heads/iso-v0",
             "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0",
             f"{WORKFLOW}@refs/heads/iso-v0x",
+            f"{WORKFLOW}@refs/heads/main",
             f"{WORKFLOW}@refs/heads/main-evil",
             f"{WORKFLOW}@refs/heads/rebase/fedora-45",
             f"{WORKFLOW}@refs/heads/rebase",
@@ -308,7 +310,7 @@ class TierDigests(unittest.TestCase):
 
     def test_resolve_accepts_the_trusted_branches_and_the_run_s_own_branch(self):
         for identity, ref in (
-            (f"{WORKFLOW}@refs/heads/main", None),
+            (f"{WORKFLOW}@refs/heads/iso-v0", None),
             (f"{WORKFLOW}@refs/heads/rebase/fedora-45", "refs/heads/rebase/fedora-45"),
             (f"{WORKFLOW}@refs/heads/feature/x", "refs/heads/feature/x"),
         ):

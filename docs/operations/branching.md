@@ -23,7 +23,7 @@ Counts are as of 2026-10-06; the command beside each recomputes it.
 | `nix-vanguard.yml` triggers on `main` (and `develop`) only, so a push or pull request to `iso-v0` never runs it | `nix-vanguard.yml` lines 5 and 7; the workflow was deleted on 2026-11-14 (doc_ci.md CI24) |
 | The installer ISO's `:latest` publishes from `refs/heads/main` only, so it does not publish today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 314 |
 | The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 320 and 345 |
-| The image trusts kernels and NVIDIA modules signed by workflows on `refs/heads/iso-v0` or `refs/heads/main` (`KERNEL_TRUSTED_REFS`), and `main` is not protected | [kernel-artifacts.sh](../../system/kernel-artifacts.sh) lines 64 and 73-74 |
+| The image trusts kernels and NVIDIA modules signed by workflows on `refs/heads/iso-v0` (`KERNEL_TRUSTED_REFS`), and `main` is not protected | [kernel-artifacts.sh](../../system/kernel-artifacts.sh) lines 64 and 73-74 |
 
 ## 2. Model (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
@@ -52,7 +52,7 @@ Both options remove `main` from the trusted refs while it is unprotected.
 | Workflow triggers | `nix-vanguard.yml:5,7` (`main` only), and `main` beside `iso-v0` in `athanor-forge-orchestrator.yml:8`, `cosmic-comp-bump.yml:16`, `kernel-build.yml:34`, `kernel-bump.yml:38`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `azoth-signer.yml:13` |
 | Workflow conditions | `athanor-forge-orchestrator.yml:411` (the ISO `:latest`, `main` only), `azoth-signer.yml:31` |
 | Settings | `.github/settings/rulesets.json:15`, `branch-protection.json:32`, the deployment branch policies of `environments.json` (lines 12, 41, 68, 100, 130) |
-| Trust | `KERNEL_TRUSTED_REFS` default `iso-v0 main` (`system/kernel-artifacts.sh:71`) |
+| Trust | `KERNEL_TRUSTED_REFS` default `iso-v0` (`system/kernel-artifacts.sh:106`) |
 
 The ISO `:latest` condition at `athanor-forge-orchestrator.yml:411` needs a decision of its own, because with `main` gone no ref satisfies it: it follows the product branch, as the kernel's `:latest` does.
 
