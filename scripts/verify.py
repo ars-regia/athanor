@@ -5746,15 +5746,10 @@ WATCHDOG_SPAWN = re.compile(r"\bwatchdog::spawn\s*\(")
 WATCHDOG_PING = re.compile(r'(?<!fn )\bnotify_watchdog\s*\(|b"WATCHDOG=1"')
 
 
-def rust_code(text):
-    """`text` without its `#[cfg(test)]` part and its `//` comments, a whole line or after code."""
-    return "\n".join(re.sub(r"(^|\s)//.*", "", line) for line in text.split("#[cfg(test)]")[0].split("\n"))
-
-
 def watchdog_senders(root):
     """{binary: "spawn", "ping" or None} for every crate under system/ and forge/specs, by its
     package name, its [[bin]] names and its src/bin/*.rs files: "spawn" when the binary's own
-    source file calls watchdog::spawn outside its tests, "ping" when the crate sends WATCHDOG=1
+    source file calls watchdog::spawn outside its comments, strings and tests (rust_code), "ping" when the crate sends WATCHDOG=1
     otherwise. A static reading cannot prove the call runs; it can require it where main is."""
     senders = {}
     for base in ("system", "forge/specs"):
@@ -5771,11 +5766,11 @@ def watchdog_senders(root):
                 entries[b.get("name")] = manifest.parent / path if path else src / "bin" / f"{b.get('name')}.rs"
             entries.pop(None, None)
             pings = any(
-                WATCHDOG_PING.search(code) or WATCHDOG_SPAWN.search(code)
-                for code in (rust_code(read(source)) for source in walk(src, ".rs"))
+                WATCHDOG_PING.search(code) or WATCHDOG_SPAWN.search(masked)
+                for code, masked in (rust_code(read(source)) for source in walk(src, ".rs"))
             )
             for binary, entry in entries.items():
-                spawns = entry.is_file() and bool(WATCHDOG_SPAWN.search(rust_code(read(entry))))
+                spawns = entry.is_file() and bool(WATCHDOG_SPAWN.search(rust_code(read(entry))[1]))
                 kind = "spawn" if spawns else "ping" if pings else None
                 if senders.get(binary) != "spawn":
                     senders[binary] = kind or senders.get(binary)

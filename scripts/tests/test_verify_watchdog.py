@@ -119,6 +119,9 @@ class WatchdogTest(unittest.TestCase):
                 "timer": {
                     "main.rs": "fn main() { athanor_unit::notify::notify_watchdog(); }\n"
                 },
+                "hidden": {
+                    "main.rs": 'fn main() { /* watchdog::spawn(&c) */ let _ = "watchdog::spawn(&c)"; }\n'
+                },
             }.items():
                 crate = root / "system" / name
                 (crate / "src").mkdir(parents=True)
@@ -133,6 +136,7 @@ class WatchdogTest(unittest.TestCase):
                     "tested": None,
                     "library": "ping",
                     "timer": "ping",
+                    "hidden": None,
                 },
             )
 
