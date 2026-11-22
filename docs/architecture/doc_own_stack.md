@@ -2178,7 +2178,7 @@ compositor and that the own compositor did not yet offer:
     default of Smithay's handler,
     and decision 37's toplevel drag runs on that same grab.
     *Amended 2026-11-21: the compositor now runs Smithay's drag and drop grab
-    (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:105-170`); the cancelling default is gone. A drag starts only
+    (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/dnd.rs:105-174`); the cancelling default is gone. A drag starts only
     while its press is still held, a popup grab's serial included; each drag keeps its own icon
     until that drag ends; the icon is drawn above the windows and the overlay layers, at most 256
     logical pixels, moved by the offsets its client commits, and not drawn when the pointer is
