@@ -26,7 +26,7 @@ pub fn spawn(connection: &zbus::Connection) {
         return;
     }
     // From here the manager has set a watchdog: one this process cannot ping ends the unit.
-    let Some(period) = notify::watchdog_timeout().and_then(|timeout| timeout.checked_div(2)) else {
+    let Some(period) = ping_period(notify::watchdog_timeout()) else {
         tracing::warn!(
             "WATCHDOG_USEC is set but names no timeout for this process (WATCHDOG_PID names another, or the value is not positive): no WATCHDOG=1"
         );
@@ -82,6 +82,12 @@ where
             ),
         }
     }
+}
+
+/// Half of the manager's timeout, so that one ping that is late or skipped still leaves the next
+/// within it.
+fn ping_period(timeout: Option<Duration>) -> Option<Duration> {
+    timeout.and_then(|timeout| timeout.checked_div(2))
 }
 
 fn ping(socket: &OsStr) {
@@ -179,6 +185,15 @@ mod tests {
             let _ = self.daemon.wait();
             let _ = fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn the_ping_comes_at_half_of_the_managers_timeout() {
+        assert_eq!(
+            ping_period(Some(Duration::from_secs(30))),
+            Some(Duration::from_secs(15))
+        );
+        assert_eq!(ping_period(None), None);
     }
 
     #[tokio::test]
