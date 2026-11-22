@@ -61,7 +61,7 @@ Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, a
   - It can activate, minimise, unminimise and close a window, and set a workspace's tiling.
   - It captures a window into `wl_shm` through `ext-image-copy-capture-v1` (`src/capture.rs`, 500 ms timeout), built for the launcher's preview (LA6).
   - It does not report which workspace a window is on (LA6), and it cannot activate, move, reorder or pin a workspace.
-- **The register** (`shell-features.md`, Workspace overview, `:386-410`): 10 entries have, 7 are missing and 4 are proposed for exclusion. Three statuses are wrong:
+- **The register** (`shell-features.md`, Workspace overview, rows `:386-410`): 10 entries have, 7 are missing and 4 are proposed for exclusion. Three statuses are wrong:
   - F-overview-11, the hot corner, is marked have through "cosmic-settings hot corner option", which does not exist (above).
   - F-overview-12, gestures, is "not verified": four-finger workspace switching exists.
   - F-overview-09, search, depends on cosmic-launcher, which leaves at LA12.
@@ -277,7 +277,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 **OV17. Retiring cosmic-workspaces.** In one change at the switch (OV19, step 5):
 
-- remove `cosmic-workspaces` from `forge/config/packages.json:125`;
+- remove `cosmic-workspaces` from `forge/config/packages.json:127`;
 - point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:511-515, 573-574`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
 - set the `WorkspaceOverview` entry of the `system_actions` file under `/usr/share/athanor/cosmic-defaults` (LN9's bullet "The `system_actions` file", the single owner by the ruling of 2026-10-05) to a `gdbus call` of `os.athanor.Overview1.Toggle`, written as LA8 writes the launcher's;
 - update `scripts/devvm/compositor-acceptance.sh:160`, which opens cosmic-workspaces;

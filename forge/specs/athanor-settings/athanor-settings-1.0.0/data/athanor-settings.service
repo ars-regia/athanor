@@ -1,0 +1,62 @@
+[Unit]
+Description=Athanor Settings
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_settings.md
+# No [Install]: the session bus starts it through os.athanor.Settings1, which the desktop
+# entry's forwarder and every caller of Show call (doc_settings.md, SE4, SE5).
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+# Not the surface class's ten starts in ten minutes (doc_session.md, SN6): until Sal keeps a
+# run without a window (doc_settings.md, SL1), every opening starts the unit, and an eleventh
+# opening in ten minutes would be refused. Twenty starts in a minute stop a crash loop at
+# RestartSec=200ms within about four seconds, and one that crashes a second after each start
+# within twenty, and no person opens Settings twenty times in a minute. Set the class's
+# limits with SL1.
+StartLimitBurst=20
+StartLimitIntervalSec=60s
+
+[Service]
+Type=notify
+BusName=os.athanor.Settings1
+ExecStart=/usr/bin/athanor-settings
+# Clears the window state once a run ended well, so that only a failed run reopens its page
+# (doc_settings.md SE5); it is the same binary, and touches nothing but that state.
+ExecStopPost=/usr/bin/athanor-settings --stopped
+TimeoutStartSec=20s
+# SE5: a crashed Settings comes back at once and reopens its window at the target it left in
+# %t/athanor-settings/state. A window the user closed ends the run cleanly, until Sal keeps
+# a run without a window (SL1).
+Restart=on-failure
+RestartSec=200ms
+Slice=session.slice
+# fontconfig's cache, inside the Landlock ruleset.
+Environment=XDG_CACHE_HOME=%C/athanor-settings
+CacheDirectory=athanor-settings
+# SE5's budget waits for the measurement of SE26, step 6 (ADR-0068): no MemoryHigh= or
+# MemoryMax= before it.
+
+# Under ProtectSystem=strict /run/user is read-only except the unit's own runtime
+# directories. "athanor-settings" holds the window state and, from the Displays page, the
+# display-revert state (SE5, SE12); it survives a restart. "dconf" because GSettings maps
+# dconf's shared-memory flag beneath %t/dconf read-write to learn that a key changed.
+RuntimeDirectory=athanor-settings dconf
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+# Sal draws with vello_cpu: no GL or Vulkan driver maps executable memory (SE6).
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, both D-Buses and journald, all over Unix sockets (SE6).
+RestrictAddressFamilies=AF_UNIX
