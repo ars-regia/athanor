@@ -5774,6 +5774,93 @@ def state_link_problems(units, created):
     ]
 
 
+# The session daemons of doc_session.md SN6 whose units set WatchdogSec= (doc_session_daemons.md
+# SD17, doc_portal.md PT3), and the value the maintainer gave them on 2026-11-22.
+WATCHDOG_UNITS = (
+    "athanor-idle.service",
+    "athanor-sessiond.service",
+    "athanor-shelld.service",
+    "xdg-desktop-portal-athanor.service",
+)
+WATCHDOG_SECONDS = 30
+# The ping SN6 asks of a session daemon, after a roundtrip on its bus: athanor-unit's helper.
+WATCHDOG_SPAWN = re.compile(r"\bwatchdog::spawn(?:_with)?\s*\(")
+# A GLib main loop beside the bus: its ping must also wait on that loop, through spawn_with. Only
+# the literal call in main's own file is seen; a loop started elsewhere, or a check that proves
+# nothing, passes, as a static reading cannot judge them.
+WATCHDOG_GLIB_LOOP = re.compile(r"\bglib::MainLoop::new\s*\(")
+WATCHDOG_SPAWN_WITH = re.compile(r"\bwatchdog::spawn_with\s*\(")
+# Any other ping in Rust: athanor-unit's notify call or the datagram itself, never a definition.
+WATCHDOG_PING = re.compile(r'(?<!fn )\bnotify_watchdog\s*\(|b"WATCHDOG=1"')
+
+
+def watchdog_senders(root):
+    """{binary: "spawn", "unchecked", "ping" or None} for every crate under system/ and forge/specs, by its
+    package name, its [[bin]] names and its src/bin/*.rs files: "spawn" when the binary's own
+    source file calls watchdog::spawn outside its comments, strings and tests (rust_code), "unchecked" when
+    that file also runs a GLib main loop and does not call watchdog::spawn_with, "ping" when the crate sends WATCHDOG=1
+    otherwise. A static reading cannot prove the call runs; it can require it where main is."""
+    senders = {}
+    for base in ("system", "forge/specs"):
+        for manifest in walk(root / base, "Cargo.toml"):
+            try:
+                package = tomllib.loads(read(manifest))
+            except tomllib.TOMLDecodeError:
+                continue
+            src = manifest.parent / "src"
+            entries = {package.get("package", {}).get("name"): src / "main.rs"}
+            entries |= {f.stem: f for f in (src / "bin").glob("*.rs")}
+            for b in package.get("bin", []):
+                path = b.get("path")
+                entries[b.get("name")] = manifest.parent / path if path else src / "bin" / f"{b.get('name')}.rs"
+            entries.pop(None, None)
+            pings = any(
+                WATCHDOG_PING.search(code) or WATCHDOG_SPAWN.search(masked)
+                for code, masked in (rust_code(read(source)) for source in walk(src, ".rs"))
+            )
+            for binary, entry in entries.items():
+                main = rust_code(read(entry))[1] if entry.is_file() else ""
+                spawns = bool(WATCHDOG_SPAWN.search(main))
+                unchecked = bool(WATCHDOG_GLIB_LOOP.search(main)) and not WATCHDOG_SPAWN_WITH.search(main)
+                kind = ("unchecked" if unchecked else "spawn") if spawns else "ping" if pings else None
+                if senders.get(binary) != "spawn":
+                    senders[binary] = kind or senders.get(binary)
+    return senders
+
+
+def watchdog_problems(units, senders):
+    """A finding for every daemon of WATCHDOG_UNITS without WatchdogSec= of WATCHDOG_SECONDS, and
+    for every unit with WatchdogSec= whose program sends no WATCHDOG=1 or whose manager would
+    drop the ping: the manager ends a unit whose watchdog is never pinged (doc_session.md SN6)."""
+    problems = []
+    for unit in WATCHDOG_UNITS:
+        have = dict(unit_section(units.get(unit, ""), "Service")).get("WatchdogSec")
+        if have is None or time_span(have) != WATCHDOG_SECONDS:
+            problems.append(f"{unit}: WatchdogSec={have if have is not None else '(unset)'}, doc_session.md SN6 wants {WATCHDOG_SECONDS}s")
+    for unit, text in sorted(units.items()):
+        service = dict(unit_section(text, "Service"))
+        have = service.get("WatchdogSec")
+        if have is None:
+            continue
+        if not time_span(have):
+            problems.append(f"{unit}: WatchdogSec={have} is no positive time span (systemd.time(7))")
+            continue
+        command = service.get("ExecStart", "").split()
+        program = command[0].lstrip("-@:+!").rsplit("/", 1)[-1] if command else "(no ExecStart=)"
+        if program not in senders:
+            problems.append(f"{unit}: sets WatchdogSec= and runs {program}, no binary of a crate under system/ or forge/specs, so no check sees it send WATCHDOG=1")
+        elif not senders[program]:
+            problems.append(f"{unit}: sets WatchdogSec= and the crate of {program} sends no WATCHDOG=1, so the manager ends it at every timeout (athanor_unit::watchdog::spawn)")
+        elif unit in WATCHDOG_UNITS and senders[program] == "unchecked":
+            problems.append(f"{unit}: {program}'s main runs a GLib main loop beside the bus and calls athanor_unit::watchdog::spawn, whose ping does not wait on that loop; call spawn_with with a check the loop answers (doc_session.md SN6)")
+        elif unit in WATCHDOG_UNITS and senders[program] != "spawn":
+            problems.append(f"{unit}: the source of {program}'s main does not call athanor_unit::watchdog::spawn, the ping after a roundtrip on its bus that doc_session.md SN6 asks for; a timer alone proves only that a loop runs")
+        # Unset, NotifyAccess= is implied as main by WatchdogSec= (systemd.service(5)); only none drops the pings.
+        if service.get("NotifyAccess") == "none":
+            problems.append(f"{unit}: sets WatchdogSec= and NotifyAccess=none, so the manager drops every WATCHDOG=1 and ends the unit at each timeout (systemd.service(5))")
+    return problems
+
+
 @check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
@@ -5784,6 +5871,8 @@ def check_session_units():
     for problem in session_exempt_problems(session_unit_problems(units, enabled)):
         r.fail(problem)
     for problem in state_link_problems(units, shipped_user_state_directories(ROOT)):
+        r.fail(problem)
+    for problem in watchdog_problems(units, watchdog_senders(ROOT)):
         r.fail(problem)
     for (unit, finding), why in SESSION_EXEMPT.items():
         r.note(f"exempt: {unit}: {finding}: {why}")

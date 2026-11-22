@@ -87,7 +87,7 @@ fn main() -> ExitCode {
 async fn serve(state_dir: PathBuf) -> ExitCode {
     let builder = zbus::connection::Builder::session();
     let query = zbus::connection::Builder::session();
-    let _connection = match server::start(
+    let connection = match server::start(
         builder,
         query,
         Config {
@@ -107,6 +107,8 @@ async fn serve(state_dir: PathBuf) -> ExitCode {
         tracing::error!(error = %err, "cannot tell systemd the daemon is ready");
         return ExitCode::FAILURE;
     }
+    // On the connection that owns the names, from this runtime's one thread (doc_session.md SN6).
+    athanor_unit::watchdog::spawn(&connection);
     tracing::info!("serving org.freedesktop.Notifications and org.kde.StatusNotifierWatcher");
     std::future::pending::<ExitCode>().await
 }

@@ -17,6 +17,9 @@ Restart=always
 RestartSec=100ms
 RestartSteps=5
 RestartMaxDelaySec=30s
+# The daemon pings the watchdog every 15 s, each time after a roundtrip on its own bus
+# connection, so a loop or a connection that hangs ends it, and Restart= restarts it (doc_session.md, SN6).
+WatchdogSec=30s
 Slice=session.slice
 
 # GSettings maps dconf's shared-memory flag beneath %t/dconf read-write to learn that a key

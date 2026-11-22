@@ -87,6 +87,9 @@ fn serve(
             .build()
             .await?;
         tracing::info!("serving {BUS_NAME}");
+        // On the connection that owns the name, from this runtime's one thread, and through the
+        // GLib main loop, which runs on the main thread (PT3, SN6).
+        athanor_unit::watchdog::spawn_with(&conn, glib_loop_answers);
         let portal = conn
             .object_server()
             .interface::<_, settings::Portal>(PATH)
@@ -96,4 +99,12 @@ fn serve(
         }
         Err("the settings watcher stopped".into())
     })
+}
+
+/// An empty task spawned on GLib's default context at the default priority, for the watchdog's
+/// check (doc_session.md SN6). A spawned task never runs in place, even before the main loop of
+/// `main` starts: only an iteration of that context runs it, so its completion proves that the
+/// loop runs. A task left by a period that timed out runs once the loop resumes, and answers no one.
+fn glib_loop_answers() -> glib::JoinHandle<()> {
+    glib::MainContext::default().spawn(async {})
 }
