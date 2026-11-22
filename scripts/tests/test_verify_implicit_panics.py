@@ -56,6 +56,22 @@ class CountsTest(unittest.TestCase):
         ]
         self.assertEqual(verify.implicit_panic_counts(lines), ({"athanor-shelld": 3, "athanor-unit": 0}, []))
 
+    def test_a_build_script_that_sets_a_cfg_is_a_problem_unless_vendored(self):
+        def executed(package, cfgs):
+            return json.dumps({"reason": "build-script-executed", "package_id": package, "cfgs": cfgs})
+
+        lines = [executed(SHELLD, ["not_clippy"]), executed(UNIT, []), executed(VENDORED, ["x"]),
+                 executed(REGISTRY, ["y"]), artifact(UNIT), FINISHED]
+        counts, problems = verify.implicit_panic_counts(lines)
+        self.assertEqual([p.split(":")[0] for p in problems], ["athanor-shelld"])
+
+    def test_a_checkout_under_a_vendor_directory_exempts_nothing(self):
+        package = "path+file:///vendor/checkout/system/athanor-unit#1.0.0"
+        line = json.dumps({"reason": "build-script-executed", "package_id": package, "cfgs": ["x"]})
+        with mock.patch.object(verify, "ROOT", pathlib.Path("/vendor/checkout")):
+            problems = verify.implicit_panic_counts([line, FINISHED])[1]
+        self.assertEqual([p.split(":")[0] for p in problems], ["athanor-unit"])
+
     def test_a_run_that_failed_or_never_finished_is_a_problem(self):
         failed = json.dumps({"reason": "build-finished", "success": False})
         self.assertEqual(len(verify.implicit_panic_counts([artifact(UNIT), FINISHED, failed])[1]), 1)
@@ -183,6 +199,48 @@ class ConfigTest(unittest.TestCase):
                 (root / path).write_text(text)
             found = verify.implicit_panic_cfgs(root, list(files), ["m"])
         self.assertEqual([f.rsplit(":", 1)[0] for f in found], ["m/src/a.rs:1", "m/src/b.rs:1", "m/src/c.rs:2"])
+
+    def test_a_name_in_a_comment_is_not_a_cfg(self):
+        files = {"m/src/a.rs": "// cfg(not(clippy)) hides code\n/* debug_assertions */\nfn f() {}\n"}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "m/src").mkdir(parents=True)
+            (root / "m/src/a.rs").write_text(files["m/src/a.rs"])
+            self.assertEqual(verify.implicit_panic_cfgs(root, list(files), ["m"]), [])
+
+    def test_not_feature_bodies_must_be_listed_at_their_count(self):
+        body = '#[cfg(not(feature = "gtk"))]\nfn f() {}\n// #[cfg(not(feature = "x"))]\n'
+        files = {"m/src/a.rs": body, "m/src/b.rs": body, "m/src/c.rs": "#[cfg(feature = \"gtk\")]\nfn g() {}\n"}
+        line = '#[cfg(not(feature = "gtk"))]\n'.strip()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "m/src").mkdir(parents=True)
+            for path, text in files.items():
+                (root / path).write_text(text)
+            with mock.patch.object(verify, "IMPLICIT_PANIC_NOT_FEATURE", {("m/src/a.rs", line): 1}):
+                found = verify.implicit_panic_cfgs(root, list(files), ["m"])
+            # The same count under another attribute is a different body.
+            with mock.patch.object(verify, "IMPLICIT_PANIC_NOT_FEATURE",
+                                   {("m/src/a.rs", '#[cfg(not(feature = "gpu"))]'): 1, ("m/src/b.rs", line): 1}):
+                swapped = verify.implicit_panic_cfgs(root, list(files), ["m"])
+        self.assertEqual([f.split(":")[0] for f in found], ["m/src/b.rs"])
+        self.assertEqual(len(swapped), 2)
+
+    def test_not_feature_is_found_at_any_depth(self):
+        found = verify.implicit_panic_not_features(
+            '#[cfg(not(any(feature = "a", feature = "b")))]\nfn a() {}\n'
+            '#[cfg(all(unix, not(feature = "a")))]\nfn b() {}\n'
+            '#[cfg(not(all(unix, feature = "a")))]\nfn c() {}\n'
+            '#[cfg(not(unix))]\nfn d() {}\n// not(feature = "z")\n')
+        self.assertEqual(sorted(found.values()), [1, 1, 1])
+        self.assertEqual(len(found), 3)
+
+    def test_the_listed_not_feature_bodies_match_the_tree(self):
+        tracked = subprocess.run(["git", "-C", str(verify.ROOT), "ls-files", "-z"], capture_output=True,
+                                 text=True, check=True).stdout.split("\0")
+        members = [d.relative_to(verify.ROOT).as_posix() for d in verify.workspace_crates().values()]
+        self.assertEqual([f for f in verify.implicit_panic_cfgs(verify.ROOT, tracked, members)
+                          if "not(feature" in f], [])
 
     def test_a_pruned_name_under_src_is_walked(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -65,7 +65,7 @@ delegate_noop!(State: ignore WlSeat);
 delegate_noop!(State: ZwpInputMethodManagerV2);
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1);
     let (Some(preedit), Some(commit)) = (args.next(), args.next()) else {
         return Err("usage: input_method <preedit> <commit>".into());
     };
