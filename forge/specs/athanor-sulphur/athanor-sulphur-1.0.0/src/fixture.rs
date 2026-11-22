@@ -13781,3 +13781,7 @@ mod flood;
 // Decision 40: drag and drop between clients, and the drag icon.
 #[cfg(test)]
 mod dnd;
+
+// OS12: a window move or resize starts only from a press still held.
+#[cfg(test)]
+mod window_grab;
