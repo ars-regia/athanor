@@ -251,7 +251,8 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
-        // A check box or a switch with a toggled state, named by its label.
+        // A check box or a switch with a toggled state, named by its label; a preference row's
+        // switch is described by its second line, a label inside it (Ui::switch_row).
         Kind::Check { label, active } | Kind::Switch { label, active } => {
             let role = if matches!(widget.kind, Kind::Switch { .. }) {
                 Role::Switch
@@ -260,6 +261,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             };
             let mut node = Node::new(role);
             node.set_label(label.as_str());
+            if let Some(line) = ui.switch_line(id) {
+                node.set_description(line);
+            }
             node.set_toggled(if *active {
                 Toggled::True
             } else {
@@ -362,8 +366,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_expanded(expanded);
     }
     // A tile's second line stays its description over a tooltip, as the GTK panel sets the
-    // description after the tooltip its name gives.
-    let second_line = matches!(&widget.kind, Kind::Tile(tile) if !tile.subtitle.is_empty());
+    // description after the tooltip its name gives, and so does a preference row's.
+    let second_line = matches!(&widget.kind, Kind::Tile(tile) if !tile.subtitle.is_empty())
+        || ui.switch_line(id).is_some();
     if let Some(description) = ui.description(id).filter(|_| !second_line) {
         node.set_description(description);
     }
@@ -825,6 +830,58 @@ mod tests {
         };
         assert_eq!(ui.do_action(&click), Some(Event::Toggled(switch)));
         assert!(ui.is_active(switch));
+    }
+
+    #[test]
+    fn a_preference_row_reads_as_one_switch_named_by_its_title_and_described_by_its_second_line() {
+        let mut ui = Ui::new("Preferences", Theme::default(), false);
+        let row = ui.switch_row(Ui::ROOT, "Wi-Fi", "Connect to known networks", true);
+        // A description the application sets gives way to the second line, as a tile's.
+        ui.set_description(row, Some("Other"));
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let switches: Vec<&Node> = update
+            .nodes
+            .iter()
+            .map(|(_, n)| n)
+            .filter(|n| n.role() == Role::Switch)
+            .collect();
+        let [switch] = switches[..] else {
+            panic!("one switch, not {}", switches.len());
+        };
+        assert_eq!(switch.label(), Some("Wi-Fi"));
+        assert_eq!(switch.description(), Some("Connect to known networks"));
+        assert_eq!(switch.toggled(), Some(Toggled::True));
+        assert!(switch.supports_action(Action::Click) && switch.supports_action(Action::Focus));
+        // The title names the switch and no other node; the second line is the one label inside
+        // it, as GTK's label beside its switch, and takes no action.
+        let named = |text: &str| {
+            let named = update.nodes.iter().map(|(_, n)| n);
+            named
+                .filter(|n| n.label() == Some(text) || n.value() == Some(text))
+                .count()
+        };
+        assert_eq!(named("Wi-Fi"), 1);
+        let of = |update: &TreeUpdate, id| {
+            let found = update.nodes.iter().find(|(n, _)| *n == node_id(id));
+            found
+                .map(|(_, n)| n.clone())
+                .expect("a node for each widget shown")
+        };
+        let line = ui.widget(row).children[0];
+        let label = of(&update, line);
+        assert_eq!(
+            (label.role(), label.value()),
+            (Role::Label, Some("Connect to known networks"))
+        );
+        assert!(switch.children().contains(&node_id(line)));
+        assert!(!label.supports_action(Action::Click) && !label.supports_action(Action::Focus));
+        // The second line hidden, the switch is a plain one again: no description.
+        ui.set_visible(line, false);
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        assert_eq!(of(&update, row).description(), Some("Other"));
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
     }
 
     #[test]

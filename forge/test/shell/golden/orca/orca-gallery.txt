@@ -53,6 +53,7 @@ tab
 Option two check box not checked
 tab
 A switch on switch
+Its second line describes it
 tab
 Screen reader off.
 Screen reader on.
@@ -146,7 +147,7 @@ Screen reader on.
 A dialog A dialog holds its window until it is closed.
 Close button
 space
-Gallery
+Gallery frame
 Dialogs toggle button pressed
 Menus toggle button not pressed
 tab

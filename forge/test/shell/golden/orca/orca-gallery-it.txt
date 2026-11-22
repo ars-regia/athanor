@@ -53,6 +53,7 @@ tabulazione
 Opzione due casella di spunta non spuntata
 tabulazione
 Un interruttore attivo selettore
+La sua seconda riga lo descrive
 tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.

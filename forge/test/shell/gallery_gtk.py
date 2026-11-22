@@ -170,14 +170,21 @@ def fill_page(page, container, text):
     elif page == "choices":
         container.append(Gtk.CheckButton(label=text["check1"], active=True))
         container.append(Gtk.CheckButton(label=text["check2"]))
-        # A switch has no label of its own: the label beside it names it, and the toolkit's
-        # switch draws both as one widget.
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        label = Gtk.Label(label=text["switch"], xalign=0, hexpand=True)
+        # A preference row, as libadwaita's SwitchRow: a switch has no label of its own, the
+        # title beside it names it and the second line under the title describes it, and the
+        # toolkit's switch draws all three as one widget. A grid keeps the title the switch's
+        # sibling, as the label beside every other switch of the gallery.
+        row = Gtk.Grid(column_spacing=8)
+        title = Gtk.Label(label=text["switch"], xalign=0, hexpand=True)
+        detail = Gtk.Label(label=text["switch.detail"], xalign=0, wrap=True)
         switch = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
-        switch.update_property([Gtk.AccessibleProperty.LABEL], [text["switch"]])
-        row.append(label)
-        row.append(switch)
+        switch.update_property(
+            [Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+            [text["switch"], text["switch.detail"]],
+        )
+        row.attach(title, 0, 0, 1, 1)
+        row.attach(detail, 0, 1, 1, 1)
+        row.attach(switch, 1, 0, 1, 2)
         container.append(row)
     elif page == "values":
         scale = Gtk.Scale(

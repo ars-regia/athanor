@@ -393,7 +393,18 @@
  },
  {
   "depth": 5,
-  "role": "check box",
+  "role": "label",
+  "name": "Its second line describes it",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "switch",
   "name": "A switch",
   "states": [
    "checkable",

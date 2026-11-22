@@ -530,6 +530,11 @@ pub fn paint<C: Canvas>(
             }
             _ => 0.0,
         };
+        // The top of a preference row's second line, which its title sits on (Ui::switch_row).
+        let second_line = ui
+            .switch_line(id)
+            .and_then(|_| ui.visible_children(id).first().copied());
+        let second_line = second_line.map(|line| ui.widgets[line].rect.y);
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
@@ -977,7 +982,10 @@ pub fn paint<C: Canvas>(
                 }
                 if let Some(layout) = &widget.text {
                     let x = label_x(r, mark, ui.rtl, is_switch, t.gap, layout.width());
-                    let y = r.y + (r.h - layout.height()) / 2.0;
+                    // Above a preference row's second line, or centred alone.
+                    let y = second_line.map_or(r.y + (r.h - layout.height()) / 2.0, |top| {
+                        top - layout.height()
+                    });
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
             }

@@ -323,7 +323,8 @@ pub enum Kind {
     /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
     /// on its own. It fills the width of its column or group, or its cell in a row, where every
     /// child gets an equal share of the row's width; activating it raises [`Event::Toggled`].
-    /// Add it with [`Ui::switch`].
+    /// Add it with [`Ui::switch`]. A switch that holds a label of its own is a preference row:
+    /// the label is its second line, under its text, and its description ([`Ui::switch_row`]).
     #[non_exhaustive]
     Switch {
         /// The text of the switch, which names it for assistive technologies.
@@ -1295,6 +1296,41 @@ impl Ui {
     pub fn switch(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
         let label = label.to_owned();
         self.add(parent, Kind::Switch { label, active })
+    }
+
+    /// Adds a preference row, as libadwaita's `SwitchRow`: a switch titled `title`, on when
+    /// `active`, with `detail` as its second line, a label of its own that wraps at the room the
+    /// track leaves. Assistive technologies read one switch, named by the title and described by
+    /// the second line, and the whole row toggles it. Replace the title with [`Ui::set_text`] on
+    /// the switch, the second line with [`Ui::set_text`] on its one child. See [`Kind::Switch`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn switch_row(
+        &mut self,
+        parent: WidgetId,
+        title: &str,
+        detail: &str,
+        active: bool,
+    ) -> WidgetId {
+        let switch = self.switch(parent, title, active);
+        let line = self.add(switch, Kind::Label(detail.to_owned()));
+        self.set_wrap(line, Some(Wrap::default()));
+        switch
+    }
+
+    /// The second line of switch `id`, the text of the label it holds, when it is a preference
+    /// row ([`Ui::switch_row`]) and the label is shown.
+    pub(crate) fn switch_line(&self, id: WidgetId) -> Option<&str> {
+        if !matches!(self.widgets[id].kind, Kind::Switch { .. }) {
+            return None;
+        }
+        let first = self.visible_children(id).into_iter().next()?;
+        match &self.widgets[first].kind {
+            Kind::Label(text) => Some(text),
+            _ => None,
+        }
     }
 
     /// Adds an island, its children stacked top to bottom when `vertical`, with `margin` kept
@@ -2558,9 +2594,14 @@ impl Ui {
             | Kind::Toggle { label, radio: true, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
                 let layout = self.text.layout(label, size, rtl, &style);
+                // A preference row's second line, under the label (Ui::switch_row).
+                let (line_w, line_h) = match sizes.first() {
+                    Some(&line) if is_switch => line,
+                    _ => (0.0, 0.0),
+                };
                 let wh = (
-                    mark_w + gap + layout.width(),
-                    mark_h.max(layout.height()) + pad,
+                    mark_w + gap + layout.width().max(line_w),
+                    mark_h.max(layout.height() + line_h) + pad,
                 );
                 widget.text = Some(layout);
                 wh
@@ -2608,6 +2649,21 @@ impl Ui {
         match self.widgets[id].kind {
             Kind::Inline { padding } => self.place_inline(id, x, y, padding),
             Kind::CenterBox => self.place_center(id, x, y),
+            // A preference row's second line under the label at the start edge, the two centred
+            // together across the row; it fills the room the track and the gap leave, as a
+            // wrapping label fills its column, and breaks its lines at that width.
+            Kind::Switch { .. } => {
+                let Some(&line) = children.first() else {
+                    return;
+                };
+                let (mark_w, _) = mark_size(true, self.theme.font_size);
+                let title = self.widgets[id].text.as_ref().map_or(0.0, |l| l.height());
+                let r = &mut self.widgets[line].rect;
+                r.w = (outer.w - mark_w - gap).max(0.0);
+                let (w, h) = (r.w, r.h);
+                let cx = if self.rtl { x + outer.w - w } else { x };
+                self.place(line, cx, y + (outer.h - title - h) / 2.0 + title);
+            }
             Kind::Row => {
                 let cells = children.len().max(self.widgets[id].slots).max(1);
                 let n = cells as f32;
@@ -3874,6 +3930,100 @@ mod tests {
             assert_eq!(ui.activate(off), Some(Event::Toggled(off)));
             assert!(ui.is_active(off));
         }
+    }
+
+    #[test]
+    fn a_preference_row_keeps_its_title_and_second_line_at_the_start_and_its_track_at_the_end() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Preferences", Theme::default(), rtl);
+            ui.min_width = 400.0;
+            let row = ui.switch_row(Ui::ROOT, "Wi-Fi", "Connect to known networks", false);
+            let plain = ui.switch(Ui::ROOT, "Bluetooth", false);
+            ui.layout();
+            let r = ui.widget(row).rect;
+            let line = ui.widget(ui.widget(row).children[0]).rect;
+            let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
+            let title = ui.widget(row).text.as_ref().map_or(0.0, |l| l.width());
+            let title_x = label_x(r, track, rtl, true, ui.theme.gap, title);
+            if rtl {
+                assert_eq!(track.x, r.x, "the track at the end edge, the left");
+                assert_eq!(
+                    title_x + title,
+                    r.x + r.w,
+                    "the title at the start edge, the right"
+                );
+                assert_eq!(line.x + line.w, r.x + r.w, "the second line under it");
+                assert!(line.x >= track.x + track.w, "clear of the track");
+            } else {
+                assert_eq!(track.x + track.w, r.x + r.w, "the track at the end edge");
+                assert_eq!(
+                    (title_x, line.x),
+                    (r.x, r.x),
+                    "title and second line at the start"
+                );
+                assert!(line.x + line.w <= track.x, "clear of the track");
+            }
+            // The second line lies under the title, and the row is taller than a plain switch.
+            let title_h = ui.widget(row).text.as_ref().map_or(0.0, |l| l.height());
+            assert!(line.y >= r.y + title_h && line.y + line.h <= r.y + r.h);
+            assert!(r.h > ui.widget(plain).rect.h);
+            assert_eq!(
+                r.w,
+                ui.widget(plain).rect.w,
+                "rtl {rtl}: it fills the width"
+            );
+        }
+    }
+
+    #[test]
+    fn a_preference_rows_second_line_wraps_in_the_room_its_track_leaves() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Preferences", Theme::default(), rtl);
+            ui.min_width = 300.0;
+            let short = ui.switch_row(Ui::ROOT, "Lid", "Suspends", false);
+            let detail = "Suspends the computer when its lid is closed, unless a monitor is on";
+            let row = ui.switch_row(Ui::ROOT, "Lid", detail, false);
+            ui.layout();
+            let r = ui.widget(row).rect;
+            let line = ui.widget(ui.widget(row).children[0]).rect;
+            let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
+            // It fills the room up to a gap before the track, and breaks its lines there.
+            assert_eq!(line.w, r.w - track.w - ui.theme.gap, "rtl {rtl}");
+            assert!(r.h > ui.widget(short).rect.h, "more lines, a taller row");
+            assert!(line.y + line.h <= r.y + r.h, "every line inside the row");
+        }
+    }
+
+    #[test]
+    fn a_preference_row_is_one_stop_of_the_focus_and_toggles_from_anywhere_on_it() {
+        let mut ui = Ui::new("Preferences", Theme::default(), false);
+        let before = ui.add(Ui::ROOT, Kind::Button("Before".into()));
+        let row = ui.switch_row(Ui::ROOT, "Wi-Fi", "Connect to known networks", false);
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.layout();
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(row), "Tab reaches the switch");
+        assert_eq!(ui.key(Key::Text(" ".into())), Some(Event::Toggled(row)));
+        assert!(ui.is_active(row));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(after), "and passes its second line over");
+        let line = ui.widget(ui.widget(row).children[0]).rect;
+        let title = ui.widget(row).rect;
+        assert_eq!(
+            ui.click(line.center_x(), line.y + line.h / 2.0),
+            Some(Event::Toggled(row))
+        );
+        assert!(
+            !ui.is_active(row),
+            "a click on the second line turns it off"
+        );
+        assert_eq!(
+            ui.click(title.x + 1.0, title.y + 1.0),
+            Some(Event::Toggled(row))
+        );
+        assert!(ui.is_active(row), "and one on the title on");
+        assert_eq!(ui.focus(), Some(row));
     }
 
     #[test]

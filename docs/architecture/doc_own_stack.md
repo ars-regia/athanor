@@ -2086,7 +2086,7 @@ compositor and that the own compositor did not yet offer:
     `89753530b`: a retained tree of widgets under generational ids (`system/athanor-sal/src/widget.rs:36`),
     one focused widget walked in tree order and by the arrows over laid-out boxes
     (`system/athanor-sal/src/focus.rs:10`, `:132`), a vertical scroll that measures every child
-    (`system/athanor-sal/src/widget.rs:2401-2407`), a list that chooses one row, a clipboard of
+    (`system/athanor-sal/src/widget.rs:2437-2443`), a list that chooses one row, a clipboard of
     UTF-8 text (`system/athanor-sal/src/driver/clipboard.rs:41`), and `wl_data_device` callbacks
     that do nothing (`system/athanor-sal/src/driver/clipboard.rs:537-555`). Each item is public
     API with rustdoc, a page of the gallery, unit tests, its goldens drawn with `vello_cpu` and
