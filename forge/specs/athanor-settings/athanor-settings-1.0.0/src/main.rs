@@ -10,6 +10,8 @@ use std::collections::VecDeque;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::io;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
 
@@ -74,12 +76,25 @@ fn forward() -> ExitCode {
 /// also kills this process, a SIGKILL of the whole unit say, leaves the state, and the next
 /// start reopens the page as after a crash. A clear that fails is logged and still exits 0:
 /// a failed `ExecStopPost=` would fail the run, and `Restart=on-failure` would bring back the
-/// window the user closed.
-fn stopped(dirs: &Dirs) -> ExitCode {
-    if env::var("SERVICE_RESULT").as_deref() == Ok("success") {
-        if let Err(error) = window_state::clear(&dirs.unit_runtime) {
-            tracing::error!(%error, "cannot clear the window state; the next start reopens it");
-        }
+/// window the user closed. It runs before every other step of `main`, which could fail, and
+/// needs only the directory systemd names in `RUNTIME_DIRECTORY`.
+fn stopped() -> ExitCode {
+    if env::var("SERVICE_RESULT").as_deref() != Ok("success") {
+        return ExitCode::SUCCESS;
+    }
+    let dir = env::var("RUNTIME_DIRECTORY").ok().and_then(|dirs| {
+        dirs.split(':')
+            .map(PathBuf::from)
+            .find(|dir| dir.ends_with("athanor-settings"))
+    });
+    let cleared = match dir {
+        Some(dir) => window_state::clear(&dir),
+        None => Err(io::Error::other(
+            "RUNTIME_DIRECTORY names no athanor-settings",
+        )),
+    };
+    if let Err(error) = cleared {
+        tracing::error!(%error, "cannot clear the window state; the next start reopens it");
     }
     ExitCode::SUCCESS
 }
@@ -87,7 +102,9 @@ fn stopped(dirs: &Dirs) -> ExitCode {
 fn main() -> ExitCode {
     athanor_unit::panic::install();
     journal::init();
-    let stop = env::args_os().nth(1).is_some_and(|arg| arg == STOPPED);
+    if env::args_os().nth(1).is_some_and(|arg| arg == STOPPED) {
+        return stopped();
+    }
     // Before any toolkit or Wayland connection: the window runs only in its unit (SE4).
     match fs::read_to_string("/proc/self/cgroup") {
         Ok(cgroup) if in_unit(&cgroup) => {}
@@ -103,9 +120,6 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the cache");
         return ExitCode::FAILURE;
     };
-    if stop {
-        return stopped(&dirs);
-    }
     // SE6: before any thread. Step 1 writes its state file and dconf's flag under the runtime
     // directory, and fontconfig's cache; the other grants of SE6 come with the pages that write.
     let mut write = dirs::private_dirs(&dirs.runtime, &["athanor-settings", "dconf"]);
