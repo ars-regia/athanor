@@ -8,7 +8,10 @@ and one for each `show` line on its standard input. A `show` must map a window; 
 the compositor's request to close it, must close it, destroying its xdg_toplevel and its
 wl_surface, and leave the client running with no window; a second `show` must map a new one,
 and `quit` must end the run with status 0. Then `athanor-sal-resident --default`, which keeps
-the driver's default, must end with status 0 when sway closes its window.
+the driver's default, must end with status 0 when sway closes its window. Last, Settings' own
+window (`athanor-settings-resident`, the probe of its `examples/resident_probe.rs`): sway's
+`kill` must close it and leave the process running, and a `Show` queued on its standard input
+must map the next window in that same process, twice.
 """
 
 import json
@@ -24,6 +27,9 @@ APP_ID = "os.athanor.SalResident"
 TRACE = Path("/out/toolkit-window.trace")
 STDOUT = Path("/out/toolkit-window.stdout")
 DEFAULT_STDOUT = Path("/out/toolkit-window-default.stdout")
+SETTINGS = "/out/bin/athanor-settings-resident"
+SETTINGS_ID = "os.athanor.Settings"
+SETTINGS_LOG = Path("/out/toolkit-window-settings.log")
 TIMEOUT = 10
 
 TOPLEVEL_DESTROY = re.compile(r"-> xdg_toplevel#\d+\.destroy\(\)")
@@ -36,15 +42,20 @@ def sway(*args):
     ).stdout
 
 
+def pids(app_id):
+    """The process of each window of `app_id` that sway maps."""
+
+    def mapped(node):
+        own = [node.get("pid")] if node.get("app_id") == app_id else []
+        children = node.get("nodes", []) + node.get("floating_nodes", [])
+        return own + [pid for child in children for pid in mapped(child)]
+
+    return mapped(json.loads(sway("-r", "-t", "get_tree")))
+
+
 def windows():
     """The number of windows of the client that sway maps."""
-
-    def count(node):
-        own = 1 if node.get("app_id") == APP_ID else 0
-        children = node.get("nodes", []) + node.get("floating_nodes", [])
-        return own + sum(count(child) for child in children)
-
-    return count(json.loads(sway("-r", "-t", "get_tree")))
+    return len(pids(APP_ID))
 
 
 def until(what, done):
@@ -150,6 +161,41 @@ def default(wayland):
             client.terminate()
 
 
+def settings(wayland):
+    with open(SETTINGS_LOG, "w") as log:
+        client = subprocess.Popen(
+            [SETTINGS],
+            env=wayland,
+            stdin=subprocess.PIPE,
+            stdout=log,
+            stderr=log,
+            text=True,
+        )
+    try:
+        until("Settings mapped no window", lambda: pids(SETTINGS_ID) == [client.pid])
+        for n in (1, 2):
+            sway(f"[app_id={SETTINGS_ID}]", "kill")
+            until(
+                f"the close of Settings' window {n} did not close it",
+                lambda: pids(SETTINGS_ID) == [],
+            )
+            time.sleep(1)
+            if client.poll() is not None:
+                raise SystemExit(
+                    f"toolkit_window_check: Settings ended with its window {n}"
+                )
+            client.stdin.write("about\n")
+            client.stdin.flush()
+            until(
+                f"the Show after Settings' close {n} mapped no window in its process",
+                lambda: pids(SETTINGS_ID) == [client.pid],
+            )
+        print("Settings outlived its window twice, and each Show opened the next in it")
+    finally:
+        if client.poll() is None:
+            client.terminate()
+
+
 def main():
     runtime = Path(os.environ["XDG_RUNTIME_DIR"])
     runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -175,6 +221,7 @@ def main():
         wayland = dict(os.environ, WAYLAND_DISPLAY=display)
         resident(wayland)
         default(wayland)
+        settings(wayland)
     finally:
         compositor.terminate()
 
