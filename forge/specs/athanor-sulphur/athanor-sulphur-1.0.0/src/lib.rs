@@ -164,7 +164,7 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
 
 /// Runs the compositor as its arguments say, until SIGTERM, SIGINT or a fatal error.
 pub fn run() -> Result<(), Error> {
-    let options = options(std::env::args().skip(1))?;
+    let options = options(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1))?;
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     // First, before any thread: see `shutdown::watch`.
     let signals = shutdown::watch(&event_loop)?;

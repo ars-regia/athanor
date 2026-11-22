@@ -35,7 +35,7 @@ const USAGE: &str =
 
 fn main() -> ExitCode {
     athanor_unit::panic::install();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1).collect();
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

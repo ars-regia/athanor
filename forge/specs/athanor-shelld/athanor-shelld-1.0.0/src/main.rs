@@ -24,7 +24,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if env::args().nth(1).as_deref() == Some("--record-exit") {
+    if env::args_os().nth(1).is_some_and(|arg| arg == "--record-exit") {
         let result = env::var("SERVICE_RESULT").ok();
         return match crash_loop::record_exit(&failures, now, result.as_deref()) {
             Ok(()) => ExitCode::SUCCESS,

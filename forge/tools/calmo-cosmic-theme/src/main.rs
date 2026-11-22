@@ -158,7 +158,7 @@ fn remove_empty_dirs(dir: &Path) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).collect();
     let [_, inputs_path, out] = args.as_slice() else {
         bail!("usage: calmo-cosmic-theme <cosmic-inputs.json> <out-dir>");
     };

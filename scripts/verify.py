@@ -2749,6 +2749,10 @@ BUDGET = {
     "todo!(": 0,
     "unimplemented!(": 0,
     "process::abort(": 2,  # the fuzz entry and the DRM lease handler of Sulphur, #1186
+    # Both panic on a non-UTF-8 argument or variable: use args_os and vars_os. clippy.toml denies
+    # them too, which also reaches tests and examples (#1430).
+    "env::args(": 0,
+    "env::vars(": 0,
 }
 
 

@@ -64,7 +64,7 @@ struct Picture {
 
 fn main() -> ExitCode {
     athanor_unit::panic::install();
-    if std::env::args().skip(1).eq(["wallpaper"]) {
+    if std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1).eq(["wallpaper"]) {
         return match wallpaper() {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -73,7 +73,7 @@ fn main() -> ExitCode {
             }
         };
     }
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1);
     let (Some(kind), Some(side)) = (args.next(), args.next().and_then(|side| side.parse::<u32>().ok())) else {
         eprintln!("usage: athanor-preview-render image|pdf <side> | wallpaper");
         return ExitCode::from(2);
