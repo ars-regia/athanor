@@ -1,6 +1,7 @@
 //! The probe of spike SE-S1 (doc_settings.md section 4): Settings' window at the landing page,
 //! opened as a cold start opens it, without the bus name, the forwarder or Landlock, so that
-//! `forge/test/shell/measure_chooser.py run` can time its first frame. Not shipped.
+//! `forge/test/shell/measure_chooser.py run` can time its first frame. Settings outlives its
+//! window (SE5), so closing it leaves the probe running: a signal ends it. Not shipped.
 
 use std::process::ExitCode;
 

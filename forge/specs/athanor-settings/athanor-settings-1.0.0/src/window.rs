@@ -9,15 +9,16 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use athanor_sal::driver::Role;
-use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, Wrap};
+use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, WindowButton, Wrap};
 use athanor_settings_core::registry::{Group, Page, Registry};
 use athanor_settings_core::target::{self, Target};
 use athanor_settings_core::window_state;
+use athanor_style::appearance::Appearance;
 use athanor_trust_state::{Badge, ReadError, Reason, State};
 
 use crate::i18n::tr;
 use crate::info::{self, Hardware, Info};
-use crate::look::Look;
+use crate::look::{self, Look};
 
 /// The application id, as the name of Settings' `.desktop` file.
 pub const APP_ID: &str = "os.athanor.Settings";
@@ -64,13 +65,33 @@ pub enum First {
     Reopen(Target),
 }
 
-/// Settings' window and what it shows.
+/// The window's frame: the sidebar, with its search and its list of pages, and the page beside
+/// it, returned as the window, the search, the list and the page.
+fn frame(look: &Look, rtl: bool) -> (Ui, WidgetId, WidgetId, WidgetId) {
+    let mut ui = Ui::new(&tr("Settings"), look.theme.clone(), rtl);
+    ui.min_width = 860.0;
+    ui.min_height = 560.0;
+    // ponytail: equal halves until Sal's split view (SL3) gives the sidebar its own width
+    // and collapses the two below 600 px.
+    let body = ui.add(Ui::ROOT, Kind::Row);
+    let side = ui.add(body, Kind::Column);
+    let search = ui.field(side, &tr("Search settings"), "");
+    let nav = ui.list(side, &tr("Pages"));
+    let page = ui.add(body, Kind::Column);
+    (ui, search, nav, page)
+}
+
+/// Settings' window and what it shows. The process outlives the window (SE5): a `Show` while
+/// none is open builds the next one.
 pub struct Settings {
     registry: Registry,
     look: Look,
+    rtl: bool,
     /// The window's widgets until the driver opens them.
     ui: Option<Ui>,
     window: Option<SurfaceId>,
+    /// The window was closed, and the next `Show` opens a new one.
+    closed: bool,
     search: WidgetId,
     nav: WidgetId,
     /// The sidebar's rows and where each leads.
@@ -101,21 +122,14 @@ impl Settings {
         shows: Rc<RefCell<VecDeque<String>>>,
         state_dir: Option<PathBuf>,
     ) -> Self {
-        let mut ui = Ui::new(&tr("Settings"), look.theme.clone(), rtl);
-        ui.min_width = 860.0;
-        ui.min_height = 560.0;
-        // ponytail: equal halves until Sal's split view (SL3) gives the sidebar its own width
-        // and collapses the two below 600 px.
-        let body = ui.add(Ui::ROOT, Kind::Row);
-        let side = ui.add(body, Kind::Column);
-        let search = ui.field(side, &tr("Search settings"), "");
-        let nav = ui.list(side, &tr("Pages"));
-        let page = ui.add(body, Kind::Column);
+        let (mut ui, search, nav, page) = frame(&look, rtl);
         let mut settings = Self {
             registry,
             look,
+            rtl,
             ui: None,
             window: None,
+            closed: false,
             search,
             nav,
             nav_rows: Vec::new(),
@@ -356,6 +370,31 @@ impl Settings {
         }
     }
 
+    /// The window closed and the process stays (SE5): its state goes, so that a crash with no
+    /// window open reopens none, and with it the marker of a reopened page closed before its
+    /// first frame.
+    fn close_window(&mut self) {
+        self.window = None;
+        self.closed = true;
+        self.reopening = false;
+        if let Some(dir) = &self.state_dir {
+            if let Err(error) = window_state::clear(dir) {
+                tracing::warn!(%error, "cannot clear the window state; a restart reopens it");
+            }
+        }
+    }
+
+    /// The next window, at `target`: its widgets built anew, the registry and what was read of
+    /// the hardware kept from the first (SE5).
+    fn window_at(&mut self, target: Target) -> Ui {
+        let (mut ui, search, nav, page) = frame(&self.look, self.rtl);
+        (self.search, self.nav, self.page) = (search, nav, page);
+        self.closed = false;
+        self.fill_nav(&mut ui, "");
+        self.navigate(&mut ui, target);
+        ui
+    }
+
     /// The target the sidebar's row or the page's button `id` leads to.
     fn link(&self, id: WidgetId) -> Option<Target> {
         self.nav_rows
@@ -424,12 +463,25 @@ impl Application for Settings {
         vec![(ui, role)]
     }
 
+    /// Resident (SE5): the window's Close closes the window, not the run.
+    fn close_ends_run(&self) -> bool {
+        false
+    }
+
     fn drawn(&mut self, _: &mut Shell, surface: SurfaceId) {
         self.window.get_or_insert(surface);
         self.end_reopen();
     }
 
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
+        if event == Event::Window(WindowButton::Close) {
+            shell.close(surface);
+            // The window has no id before its first frame; any other surface is not it.
+            if self.window.is_none_or(|window| window == surface) {
+                self.close_window();
+            }
+            return;
+        }
         let Some(ui) = shell.ui_mut(surface) else {
             return;
         };
@@ -454,8 +506,25 @@ impl Application for Settings {
         }
     }
 
-    /// Applies the `Show` calls and the answers of the services that came since.
+    /// Opens the next window at the first `Show` since the last one closed, then applies the
+    /// `Show` calls and the answers of the services that came since.
     fn turn(&mut self, shell: &mut Shell) {
+        if self.closed {
+            let Some(target) = take_show(&self.registry, &self.shows) else {
+                return;
+            };
+            // Read again, as each start read them: they may have changed while no window was open.
+            // The last window's answers go first, so the new one never draws a trust state or a
+            // name read before it, and shows "Not verified" until the service answers again.
+            self.look = look::look(&Appearance::read());
+            *self.info.borrow_mut() = Info::default();
+            info::fetch(&self.info);
+            let ui = self.window_at(target);
+            match shell.open_window(ui, APP_ID) {
+                Ok(window) => self.window = Some(window),
+                Err(error) => return shell.fail(error),
+            }
+        }
         let Some(window) = self.window else {
             return;
         };
@@ -652,6 +721,51 @@ mod tests {
         assert!(ui.selected(settings.nav).is_some(), "About is built and selected");
         settings.end_reopen();
         assert!(!marker.exists(), "its first frame removes the marker");
+        std::fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[test]
+    fn a_closed_window_keeps_the_process_and_the_next_show_builds_a_new_one() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "athanor-settings-resident-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).expect("a scratch directory");
+        let registry = Registry::new();
+        let state = || window_state::load(&registry, &dir).expect("readable");
+        window_state::save(&dir, Target::Landing).expect("a crashed run's state");
+        let mut settings = Settings::new(
+            Registry::new(),
+            crate::look::look(&Appearance::default()),
+            false,
+            First::Reopen(Target::Landing),
+            Rc::default(),
+            Rc::default(),
+            Some(dir.clone()),
+        );
+        assert!(!settings.close_ends_run(), "closing the window does not end the run");
+        let first = settings.start();
+        let (ui, _) = first.first().expect("the window");
+        let first_nav = settings.nav;
+        assert!(ui.selected(first_nav).is_none(), "the landing page selects no row");
+        let marker = dir.join(window_state::MARKER);
+        assert!(marker.exists(), "the reopened page is drawn inside the marker");
+
+        settings.close_window();
+        assert_eq!(state(), None, "a crash with no window open reopens none");
+        assert!(!marker.exists(), "a page closed before its first frame leaves no marker");
+
+        let next = settings.window_at(Target::Page("about"));
+        assert!(
+            next.selected(settings.nav).is_some(),
+            "the new window's own sidebar selects About"
+        );
+        assert_eq!(state(), Some(Target::Page("about")));
+        assert!(!marker.exists(), "only a page reopened after a crash is marked");
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 
