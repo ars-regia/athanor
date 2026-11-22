@@ -385,11 +385,11 @@ One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux
 
 | Job | Why self-hosted |
 |---|---|
-| CI8 `build` (`kernel-build.yml:201`) | the kernel RPM build takes about an hour |
+| CI8 `build` (`kernel-build.yml:198`) | the kernel RPM build takes about an hour |
 | CI9 `prep` (`kernel-bump.yml:116`) | `build.sh --stage prep` of the new pins, in the same builder |
 | CI10 `repro`, `variant` (`kernel-weekly.yml:54,128`) | full kernel rebuilds |
 
-CI8 runs on every PR; its `build` job is skipped for PRs from forks (`kernel-build.yml:205`), so outside code never reaches the runner through it.
+CI8 runs on every PR; its `build` job is skipped for PRs from forks (`kernel-build.yml:202`), so outside code never reaches the runner through it.
 
 ## 5. Secrets, variables and environments
 
