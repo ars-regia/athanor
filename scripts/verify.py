@@ -8653,6 +8653,69 @@ def take_option(argv, name):
     return value
 
 
+# The branches whose runs may sign or move a tag, by the variable that overrides the default and
+# the script that holds it (issue #1346). ADR-0125 keeps rebase/* out of every one of them.
+TRUSTED_REF_DEFAULTS = (
+    ("system/tier-digests.sh", "TIER_TRUSTED_REFS"),
+    ("system/kernel-artifacts.sh", "KERNEL_TRUSTED_REFS"),
+    ("system/tag-images.sh", "KERNEL_TRUSTED_REFS"),
+)
+
+
+def trusted_ref_problems(scripts):
+    """`scripts` maps a path to its text. A default of a trusted-ref variable, `${VAR:-a b}`,
+    names exactly the branch iso-v0; the retired main and any rebase/* branch are not signers."""
+    out = []
+    for path, var in TRUSTED_REF_DEFAULTS:
+        text = scripts.get(path)
+        if text is None:
+            out.append(f"{path}: cannot be read")
+            continue
+        defaults = re.findall(r"\$\{" + var + r":-([^}]*)\}", text)
+        if not defaults:
+            out.append(f"{path}: has no default for {var}")
+        out.extend(f"{path}: the default of {var} is '{d}', not 'iso-v0' (ADR-0125, issue #1346)"
+                   for d in defaults if d.split() != ["iso-v0"])
+    return out
+
+
+# Files that run signing or publishing on a branch: `main` is not one of the branches that start
+# them. A line holds it when a `branches: [...]` list, a `- main` block-list item, a
+# `refs/heads/main` condition or a `ref_name == 'main'` condition names it.
+MAIN_BRANCH_FILES = (
+    ".github/workflows/azoth-signer.yml",
+    ".github/workflows/kernel-build.yml",
+    "forge/scripts/publish_tiers.sh",
+)
+MAIN_BRANCH_LINE = re.compile(
+    r"branches:\s*\[[^\]]*(?<![\w-])main(?![\w-])[^\]]*\]|refs/heads/main(?![\w-])"
+    r"""|^\s*-\s*['"]?main['"]?\s*(#.*)?$|ref_name\s*==\s*['"]main['"]""")
+
+
+def main_branch_problems(files):
+    """`files` maps a path to its text; a comment line is not read."""
+    out = []
+    for path in MAIN_BRANCH_FILES:
+        text = files.get(path)
+        if text is None:
+            out.append(f"{path}: cannot be read")
+            continue
+        out.extend(f"{path}:{n}: names the retired main branch (issue #1346)"
+                   for n, line in enumerate(text.splitlines(), 1)
+                   if not line.lstrip().startswith("#") and MAIN_BRANCH_LINE.search(line))
+    return out
+
+
+@check("trusted-refs", "Every trusted-ref default of the signing scripts names only iso-v0, and no signing or publishing trigger names main (issue #1346)")
+def check_trusted_refs():
+    r = Result()
+    texts = {path: (ROOT / path).read_text() if (ROOT / path).is_file() else None
+             for path in [path for path, _ in TRUSTED_REF_DEFAULTS] + list(MAIN_BRANCH_FILES)}
+    for problem in trusted_ref_problems(texts) + main_branch_problems(texts):
+        r.fail(problem)
+    return r
+
+
 def main(argv):
     argv = list(argv)
     try:

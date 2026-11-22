@@ -26,7 +26,7 @@ adds, deletes or renames one, PB12's included, edits that table in the same pull
 - **Never send logs to an external service.** Use `actions/upload-artifact` and
   `$GITHUB_STEP_SUMMARY`.
 - **Keep the required checks running on every pull request**: `gate` on
-  `iso-v0`, `Kernel gate` on `main` (`kernel-build.yml` runs on pull requests to `main` only) (`.github/settings/branch-protection.json`), and
+  `iso-v0`, `Kernel gate` on `main` (`kernel-build.yml` no longer runs on pull requests, so no pull request to `main` can satisfy it until #1377 retires the branch) (`.github/settings/branch-protection.json`), and
   `gate` through the `product-branches` ruleset (`rulesets.json`), and on every merge group:
   the merge queue of `iso-v0` (`product-queue`, ADR-0137) waits for `gate` of `merge_group`.
 - **A workflow on a non-default branch is not registered** until a push matches its

@@ -274,7 +274,7 @@ class PublishTiers(unittest.TestCase):
     def test_a_branch_run_reuses_what_its_branch_or_a_trusted_one_signed(self):
         self.env["GITHUB_REF"] = "refs/heads/feature/x"
         self.publish_current(*DIRS, signer=f"{WORKFLOW}@refs/heads/feature/x")
-        self.publish_current("athanor-forge-tier1-repo", signer=f"{WORKFLOW}@refs/heads/main")
+        self.publish_current("athanor-forge-tier1-repo", signer=f"{WORKFLOW}@refs/heads/iso-v0")
         r = self.run_script()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.pushed(), [])
@@ -331,10 +331,11 @@ class PublishTiers(unittest.TestCase):
         for log in ("skopeo.log", "buildah.log"):
             (self.dir / log).unlink()
 
-    def test_the_default_branches_push_latest(self):
-        for ref in ("refs/heads/iso-v0", "refs/heads/main"):
-            with self.subTest(ref=ref):
-                self.assert_tag(ref, "latest")
+    def test_the_default_branch_pushes_latest(self):
+        self.assert_tag("refs/heads/iso-v0", "latest")
+
+    def test_the_retired_main_branch_pushes_a_branch_tag(self):
+        self.assert_tag("refs/heads/main", "branch-main")
 
     def test_another_branch_pushes_a_branch_tag(self):
         self.assert_tag("refs/heads/rebase/fedora-45", "branch-rebase-fedora-45")
