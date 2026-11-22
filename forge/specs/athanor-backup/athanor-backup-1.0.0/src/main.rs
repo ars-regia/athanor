@@ -88,10 +88,19 @@ fn parse(args: &[OsString]) -> Result<Action<'_>, Usage> {
 fn run(args: &[OsString]) -> Result<()> {
     let action = parse(args)?;
     if !nix::unistd::geteuid().is_root() {
-        bail!(
-            "snapshots belong to root: run it as `sudo athanor-backup {}`",
-            args.iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>().join(" ")
-        );
+        // A word that is not UTF-8 cannot be printed as typed, and a lossy copy names a
+        // different path, so the hint then names no command.
+        match args
+            .iter()
+            .map(|arg| arg.to_str())
+            .collect::<Option<Vec<_>>>()
+        {
+            Some(words) => bail!(
+                "snapshots belong to root: run it as `sudo athanor-backup {}`",
+                words.join(" ")
+            ),
+            None => bail!("snapshots belong to root: run the same command again with sudo"),
+        }
     }
     match action {
         Action::Init => init(),
@@ -250,12 +259,8 @@ fn restore(id: &str, path: &Path) -> Result<()> {
             parent.display()
         )
     })?;
-    fstatat(
-        &parent_fd,
-        name,
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .with_context(|| format!("{} is not in snapshot {id}", path.display()))?;
+    fstatat(&parent_fd, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .with_context(|| format!("{} is not in snapshot {id}", path.display()))?;
 
     let below_home = relative
         .parent()
@@ -476,13 +481,18 @@ mod tests {
         // Outside btrfs a directory never has inode 256, so `init` and `create` stop on it and the
         // hourly timer unit fails visibly. A link to "/" (inode 256 on many filesystems) is not
         // tried: the inode of "/" is not under the test's control.
-        let dir = TempDir(std::env::temp_dir().join(format!("athanor-backup-test-{}", std::process::id())));
+        let dir = TempDir(
+            std::env::temp_dir().join(format!("athanor-backup-test-{}", std::process::id())),
+        );
         fs::create_dir_all(&dir.0).expect("create test directory");
         for (path, want) in [
             (dir.0.clone(), "is not a btrfs subvolume"),
             (dir.0.join("missing"), "is missing"),
         ] {
-            let text = format!("{:#}", ensure_subvolume(&path).expect_err("must be refused"));
+            let text = format!(
+                "{:#}",
+                ensure_subvolume(&path).expect_err("must be refused")
+            );
             assert!(text.contains(want), "{text}");
             assert!(text.contains(&path.display().to_string()), "{text}");
         }
@@ -502,12 +512,23 @@ mod tests {
     fn a_restore_path_keeps_its_bytes_and_a_snapshot_name_must_be_text() {
         use std::os::unix::ffi::{OsStrExt, OsStringExt};
         let path = OsString::from_vec(b"/var/home/ada/caf\xe9".to_vec());
-        let line = [OsString::from("restore"), OsString::from("2026-01-01_00-00-00"), path.clone()];
+        let line = [
+            OsString::from("restore"),
+            OsString::from("2026-01-01_00-00-00"),
+            path.clone(),
+        ];
         let Ok(Action::Restore(id, got)) = parse(&line) else {
             panic!("a non-UTF-8 path is a restore");
         };
-        assert_eq!((id, got.as_os_str().as_bytes()), ("2026-01-01_00-00-00", path.as_bytes()));
-        let bad_id = [OsString::from("restore"), OsString::from_vec(vec![0xff]), path];
+        assert_eq!(
+            (id, got.as_os_str().as_bytes()),
+            ("2026-01-01_00-00-00", path.as_bytes())
+        );
+        let bad_id = [
+            OsString::from("restore"),
+            OsString::from_vec(vec![0xff]),
+            path,
+        ];
         assert!(parse(&bad_id).is_err_and(|usage| usage.0.contains("not UTF-8")));
         assert!(parse(&[OsString::from("restore")]).is_err());
         assert!(run(&bad_id).unwrap_err().is::<Usage>());
