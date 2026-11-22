@@ -1385,7 +1385,9 @@ impl State {
         let origin = shown.loc;
         let map = layer_map_for_output(output);
         let focused = self.focused_window();
-        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output);
+        // A window a drag carries is left out, here and below (decision 37).
+        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output)
+            .filter(|window| !self.carried(window));
         let above_top = lifted.and_then(|window| {
             let location = self.space.element_location(window)? - window.geometry().loc;
             window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
@@ -1409,7 +1411,7 @@ impl State {
         if above.is_some() {
             return above;
         }
-        // `Space::element_under`, less a window a drag carries (decision 37).
+        // `Space::element_under`.
         let window = self
             .space
             .elements()
@@ -1426,6 +1428,7 @@ impl State {
             .space
             .elements()
             .rev()
+            .filter(|above| !self.carried(above))
             .take_while(|above| window.as_ref().is_none_or(|(window, _)| above != window))
             .any(|above| crate::marks::whole_on(above, shown));
         if black {

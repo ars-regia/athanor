@@ -428,6 +428,40 @@ fn a_toplevel_drag_is_kept_until_its_drag_ends() {
     run.stop();
 }
 
+/// A full-screen window attached to its own drag is no drop target either, though it is lifted
+/// above the top layers and its black hides what is below it.
+#[test]
+fn an_attached_full_screen_window_is_not_the_target() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut to = party(&mut run, (500, 100), None);
+    let mut from = party(&mut run, (100, 100), None);
+    from.local.roundtrip(&mut run);
+    from.local.client.configure = None;
+    from.toplevel.set_fullscreen(None);
+    from.local.redraw(&mut run);
+    let serial = from.press(&mut run);
+    let carry = from.carry(&mut run);
+    carry.drag.attach(&from.toplevel, 20, 20);
+    from.start(&mut run, &carry.source, serial);
+
+    run.state
+        .pointer_to((550.0, 150.0).into(), InputTime::now());
+    let (surface, _, _) = to.entered(&mut run, 1);
+    assert_eq!(surface, to.surface.id(), "the window below the full-screen one");
+    from.local.roundtrip(&mut run);
+    assert!(
+        from.heard
+            .heard()
+            .entered
+            .iter()
+            .all(|(entered, _, _)| *entered != from.surface.id()),
+        "the attached window is never a target"
+    );
+    release(&mut run);
+    run.stop();
+}
+
 /// A toplevel destroyed during the drag is no error, and nothing of it is kept once the drag
 /// has ended.
 #[test]
