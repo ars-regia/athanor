@@ -17,6 +17,7 @@ mod clipboard;
 mod constraints;
 mod cursor;
 mod decoration;
+mod dnd;
 mod dock_overlap;
 mod eis;
 mod drm_lease;

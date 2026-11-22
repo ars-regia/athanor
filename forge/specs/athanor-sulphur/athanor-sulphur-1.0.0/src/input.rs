@@ -328,6 +328,13 @@ impl State {
             self.grab_serials.press = Some(serial);
             let to = pointer.current_focus().and_then(|surface| surface.client());
             self.grab_serials.button = to.map(|client| (serial, client.id()));
+            self.grab_serials.held_button = Some((serial, button));
+        } else if self
+            .grab_serials
+            .held_button
+            .is_some_and(|(_, held)| held == button)
+        {
+            self.grab_serials.held_button = None;
         }
         pointer.frame(self);
         self.a11y.set_pointing(false);

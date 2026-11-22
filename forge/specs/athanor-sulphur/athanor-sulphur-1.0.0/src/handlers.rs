@@ -11,6 +11,7 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupGrab,
     PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
+use smithay::input::dnd::GrabType;
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
@@ -43,7 +44,7 @@ use smithay::wayland::security_context::{
     SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
 };
 use smithay::wayland::selection::data_device::{
-    set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
+    set_data_device_focus, DataDeviceHandler, DataDeviceState,
 };
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
@@ -276,6 +277,7 @@ impl CompositorHandler for State {
         self.request_redraw();
         self.fifo_committed(surface);
         on_commit_buffer_handler::<Self>(surface);
+        self.drag_icon_committed(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
             while let Some(parent) = get_parent(&root) {
@@ -918,10 +920,14 @@ impl State {
         let seat = Seat::<Self>::from_resource(seat)?;
         let client = surface.wl_surface().client()?.id();
         let pointer = seat.get_pointer().filter(|pointer| {
-            self.grab_serials.clicked(serial, &client) && pointer.has_grab(serial)
+            self.grab_serials.clicked(serial, &client)
+                && pointer.has_grab(serial)
+                && self.held(serial, GrabType::Pointer)
         });
         let touch = seat.get_touch().filter(|touch| {
-            self.grab_serials.touched(serial, &client) && touch.has_grab(serial)
+            self.grab_serials.touched(serial, &client)
+                && touch.has_grab(serial)
+                && self.held(serial, GrabType::Touch)
         });
         let grabbed = match (pointer, touch) {
             (Some(pointer), _) => {
@@ -1587,9 +1593,6 @@ impl DataDeviceHandler for State {
         &mut self.data_device_state
     }
 }
-
-// ponytail: the default cancels every drag and drop; a DnD grab with its icon when a client needs it.
-impl WaylandDndGrabHandler for State {}
 
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {

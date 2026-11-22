@@ -217,6 +217,8 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub xdg_activation_state: XdgActivationState,
     pub data_device_state: DataDeviceState,
+    /// The icons of the drags in progress (`dnd.rs`).
+    pub drag_icons: Vec<crate::dnd::DragIcon>,
     /// Primary selection and data control (`clipboard`).
     pub clipboard: crate::clipboard::Clipboard,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
@@ -309,6 +311,9 @@ pub struct State {
 #[derive(Debug, Default)]
 pub struct GrabSerials {
     pub button: Option<(Serial, ClientId)>,
+    /// The last button press and its button, until that button is released: a drag or a window
+    /// grab names a press still held (`dnd.rs`, `window_grab`).
+    pub held_button: Option<(Serial, u32)>,
     pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
@@ -493,6 +498,7 @@ impl State {
             dmabuf_state: DmabufState::new(),
             xdg_activation_state,
             data_device_state,
+            drag_icons: Vec::new(),
             clipboard,
             syncobj_state: None,
             frame_stats: None,
@@ -1327,6 +1333,15 @@ impl State {
                 });
             }
         }
+        // Nor are the drag icons: their frames go to the output under the pointer or the touch
+        // point each follows.
+        for (icon, at) in self.drag_icons() {
+            if self.space.output_under(at).any(|under| under == output) {
+                send_frames_surface_tree(&icon, output, frame_target, throttle, |_, _| {
+                    Some(output.clone())
+                });
+            }
+        }
     }
 
     /// The presentation feedback the surfaces shown on `output` asked for, to be answered when
@@ -1793,6 +1808,7 @@ impl State {
             outline,
             edge: self.focus_theme.edge(),
             blurred: self.blurred.clone(),
+            drag: self.drawn_drag_icons(),
         }
     }
 }
@@ -2253,6 +2269,7 @@ mod tests {
         let s = Serial::from;
         let serials = GrabSerials {
             button: Some((s(7), b.clone())),
+            held_button: None,
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
             touch: Some((s(10), b.clone())),

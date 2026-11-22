@@ -236,7 +236,7 @@ fn conditions(run: &mut Running, zoom: Option<(Point<i32, Physical>, f64)>) -> C
 }
 
 /// A layer surface of a new client on `layer` of the first output, 100 by 100 pixels.
-fn layer(run: &mut Running, layer: zwlr_layer_shell_v1::Layer) -> Local {
+pub(super) fn layer(run: &mut Running, layer: zwlr_layer_shell_v1::Layer) -> Local {
     let mut local = Local::connect(run, None);
     let (kept, shell_layer, surface) = local.layer_kept(run, layer);
     assert!(kept, "the layer surface is configured");

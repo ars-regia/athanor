@@ -79,7 +79,7 @@
 # repository root). KERNEL_REGISTRY is the registry and owner (default ghcr.io/ followed by
 # GITHUB_REPOSITORY_OWNER, else ars-regia); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
 # workflows whose signatures are trusted, and KERNEL_TRUSTED_REFS the branches they may have run
-# on (space separated, default "iso-v0 main"): a kernel or a module signed by the same workflow on
+# on (space separated, default "iso-v0"): a kernel or a module signed by the same workflow on
 # any other branch is not published, whoever pushed it. A kernel is ready only when its verified
 # pins attestation carries the inputs of this checkout (forge/specs/azoth/build-inputs.py), as
 # the modules' does. cycle and check-plan run git in the repository checkout that is the current
@@ -103,7 +103,7 @@ workflows=${workflows//./\\.}
 # The branches whose runs may publish. A signature carries the ref of the run that made it, and
 # a workflow_dispatch can be started from any branch: without this list any branch could sign a
 # kernel the images then trust.
-TRUSTED_REFS=${KERNEL_TRUSTED_REFS:-iso-v0 main}
+TRUSTED_REFS=${KERNEL_TRUSTED_REFS:-iso-v0}
 refs=''
 read -ra trusted <<< "$TRUSTED_REFS"
 for ref in "${trusted[@]}"; do

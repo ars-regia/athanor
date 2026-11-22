@@ -623,13 +623,13 @@ class SignImages(unittest.TestCase):
     def test_latest_moves_only_from_a_trusted_ref(self):
         self.digests()
         before = self.calls()
-        for ref in ("refs/heads/feature/x", "refs/heads/iso-v0-x", "refs/tags/iso-v0", ""):
+        for ref in ("refs/heads/feature/x", "refs/heads/iso-v0-x", "refs/heads/main", "refs/tags/iso-v0", ""):
             with self.subTest(ref=ref):
                 r = self.tag(GITHUB_REF=ref)
                 self.assertEqual(r.returncode, 1)
                 self.assertIn("not a trusted ref", r.stderr)
                 self.assertEqual(self.calls(), before)
-        self.assertEqual(self.tag(GITHUB_REF="refs/heads/main").returncode, 0)
+        self.assertEqual(self.tag(GITHUB_REF="refs/heads/iso-v0").returncode, 0)
 
     def test_a_tag_that_does_not_read_back_fails(self):
         self.digests()
