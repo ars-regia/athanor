@@ -54,6 +54,9 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 # The daemon speaks only D-Bus and journald, both over Unix sockets.
 RestrictAddressFamilies=AF_UNIX
+# The daemon pings the watchdog every 15 s, each time after a roundtrip on its own bus
+# connection, so a loop or a connection that hangs ends it, and Restart= above restarts it (doc_session.md, SN6).
+WatchdogSec=30s
 
 [Install]
 WantedBy=athanor-session.target

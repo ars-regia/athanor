@@ -15,6 +15,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # The `bus_caller` module: who a D-Bus caller is, asked of the bus and systemd (doc_session_daemons.md SD5).
 zbus = { workspace = true, optional = true }
+# The `watchdog` module: its ping task and the timeout of its roundtrip (doc_session.md SN6).
+tokio = { workspace = true, optional = true }
 
 [features]
 bus-caller = ["dep:zbus", "nix/poll", "nix/user"]
+watchdog = ["dep:zbus", "dep:tokio"]

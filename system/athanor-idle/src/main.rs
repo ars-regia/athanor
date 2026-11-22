@@ -386,6 +386,9 @@ async fn daemon(
     )
     .await?;
     let system = bus::System::new(system_query);
+    // On the connection that owns the names, from this runtime's one thread, and through the GLib
+    // main loop, which runs on the main thread (doc_session.md SN6).
+    athanor_unit::watchdog::spawn_with(&session, glib_loop_answers);
 
     let mut changes = bus::upower_changes(&system_watch).await?;
     let mut owners = bus::upower_owners(&system_watch).await?;
@@ -478,9 +481,39 @@ async fn sleep_until(deadline: Option<Instant>) {
     }
 }
 
+/// An empty task spawned on GLib's default context at the default priority, for the watchdog's
+/// check (doc_session.md SN6). A spawned task never runs in place, even before the main loop of
+/// `main` starts: only an iteration of that context runs it, so its completion proves that the
+/// loop runs. A task left by a period that timed out runs once the loop resumes, and answers no one.
+fn glib_loop_answers() -> glib::JoinHandle<()> {
+    glib::MainContext::default().spawn(async {})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The watchdog's check answers only through an iteration of GLib's default context, never
+    /// in place before the main loop runs (doc_session.md SN6).
+    #[test]
+    fn the_glib_check_answers_only_through_the_loop() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let within = std::time::Duration::from_millis(100);
+        let unanswered =
+            runtime.block_on(async { tokio::time::timeout(within, glib_loop_answers()).await });
+        assert!(unanswered.is_err(), "answered with no loop running");
+        let answer = glib_loop_answers();
+        let context = glib::MainContext::default();
+        while context.iteration(false) {}
+        let answered = runtime.block_on(async { tokio::time::timeout(within, answer).await });
+        assert!(
+            matches!(answered, Ok(Ok(()))),
+            "no answer after the loop ran"
+        );
+    }
 
     fn prefs(blank_after: u32) -> Prefs {
         Prefs {
