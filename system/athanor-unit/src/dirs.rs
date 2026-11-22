@@ -503,13 +503,16 @@ mod tests {
             "nothing is made through the link"
         );
         let error = owned_dir(&link.join("d")).expect_err("owned_dir");
+        // The refusal names the link where the walk reached it, past every link it followed
+        // (the temporary directory may lie under /home, a link to var/home).
+        let reached = fs::canonicalize(&runtime).expect("canonical").join("link");
         assert_eq!(
             error.to_string(),
             format!(
                 "{} passes through {} -> {}, a link in a directory that root alone does not \
                  write; replace the link with a real directory",
                 link.join("d").display(),
-                link.display(),
+                reached.display(),
                 real.display()
             )
         );
@@ -549,13 +552,16 @@ mod tests {
         fs::create_dir(runtime.join("d")).expect("mkdir");
         let error = owned_dir(&link.join("d")).expect_err("a link in /tmp");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        let reached = fs::canonicalize("/tmp")
+            .expect("canonical")
+            .join(format!("athanor-unit-link-{}", std::process::id()));
         assert_eq!(
             error.to_string(),
             format!(
                 "{} passes through {} -> {}, a link in a directory that root alone does not \
                  write; replace the link with a real directory",
                 link.join("d").display(),
-                link.display(),
+                reached.display(),
                 runtime.display()
             )
         );
