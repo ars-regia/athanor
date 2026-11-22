@@ -65,6 +65,13 @@ class CountsTest(unittest.TestCase):
         counts, problems = verify.implicit_panic_counts(lines)
         self.assertEqual([p.split(":")[0] for p in problems], ["athanor-shelld"])
 
+    def test_a_checkout_under_a_vendor_directory_exempts_nothing(self):
+        package = "path+file:///vendor/checkout/system/athanor-unit#1.0.0"
+        line = json.dumps({"reason": "build-script-executed", "package_id": package, "cfgs": ["x"]})
+        with mock.patch.object(verify, "ROOT", pathlib.Path("/vendor/checkout")):
+            problems = verify.implicit_panic_counts([line, FINISHED])[1]
+        self.assertEqual([p.split(":")[0] for p in problems], ["athanor-unit"])
+
     def test_a_run_that_failed_or_never_finished_is_a_problem(self):
         failed = json.dumps({"reason": "build-finished", "success": False})
         self.assertEqual(len(verify.implicit_panic_counts([artifact(UNIT), FINISHED, failed])[1]), 1)
@@ -204,14 +211,29 @@ class ConfigTest(unittest.TestCase):
     def test_not_feature_bodies_must_be_listed_at_their_count(self):
         body = '#[cfg(not(feature = "gtk"))]\nfn f() {}\n// #[cfg(not(feature = "x"))]\n'
         files = {"m/src/a.rs": body, "m/src/b.rs": body, "m/src/c.rs": "#[cfg(feature = \"gtk\")]\nfn g() {}\n"}
+        line = '#[cfg(not(feature = "gtk"))]\n'.strip()
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "m/src").mkdir(parents=True)
             for path, text in files.items():
                 (root / path).write_text(text)
-            with mock.patch.object(verify, "IMPLICIT_PANIC_NOT_FEATURE", {"m/src/a.rs": 1}):
+            with mock.patch.object(verify, "IMPLICIT_PANIC_NOT_FEATURE", {("m/src/a.rs", line): 1}):
                 found = verify.implicit_panic_cfgs(root, list(files), ["m"])
+            # The same count under another attribute is a different body.
+            with mock.patch.object(verify, "IMPLICIT_PANIC_NOT_FEATURE",
+                                   {("m/src/a.rs", '#[cfg(not(feature = "gpu"))]'): 1, ("m/src/b.rs", line): 1}):
+                swapped = verify.implicit_panic_cfgs(root, list(files), ["m"])
         self.assertEqual([f.split(":")[0] for f in found], ["m/src/b.rs"])
+        self.assertEqual(len(swapped), 2)
+
+    def test_not_feature_is_found_at_any_depth(self):
+        found = verify.implicit_panic_not_features(
+            '#[cfg(not(any(feature = "a", feature = "b")))]\nfn a() {}\n'
+            '#[cfg(all(unix, not(feature = "a")))]\nfn b() {}\n'
+            '#[cfg(not(all(unix, feature = "a")))]\nfn c() {}\n'
+            '#[cfg(not(unix))]\nfn d() {}\n// not(feature = "z")\n')
+        self.assertEqual(sorted(found.values()), [1, 1, 1])
+        self.assertEqual(len(found), 3)
 
     def test_the_listed_not_feature_bodies_match_the_tree(self):
         tracked = subprocess.run(["git", "-C", str(verify.ROOT), "ls-files", "-z"], capture_output=True,

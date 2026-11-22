@@ -7985,15 +7985,33 @@ IMPLICIT_PANIC_CLIPPY_KEY = re.compile(
     r".*(?:arithmetic-side-effects|indexing-slicing|string-slice).*|suppress-restriction-lint-in-const")
 
 
-# The `cfg(not(feature = ...))` bodies of the members, per file: `--all-features` does not compile
-# them and the image ships them when the feature is off. Each is a stub that returns `None` or
-# asserts; a count differs from the file's, or a file is not listed, and the check fails, so the
-# list only goes down (#1403).
+# The `cfg(not(feature = ...))` bodies of the members, by file and the line that holds the
+# attribute, whitespace collapsed: `--all-features` does not compile them and the image ships
+# them when the feature is off. Each is a stub that returns `None` or asserts. Any difference
+# from the tree fails the check, so a body swapped for another is read again and the list only
+# goes down (#1403).
 IMPLICIT_PANIC_NOT_FEATURE = {
-    "system/athanor-sal/src/driver.rs": 1,
-    "system/athanor-sulphur-client/src/connection.rs": 2,
+    ("system/athanor-sal/src/driver.rs", '#[cfg(not(feature = "gpu"))]'): 1,
+    ("system/athanor-sulphur-client/src/connection.rs", '#[cfg(not(feature = "gtk"))]'): 2,
 }
-IMPLICIT_PANIC_NOT_FEATURE_RE = re.compile(r"\bnot\s*\(\s*feature\s*=")
+IMPLICIT_PANIC_NOT = re.compile(r"\bnot\s*\(")
+IMPLICIT_PANIC_FEATURE = re.compile(r"\bfeature\b")
+
+
+def implicit_panic_not_features(text):
+    """{line of the attribute: count} of the `not(...)` in `text` whose parentheses, at any depth,
+    name `feature`, as in `not(any(feature = "a", feature = "b"))` or `all(unix, not(feature = "a"))`.
+    Comments and literals are blanked to find them; the line is read from `text`."""
+    code, lines, found = without_literals(text), text.split("\n"), {}
+    for m in IMPLICIT_PANIC_NOT.finditer(code):
+        depth, end = 1, m.end()
+        while end < len(code) and depth:
+            depth += {"(": 1, ")": -1}.get(code[end], 0)
+            end += 1
+        if IMPLICIT_PANIC_FEATURE.search(code[m.end():end]):
+            line = " ".join(lines[code.count("\n", 0, m.start())].split())
+            found[line] = found.get(line, 0) + 1
+    return found
 
 
 def implicit_panic_env_key(key):
@@ -8048,7 +8066,9 @@ def implicit_panic_counts(lines):
         msg = json.loads(line)
         if msg.get("reason") == "build-script-executed":
             package = msg.get("package_id", "")
-            if package.startswith("path+") and "/vendor/" not in package and msg.get("cfgs"):
+            # Relative to the checkout: one under a `/vendor/` directory exempts nothing.
+            local = package.removeprefix(f"path+file://{ROOT}")
+            if package.startswith("path+") and "/vendor/" not in local and msg.get("cfgs"):
                 problems.append(f"{package_crate(package)}: its build script sets the cfgs "
                                 f"{', '.join(sorted(msg['cfgs']))}, which can hide code from clippy")
             hidden = sorted({key for key, _ in msg.get("env") or [] if implicit_panic_env_key(key)})
@@ -8181,8 +8201,10 @@ def implicit_panic_cfgs(root, tracked, members):
     hidden from clippy, and under `cfg(not(debug_assertions))` from the dev profile clippy builds,
     while the release build compiles it. The whole file is read, not only the `cfg(` and
     `cfg_attr(` attributes: a macro can take the predicate as an argument. Comments and literals
-    are blanked first, so a name in a comment or a string is not a finding. The `not(feature = ...)`
-    of a member file must number what IMPLICIT_PANIC_NOT_FEATURE lists for it."""
+    are blanked first, so a name in a comment or a string is not a finding: the limit is a predicate
+    handed to a macro as a string (`"not(clippy)"`), which no member does today (grepped on
+    2026-11-22). The `not(feature = ...)` of a member file must be what IMPLICIT_PANIC_NOT_FEATURE
+    lists for it."""
     found = []
     for path in sorted(tracked):
         if not path.endswith(".rs") or "/vendor/" in path or not any(path.startswith(f"{m}/") for m in members):
@@ -8196,10 +8218,11 @@ def implicit_panic_cfgs(root, tracked, members):
         for n, line in enumerate(code.split("\n"), 1):
             found += [f"{path}:{n}: names `{m.group(1)}`, which a `cfg` can hide code from clippy with"
                       for m in IMPLICIT_PANIC_CFG_NAME.finditer(line)]
-        have, listed = len(IMPLICIT_PANIC_NOT_FEATURE_RE.findall(code)), IMPLICIT_PANIC_NOT_FEATURE.get(path, 0)
-        if have != listed:
-            found.append(f"{path}: {have} `cfg(not(feature = ...))` where IMPLICIT_PANIC_NOT_FEATURE lists {listed}: "
-                         f"`--all-features` does not measure that code; list the file at its count or drop the cfg")
+        have = implicit_panic_not_features(text)
+        listed = {line: n for (file, line), n in IMPLICIT_PANIC_NOT_FEATURE.items() if file == path}
+        found += [f"{path}: {have.get(line, 0)} of `{line}` where IMPLICIT_PANIC_NOT_FEATURE lists {listed.get(line, 0)}: "
+                  f"`--all-features` does not measure that code; list it at its count or drop the cfg"
+                  for line in sorted(have.keys() | listed.keys()) if have.get(line, 0) != listed.get(line, 0)]
     return found
 
 
