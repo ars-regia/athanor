@@ -7955,7 +7955,9 @@ def judge_known_red(entries, base, results, today):
 # clippy.toml can relax them, so implicit_panic_configs reads the tracked configurations, the
 # measuring run drops from its environment what implicit_panic_env does, and implicit_panic_counts
 # refuses a build script that sets it back. Code that clippy does not compile is not measured:
-# implicit_panic_cfgs refuses a `cfg` on `clippy` or on `debug_assertions`.
+# implicit_panic_cfgs refuses a `cfg` on `clippy` or on `debug_assertions`, and lists the
+# `cfg(not(feature = ...))` bodies that `--all-features` leaves out; a build script of a member
+# that sets a `cfg` for its crate is refused by implicit_panic_counts (#1403).
 IMPLICIT_PANIC_LINTS = ("clippy::arithmetic_side_effects", "clippy::indexing_slicing", "clippy::string_slice")
 IMPLICIT_PANIC_BUDGET = "scripts/ci/implicit-panics.txt"
 # Two runs, as in security-audit.sh: athanor-preview-render needs zbus on async-io. No test target:
@@ -7981,6 +7983,17 @@ IMPLICIT_PANIC_BUILD_KEYS = {"rustc", "rustc-wrapper", "rustc-workspace-wrapper"
 # through, or no restriction lint in a `const` context.
 IMPLICIT_PANIC_CLIPPY_KEY = re.compile(
     r".*(?:arithmetic-side-effects|indexing-slicing|string-slice).*|suppress-restriction-lint-in-const")
+
+
+# The `cfg(not(feature = ...))` bodies of the members, per file: `--all-features` does not compile
+# them and the image ships them when the feature is off. Each is a stub that returns `None` or
+# asserts; a count differs from the file's, or a file is not listed, and the check fails, so the
+# list only goes down (#1403).
+IMPLICIT_PANIC_NOT_FEATURE = {
+    "system/athanor-sal/src/driver.rs": 1,
+    "system/athanor-sulphur-client/src/connection.rs": 2,
+}
+IMPLICIT_PANIC_NOT_FEATURE_RE = re.compile(r"\bnot\s*\(\s*feature\s*=")
 
 
 def implicit_panic_env_key(key):
@@ -8034,6 +8047,10 @@ def implicit_panic_counts(lines):
             continue
         msg = json.loads(line)
         if msg.get("reason") == "build-script-executed":
+            package = msg.get("package_id", "")
+            if package.startswith("path+") and "/vendor/" not in package and msg.get("cfgs"):
+                problems.append(f"{package_crate(package)}: its build script sets the cfgs "
+                                f"{', '.join(sorted(msg['cfgs']))}, which can hide code from clippy")
             hidden = sorted({key for key, _ in msg.get("env") or [] if implicit_panic_env_key(key)})
             if hidden:
                 problems.append(f"{package_crate(msg.get('package_id', ''))}: its build script sets "
@@ -8163,7 +8180,9 @@ def implicit_panic_cfgs(root, tracked, members):
     `clippy` or `debug_assertions` outside a `clippy::` path. Under `cfg(not(clippy))` code is
     hidden from clippy, and under `cfg(not(debug_assertions))` from the dev profile clippy builds,
     while the release build compiles it. The whole file is read, not only the `cfg(` and
-    `cfg_attr(` attributes: a macro can take the predicate as an argument."""
+    `cfg_attr(` attributes: a macro can take the predicate as an argument. Comments and literals
+    are blanked first, so a name in a comment or a string is not a finding. The `not(feature = ...)`
+    of a member file must number what IMPLICIT_PANIC_NOT_FEATURE lists for it."""
     found = []
     for path in sorted(tracked):
         if not path.endswith(".rs") or "/vendor/" in path or not any(path.startswith(f"{m}/") for m in members):
@@ -8173,9 +8192,14 @@ def implicit_panic_cfgs(root, tracked, members):
         except OSError as e:
             found.append(f"{path}: cannot be read: {e}")
             continue
-        for n, line in enumerate(text.split("\n"), 1):
+        code = without_literals(text)
+        for n, line in enumerate(code.split("\n"), 1):
             found += [f"{path}:{n}: names `{m.group(1)}`, which a `cfg` can hide code from clippy with"
                       for m in IMPLICIT_PANIC_CFG_NAME.finditer(line)]
+        have, listed = len(IMPLICIT_PANIC_NOT_FEATURE_RE.findall(code)), IMPLICIT_PANIC_NOT_FEATURE.get(path, 0)
+        if have != listed:
+            found.append(f"{path}: {have} `cfg(not(feature = ...))` where IMPLICIT_PANIC_NOT_FEATURE lists {listed}: "
+                         f"`--all-features` does not measure that code; list the file at its count or drop the cfg")
     return found
 
 
