@@ -31,7 +31,7 @@
 # A trusted signature is one by .github/workflows/call-system-image.yml, or the WORKFLOW of
 # signed, of GITHUB_SERVER_URL and GITHUB_REPOSITORY (default https://github.com and
 # ars-regia/athanor) run on a branch of
-# TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
+# TIER_TRUSTED_REFS (space separated, default "iso-v0"), or on the branch of this run when
 # GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
 # trusted run accepts them. No other branch is trusted, rebase/* included, but for the base or
 # the rebase/* head of a pull request below: creating a branch is not protected, and a tier
@@ -134,7 +134,7 @@ trust() {
     workflow="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/$SIGNER"
     # Owner, repository, host and branch names hold no regex metacharacter other than the dot.
     workflow=${workflow//./\\.}
-    read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0 main}"
+    read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0}"
     for ref in "${trusted[@]}"; do
         [[ $ref =~ ^[A-Za-z0-9._/-]+$ ]] || die "'$ref' of TIER_TRUSTED_REFS is not a branch name"
         refs+="${refs:+|}${ref//./\\.}"
