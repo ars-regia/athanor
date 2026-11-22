@@ -425,6 +425,20 @@ class Moved(unittest.TestCase):
         text = "The line `grant`, reworded, is at `src/x.rs:1-4`."
         self.assertEqual(self.found(text, {"other.md": [(0, 0, 3)]}, base=self.TEXT), [])
 
+    def test_a_renumbering_whose_numbers_are_base_numbers_of_other_lines_passes(self):
+        base = "`a` is at `src/x.rs:1`.\n`b` is at `src/x.rs:2`.\n`c` is at `src/x.rs:3`."
+        text = "`a` now is at `src/x.rs:2`.\n`b` now is at `src/x.rs:3`.\n`c` now is at `src/x.rs:4`."
+        files = {"src/x.rs": "new\nfn a() {}\nfn b() {}\nfn c() {}\n"}
+        self.assertEqual(self.found(text, {"src/x.rs": [(0, 0, 1)]}, base=base, extra=files), [])
+        stale = text.replace(":2`", ":1`").replace(":3`", ":2`").replace(":4`", ":3`")
+        self.assertEqual(len(self.found(stale, {"src/x.rs": [(0, 0, 1)]}, base=base, extra=files)), 3)
+
+    def test_a_reworded_line_keeping_its_spec_over_code_edited_in_place_passes(self):
+        text = "The line `grant`, reworded, is at `src/x.rs:1-4`."
+        hunks = {"src/x.rs": [(2, 1, 1)]}
+        self.assertEqual(self.found(text, hunks, base=self.TEXT, extra={}), [])
+        self.assertEqual(len(self.found(self.TEXT, hunks, extra={})), 1)
+
     def test_a_hunk_below_the_range_or_in_another_file_moves_nothing(self):
         self.assertEqual(self.found(self.TEXT, {"src/x.rs": [(4, 0, 3)]}), [])
         self.assertEqual(self.found(self.TEXT, {"other.md": [(0, 0, 3)]}), [])
