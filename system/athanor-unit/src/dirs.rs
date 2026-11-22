@@ -553,22 +553,24 @@ mod tests {
 
     #[test]
     fn a_link_in_a_directory_others_may_write_is_refused() {
-        // /tmp is root's but writable by everyone, so a link in it is not root's alone. Not
-        // checkable where /tmp is not root's 1777 (a user namespace that does not map root).
-        let tmp = fs::metadata("/tmp").expect("/tmp");
-        if tmp.uid() != 0 || tmp.mode() & 0o7777 != 0o1777 {
-            eprintln!("skipped: /tmp is not root's with mode 1777 here");
+        // The shared temporary directory, /tmp on a host, is root's but writable by everyone,
+        // so a link in it is not root's alone. Not checkable where it is not root's 1777 (a
+        // user namespace that does not map root, or a private TMPDIR).
+        let shared = std::env::temp_dir();
+        let holder = fs::metadata(&shared).expect("temporary directory");
+        if holder.uid() != 0 || holder.mode() & 0o7777 != 0o1777 {
+            eprintln!("skipped: {} is not root's with mode 1777 here", shared.display());
             return;
         }
         let runtime = runtime("writable-holder");
-        let link = PathBuf::from(format!("/tmp/athanor-unit-link-{}", std::process::id()));
+        let link = shared.join(format!("athanor-unit-link-{}", std::process::id()));
         fs::remove_file(&link).ok();
         let (_runtime_removed, _link_removed) = (Removed(runtime.clone()), Removed(link.clone()));
         std::os::unix::fs::symlink(&runtime, &link).expect("symlink");
         fs::create_dir(runtime.join("d")).expect("mkdir");
-        let error = owned_dir(&link.join("d")).expect_err("a link in /tmp");
+        let error = owned_dir(&link.join("d")).expect_err("a link in the shared directory");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
-        let reached = fs::canonicalize("/tmp")
+        let reached = fs::canonicalize(&shared)
             .expect("canonical")
             .join(format!("athanor-unit-link-{}", std::process::id()));
         assert_eq!(
