@@ -17,7 +17,7 @@ PROGRAMS = {
     "athanor-shelld.service": ("athanor-shelld", "notify"),
     "xdg-desktop-portal-athanor.service": ("xdg-desktop-portal-athanor", "dbus"),
 }
-SENDERS = {program: True for program, _ in PROGRAMS.values()}
+SENDERS = {program: "spawn" for program, _ in PROGRAMS.values()}
 
 
 def unit(program, kind, watchdog="WatchdogSec=30s\n", access="NotifyAccess=main\n"):
@@ -52,10 +52,19 @@ class WatchdogTest(unittest.TestCase):
 
     def test_a_watchdog_whose_crate_sends_no_ping_fails(self):
         found = verify.watchdog_problems(
-            units(), dict(SENDERS, **{"athanor-sessiond": False})
+            units(), dict(SENDERS, **{"athanor-sessiond": None})
         )
         self.assertEqual(len(found), 1)
         self.assertIn("athanor-sessiond sends no WATCHDOG=1", found[0])
+
+    def test_a_listed_daemon_that_pings_without_the_roundtrip_fails(self):
+        found = verify.watchdog_problems(
+            units(), dict(SENDERS, **{"athanor-idle": "ping"})
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn(
+            "athanor-idle's main does not call athanor_unit::watchdog::spawn", found[0]
+        )
 
     def test_a_watchdog_on_a_program_of_no_crate_fails(self):
         other = unit("someone-else", "notify")
@@ -93,16 +102,38 @@ class WatchdogTest(unittest.TestCase):
     def test_a_ping_is_found_in_the_crate_and_not_in_a_comment_or_a_definition(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            for name, body in {
-                "pinger": "fn main() { athanor_unit::watchdog::spawn(&connection); }\n",
-                "quiet": "// athanor_unit::watchdog::spawn(&connection);\npub fn notify_watchdog() {}\n",
+            for name, files in {
+                "pinger": {
+                    "main.rs": 'fn main() { let _ = "http://x"; athanor_unit::watchdog::spawn(&c); }\n'
+                },
+                "quiet": {
+                    "main.rs": "// athanor_unit::watchdog::spawn(&connection);\npub fn notify_watchdog() {}\n"
+                },
+                "tested": {
+                    "main.rs": "fn main() {}\n#[cfg(test)]\nmod tests { fn t() { watchdog::spawn(&c); } }\n"
+                },
+                "library": {
+                    "main.rs": "fn main() {}\n",
+                    "lib.rs": "pub fn unused() { watchdog::spawn(&c); }\n",
+                },
+                "timer": {
+                    "main.rs": "fn main() { athanor_unit::notify::notify_watchdog(); }\n"
+                },
             }.items():
                 crate = root / "system" / name
                 (crate / "src").mkdir(parents=True)
                 (crate / "Cargo.toml").write_text(f'[package]\nname = "{name}"\n')
-                (crate / "src" / "main.rs").write_text(body)
+                for file, body in files.items():
+                    (crate / "src" / file).write_text(body)
             self.assertEqual(
-                verify.watchdog_senders(root), {"pinger": True, "quiet": False}
+                verify.watchdog_senders(root),
+                {
+                    "pinger": "spawn",
+                    "quiet": None,
+                    "tested": None,
+                    "library": "ping",
+                    "timer": "ping",
+                },
             )
 
 

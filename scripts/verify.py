@@ -5740,13 +5740,22 @@ WATCHDOG_UNITS = (
     "xdg-desktop-portal-athanor.service",
 )
 WATCHDOG_SECONDS = 30
-# A ping in Rust: athanor-unit's helper, its notify call or the datagram itself, never a definition.
-WATCHDOG_SEND = re.compile(r'(?<!fn )\b(?:watchdog::spawn|notify_watchdog)\s*\(|b"WATCHDOG=1"')
+# The ping SN6 asks of a session daemon, after a roundtrip on its bus: athanor-unit's helper.
+WATCHDOG_SPAWN = re.compile(r"\bwatchdog::spawn\s*\(")
+# Any other ping in Rust: athanor-unit's notify call or the datagram itself, never a definition.
+WATCHDOG_PING = re.compile(r'(?<!fn )\bnotify_watchdog\s*\(|b"WATCHDOG=1"')
+
+
+def rust_code(text):
+    """`text` without its `#[cfg(test)]` part and its `//` comments, a whole line or after code."""
+    return "\n".join(re.sub(r"(^|\s)//.*", "", line) for line in text.split("#[cfg(test)]")[0].split("\n"))
 
 
 def watchdog_senders(root):
-    """{binary: whether its crate's src/ sends WATCHDOG=1} for every crate under system/ and
-    forge/specs: its package name, its [[bin]] names and its src/bin/*.rs files."""
+    """{binary: "spawn", "ping" or None} for every crate under system/ and forge/specs, by its
+    package name, its [[bin]] names and its src/bin/*.rs files: "spawn" when the binary's own
+    source file calls watchdog::spawn outside its tests, "ping" when the crate sends WATCHDOG=1
+    otherwise. A static reading cannot prove the call runs; it can require it where main is."""
     senders = {}
     for base in ("system", "forge/specs"):
         for manifest in walk(root / base, "Cargo.toml"):
@@ -5754,16 +5763,22 @@ def watchdog_senders(root):
                 package = tomllib.loads(read(manifest))
             except tomllib.TOMLDecodeError:
                 continue
-            bins = {package.get("package", {}).get("name")} | {b.get("name") for b in package.get("bin", [])}
-            bins |= {f.stem for f in (manifest.parent / "src" / "bin").glob("*.rs")}
-            bins.discard(None)
-            sends = any(
-                WATCHDOG_SEND.search(line.split("//")[0])
-                for source in walk(manifest.parent / "src", ".rs")
-                for line in read(source).split("\n")
+            src = manifest.parent / "src"
+            entries = {package.get("package", {}).get("name"): src / "main.rs"}
+            entries |= {f.stem: f for f in (src / "bin").glob("*.rs")}
+            for b in package.get("bin", []):
+                path = b.get("path")
+                entries[b.get("name")] = manifest.parent / path if path else src / "bin" / f"{b.get('name')}.rs"
+            entries.pop(None, None)
+            pings = any(
+                WATCHDOG_PING.search(code) or WATCHDOG_SPAWN.search(code)
+                for code in (rust_code(read(source)) for source in walk(src, ".rs"))
             )
-            for binary in bins:
-                senders[binary] = senders.get(binary, False) or sends
+            for binary, entry in entries.items():
+                spawns = entry.is_file() and bool(WATCHDOG_SPAWN.search(rust_code(read(entry))))
+                kind = "spawn" if spawns else "ping" if pings else None
+                if senders.get(binary) != "spawn":
+                    senders[binary] = kind or senders.get(binary)
     return senders
 
 
@@ -5790,6 +5805,8 @@ def watchdog_problems(units, senders):
             problems.append(f"{unit}: sets WatchdogSec= and runs {program}, no binary of a crate under system/ or forge/specs, so no check sees it send WATCHDOG=1")
         elif not senders[program]:
             problems.append(f"{unit}: sets WatchdogSec= and the crate of {program} sends no WATCHDOG=1, so the manager ends it at every timeout (athanor_unit::watchdog::spawn)")
+        elif unit in WATCHDOG_UNITS and senders[program] != "spawn":
+            problems.append(f"{unit}: the source of {program}'s main does not call athanor_unit::watchdog::spawn, the ping after a roundtrip on its bus that doc_session.md SN6 asks for; a timer alone proves only that a loop runs")
         # Unset, NotifyAccess= is implied as main by WatchdogSec= (systemd.service(5)); only none drops the pings.
         if service.get("NotifyAccess") == "none":
             problems.append(f"{unit}: sets WatchdogSec= and NotifyAccess=none, so the manager drops every WATCHDOG=1 and ends the unit at each timeout (systemd.service(5))")
