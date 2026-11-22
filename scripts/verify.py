@@ -23,6 +23,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 import ast
 import collections
 import datetime
+import difflib
 import fnmatch
 import hashlib
 import importlib.util
@@ -7176,7 +7177,7 @@ def symbol_definitions(path, body):
 
 
 def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None,
-                      base_file=None, upstream=None):
+                      base_file=None, upstream=None, placed=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -7227,7 +7228,12 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch. A cited
+    on a line that replaces a base line (difflib pairs the lines of a replaced block of equal size by position), the
+    k-th citation of a file is kept when the base line's k-th citation of that file has the same lines:
+    it is read through the hunks for a shift only, as the author re-confirmed it by rewording the line (a
+    cited line edited in place, with the line count kept, is not a finding there). The author's own placing,
+    checked only by the token check, is: an edited line with no pair (an inserted line, a split or merged line,
+    a block of unequal size), a new citation, and a citation whose lines the edit changed. A cited
     line of a Markdown file that the change edited without adding or removing lines, and whose only
     difference from the revision is the numbers of its own citations (`base_file(path)` is the file
     there), is not an edit.
@@ -7248,9 +7254,25 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
 
     With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
     is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
-    `path:N`."""
+    `path:N`. `placed`, a list, gets the (line, file, lines) of every `path:N`."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
+    if hunks and base_text:
+        # The citations of each base line, and the base line that each edited line replaces.
+        base_cites = []
+        citation_findings(doc, base_text, tracked, read_file, placed=base_cites, upstream=upstream)
+        was = {}
+        for number, path, spec in base_cites:
+            was.setdefault((number, path), []).append(spec)
+        old_rows = [backtick_plain_paths(row) for row in base_text.split("\n")]
+        new_rows = [backtick_plain_paths(row) for row in text.split("\n")]
+        pair = {}
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_rows, new_rows, autojunk=False).get_opcodes():
+            if tag == "replace" and i2 - i1 == j2 - j1:
+                pair.update({j + 1: i + 1 for i, j in zip(range(i1, i2), range(j1, j2))})
+    else:
+        was, pair = {}, {}
+    nth = {}
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
     for path in known:
@@ -7341,6 +7363,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 crate = c.group(1)
             if not symbol and cited is not None:
                 cited.add(path)
+            if not symbol:
+                nth[number, path] = k = nth.get((number, path), -1) + 1
+                if placed is not None:
+                    placed.append((number, path, spec))
             if not symbol and lines_kept is not None and path not in lines_kept:
                 out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites lines: cite a "
                             f"symbol, `{path}#name`, or keep a file with no symbol in CITATION_LINES_KEPT"))
@@ -7373,7 +7399,23 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
-            if not symbol and line in unchanged and path in hunks:
+            reworded = False
+            if not symbol and hunks and line not in unchanged and path in hunks:
+                kept = was.get((pair.get(number), path), [])
+                reworded = k < len(kept) and kept[k] == spec
+            if not symbol and reworded:
+                new = moved_ranges(ranges, hunks[path], lambda old, now: True)
+                if new is None:
+                    out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
+                                "that this change edited or removed: place it again"))
+                    continue
+                if new != ranges:
+                    named = ", ".join(f"{a}-{b}" if "-" in part else str(a) for part, (a, b)
+                                      in zip(re.split(r",\s*", spec), new))
+                    out.append((number, path, spec, "moved", f"{doc}:{number}: `{path}:{spec}` is moved by "
+                                f"this change: it should name `{path}:{named}`"))
+                    continue
+            elif not symbol and line in unchanged and path in hunks:
                 before = base_file(path).split("\n") if base_file else []
                 new = moved_ranges(ranges, hunks[path], lambda old, now: path.endswith(".md")
                                    and old <= len(before) and now <= len(rows)
