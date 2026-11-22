@@ -1330,7 +1330,8 @@ impl Ui {
     /// `active`, with `detail` as its second line, a label of its own that wraps at the room the
     /// track leaves. Assistive technologies read one switch, named by the title and described by
     /// the second line, and the whole row toggles it. Replace the title with [`Ui::set_text`] on
-    /// the switch, the second line with [`Ui::set_text`] on its one child. See [`Kind::Switch`].
+    /// the switch, the second line with [`Ui::set_text`] on its one child. A blank `detail` adds
+    /// a plain switch, as [`Ui::switch`], with no child. See [`Kind::Switch`].
     ///
     /// # Panics
     ///
@@ -1343,20 +1344,22 @@ impl Ui {
         active: bool,
     ) -> WidgetId {
         let switch = self.switch(parent, title, active);
-        let line = self.add(switch, Kind::Label(detail.to_owned()));
-        self.set_wrap(line, Some(Wrap::default()));
+        if !detail.trim().is_empty() {
+            let line = self.add(switch, Kind::Label(detail.to_owned()));
+            self.set_wrap(line, Some(Wrap::default()));
+        }
         switch
     }
 
     /// The second line of switch `id`, the text of the label it holds, when it is a preference
-    /// row ([`Ui::switch_row`]) and the label is shown.
+    /// row ([`Ui::switch_row`]), the label is shown and its text is not blank.
     pub(crate) fn switch_line(&self, id: WidgetId) -> Option<&str> {
         if !matches!(self.widgets[id].kind, Kind::Switch { .. }) {
             return None;
         }
         let first = self.visible_children(id).into_iter().next()?;
         match &self.widgets[first].kind {
-            Kind::Label(text) => Some(text),
+            Kind::Label(text) if !text.trim().is_empty() => Some(text),
             _ => None,
         }
     }
@@ -2681,15 +2684,18 @@ impl Ui {
             Kind::CenterBox => self.place_center(id, x, y),
             // A preference row's second line under the label at the start edge, the two centred
             // together across the row; it fills the room the track and the gap leave, as a
-            // wrapping label fills its column, and breaks its lines at that width.
+            // wrapping label fills its column, and breaks its lines at that width, never below
+            // its longest word nor its least width, as in a column.
             Kind::Switch { .. } => {
                 let Some(&line) = children.first() else {
                     return;
                 };
                 let (mark_w, _) = mark_size(true, self.theme.font_size);
                 let title = self.widgets[id].text.as_ref().map_or(0.0, |l| l.height());
+                let least = self.widgets[line].wrap.as_ref().map_or(0.0, |w| w.2);
+                let floor = least.max(self.widgets[line].min_w);
                 let r = &mut self.widgets[line].rect;
-                r.w = (outer.w - mark_w - gap).max(0.0);
+                r.w = (outer.w - mark_w - gap).max(floor);
                 let (w, h) = (r.w, r.h);
                 let cx = if self.rtl { x + outer.w - w } else { x };
                 self.place(line, cx, y + (outer.h - title - h) / 2.0 + title);
@@ -4021,6 +4027,40 @@ mod tests {
             assert_eq!(line.w, r.w - track.w - ui.theme.gap, "rtl {rtl}");
             assert!(r.h > ui.widget(short).rect.h, "more lines, a taller row");
             assert!(line.y + line.h <= r.y + r.h, "every line inside the row");
+        }
+    }
+
+    #[test]
+    fn a_blank_second_line_makes_a_plain_switch() {
+        for detail in ["", " \t "] {
+            let mut ui = Ui::new("Preferences", Theme::default(), false);
+            let row = ui.switch_row(Ui::ROOT, "Wi-Fi", detail, true);
+            let plain = ui.switch(Ui::ROOT, "Wi-Fi", true);
+            ui.layout();
+            assert!(ui.widget(row).children.is_empty(), "{detail:?}: no second line");
+            assert_eq!(ui.switch_line(row), None);
+            assert_eq!(ui.measure(row), ui.measure(plain), "{detail:?}: a plain switch's size");
+            let (r, p) = (ui.widget(row).rect, ui.widget(plain).rect);
+            assert_eq!((r.w, r.h), (p.w, p.h));
+        }
+    }
+
+    #[test]
+    fn a_preference_rows_second_line_keeps_its_longest_word_at_any_width() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Preferences", Theme::default(), rtl);
+            let row = ui.switch_row(Ui::ROOT, "Lid", "Suspends unconditionally", false);
+            ui.layout();
+            let line = ui.widget(row).children[0];
+            let least = ui.widget(line).wrap.as_ref().map_or(0.0, |w| w.2);
+            assert!(least > 0.0, "the longest word has a width");
+            // The row measures room for its track, the gap and the line's longest word.
+            let (mark_w, _) = mark_size(true, ui.theme.font_size);
+            assert!(ui.measure(row).0 >= mark_w + ui.theme.gap + least, "rtl {rtl}");
+            // Placed at a width of 0, the line keeps its longest word, as in a column.
+            ui.widgets[row].rect.w = 0.0;
+            ui.place(row, 0.0, 0.0);
+            assert_eq!(ui.widget(line).rect.w, least, "rtl {rtl}");
         }
     }
 

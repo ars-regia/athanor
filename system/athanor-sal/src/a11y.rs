@@ -833,6 +833,35 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_second_line_leaves_a_plain_switch_and_the_applications_description() {
+        let mut ui = Ui::new("Preferences", Theme::default(), false);
+        let row = ui.switch_row(Ui::ROOT, "Wi-Fi", " ", true);
+        let plain = ui.switch(Ui::ROOT, "Wi-Fi", true);
+        for id in [row, plain] {
+            ui.set_description(id, Some("Mine"));
+        }
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let node = |id| {
+            let found = update.nodes.iter().find(|(n, _)| *n == node_id(id));
+            found
+                .map(|(_, n)| n.clone())
+                .expect("a node for each widget shown")
+        };
+        let (row, plain) = (node(row), node(plain));
+        assert_eq!(row.description(), Some("Mine"));
+        assert_eq!(row.role(), plain.role());
+        assert_eq!(row.label(), plain.label());
+        assert_eq!(row.description(), plain.description());
+        assert_eq!(row.toggled(), plain.toggled());
+        assert_eq!(row.children(), plain.children(), "no second line inside it");
+        assert!(row.children().is_empty());
+        for action in [Action::Click, Action::Focus] {
+            assert_eq!(row.supports_action(action), plain.supports_action(action));
+        }
+    }
+
+    #[test]
     fn a_preference_row_reads_as_one_switch_named_by_its_title_and_described_by_its_second_line() {
         let mut ui = Ui::new("Preferences", Theme::default(), false);
         let row = ui.switch_row(Ui::ROOT, "Wi-Fi", "Connect to known networks", true);
