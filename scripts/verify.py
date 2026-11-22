@@ -23,6 +23,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 import ast
 import collections
 import datetime
+import difflib
 import fnmatch
 import hashlib
 import importlib.util
@@ -5770,6 +5771,93 @@ def state_link_problems(units, created):
     ]
 
 
+# The session daemons of doc_session.md SN6 whose units set WatchdogSec= (doc_session_daemons.md
+# SD17, doc_portal.md PT3), and the value the maintainer gave them on 2026-11-22.
+WATCHDOG_UNITS = (
+    "athanor-idle.service",
+    "athanor-sessiond.service",
+    "athanor-shelld.service",
+    "xdg-desktop-portal-athanor.service",
+)
+WATCHDOG_SECONDS = 30
+# The ping SN6 asks of a session daemon, after a roundtrip on its bus: athanor-unit's helper.
+WATCHDOG_SPAWN = re.compile(r"\bwatchdog::spawn(?:_with)?\s*\(")
+# A GLib main loop beside the bus: its ping must also wait on that loop, through spawn_with. Only
+# the literal call in main's own file is seen; a loop started elsewhere, or a check that proves
+# nothing, passes, as a static reading cannot judge them.
+WATCHDOG_GLIB_LOOP = re.compile(r"\bglib::MainLoop::new\s*\(")
+WATCHDOG_SPAWN_WITH = re.compile(r"\bwatchdog::spawn_with\s*\(")
+# Any other ping in Rust: athanor-unit's notify call or the datagram itself, never a definition.
+WATCHDOG_PING = re.compile(r'(?<!fn )\bnotify_watchdog\s*\(|b"WATCHDOG=1"')
+
+
+def watchdog_senders(root):
+    """{binary: "spawn", "unchecked", "ping" or None} for every crate under system/ and forge/specs, by its
+    package name, its [[bin]] names and its src/bin/*.rs files: "spawn" when the binary's own
+    source file calls watchdog::spawn outside its comments, strings and tests (rust_code), "unchecked" when
+    that file also runs a GLib main loop and does not call watchdog::spawn_with, "ping" when the crate sends WATCHDOG=1
+    otherwise. A static reading cannot prove the call runs; it can require it where main is."""
+    senders = {}
+    for base in ("system", "forge/specs"):
+        for manifest in walk(root / base, "Cargo.toml"):
+            try:
+                package = tomllib.loads(read(manifest))
+            except tomllib.TOMLDecodeError:
+                continue
+            src = manifest.parent / "src"
+            entries = {package.get("package", {}).get("name"): src / "main.rs"}
+            entries |= {f.stem: f for f in (src / "bin").glob("*.rs")}
+            for b in package.get("bin", []):
+                path = b.get("path")
+                entries[b.get("name")] = manifest.parent / path if path else src / "bin" / f"{b.get('name')}.rs"
+            entries.pop(None, None)
+            pings = any(
+                WATCHDOG_PING.search(code) or WATCHDOG_SPAWN.search(masked)
+                for code, masked in (rust_code(read(source)) for source in walk(src, ".rs"))
+            )
+            for binary, entry in entries.items():
+                main = rust_code(read(entry))[1] if entry.is_file() else ""
+                spawns = bool(WATCHDOG_SPAWN.search(main))
+                unchecked = bool(WATCHDOG_GLIB_LOOP.search(main)) and not WATCHDOG_SPAWN_WITH.search(main)
+                kind = ("unchecked" if unchecked else "spawn") if spawns else "ping" if pings else None
+                if senders.get(binary) != "spawn":
+                    senders[binary] = kind or senders.get(binary)
+    return senders
+
+
+def watchdog_problems(units, senders):
+    """A finding for every daemon of WATCHDOG_UNITS without WatchdogSec= of WATCHDOG_SECONDS, and
+    for every unit with WatchdogSec= whose program sends no WATCHDOG=1 or whose manager would
+    drop the ping: the manager ends a unit whose watchdog is never pinged (doc_session.md SN6)."""
+    problems = []
+    for unit in WATCHDOG_UNITS:
+        have = dict(unit_section(units.get(unit, ""), "Service")).get("WatchdogSec")
+        if have is None or time_span(have) != WATCHDOG_SECONDS:
+            problems.append(f"{unit}: WatchdogSec={have if have is not None else '(unset)'}, doc_session.md SN6 wants {WATCHDOG_SECONDS}s")
+    for unit, text in sorted(units.items()):
+        service = dict(unit_section(text, "Service"))
+        have = service.get("WatchdogSec")
+        if have is None:
+            continue
+        if not time_span(have):
+            problems.append(f"{unit}: WatchdogSec={have} is no positive time span (systemd.time(7))")
+            continue
+        command = service.get("ExecStart", "").split()
+        program = command[0].lstrip("-@:+!").rsplit("/", 1)[-1] if command else "(no ExecStart=)"
+        if program not in senders:
+            problems.append(f"{unit}: sets WatchdogSec= and runs {program}, no binary of a crate under system/ or forge/specs, so no check sees it send WATCHDOG=1")
+        elif not senders[program]:
+            problems.append(f"{unit}: sets WatchdogSec= and the crate of {program} sends no WATCHDOG=1, so the manager ends it at every timeout (athanor_unit::watchdog::spawn)")
+        elif unit in WATCHDOG_UNITS and senders[program] == "unchecked":
+            problems.append(f"{unit}: {program}'s main runs a GLib main loop beside the bus and calls athanor_unit::watchdog::spawn, whose ping does not wait on that loop; call spawn_with with a check the loop answers (doc_session.md SN6)")
+        elif unit in WATCHDOG_UNITS and senders[program] != "spawn":
+            problems.append(f"{unit}: the source of {program}'s main does not call athanor_unit::watchdog::spawn, the ping after a roundtrip on its bus that doc_session.md SN6 asks for; a timer alone proves only that a loop runs")
+        # Unset, NotifyAccess= is implied as main by WatchdogSec= (systemd.service(5)); only none drops the pings.
+        if service.get("NotifyAccess") == "none":
+            problems.append(f"{unit}: sets WatchdogSec= and NotifyAccess=none, so the manager drops every WATCHDOG=1 and ends the unit at each timeout (systemd.service(5))")
+    return problems
+
+
 @check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
@@ -5780,6 +5868,8 @@ def check_session_units():
     for problem in session_exempt_problems(session_unit_problems(units, enabled)):
         r.fail(problem)
     for problem in state_link_problems(units, shipped_user_state_directories(ROOT)):
+        r.fail(problem)
+    for problem in watchdog_problems(units, watchdog_senders(ROOT)):
         r.fail(problem)
     for (unit, finding), why in SESSION_EXEMPT.items():
         r.note(f"exempt: {unit}: {finding}: {why}")
@@ -7080,7 +7170,7 @@ def symbol_definitions(path, body):
 
 
 def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", lines_kept=None, cited=None,
-                      base_file=None, upstream=None):
+                      base_file=None, upstream=None, placed=None):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -7131,7 +7221,12 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    the limit: every citation on an edited line is skipped, also one the edit did not touch. A cited
+    on a line that replaces a base line (difflib pairs the lines of a replaced block of equal size by position), the
+    k-th citation of a file is kept when the base line's k-th citation of that file has the same lines:
+    it is read through the hunks for a shift only, as the author re-confirmed it by rewording the line (a
+    cited line edited in place, with the line count kept, is not a finding there). The author's own placing,
+    checked only by the token check, is: an edited line with no pair (an inserted line, a split or merged line,
+    a block of unequal size), a new citation, and a citation whose lines the edit changed. A cited
     line of a Markdown file that the change edited without adding or removing lines, and whose only
     difference from the revision is the numbers of its own citations (`base_file(path)` is the file
     there), is not an edit.
@@ -7152,9 +7247,25 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
 
     With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
     is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
-    `path:N`."""
+    `path:N`. `placed`, a list, gets the (line, file, lines) of every `path:N`."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
+    if hunks and base_text:
+        # The citations of each base line, and the base line that each edited line replaces.
+        base_cites = []
+        citation_findings(doc, base_text, tracked, read_file, placed=base_cites, upstream=upstream)
+        was = {}
+        for number, path, spec in base_cites:
+            was.setdefault((number, path), []).append(spec)
+        old_rows = [backtick_plain_paths(row) for row in base_text.split("\n")]
+        new_rows = [backtick_plain_paths(row) for row in text.split("\n")]
+        pair = {}
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_rows, new_rows, autojunk=False).get_opcodes():
+            if tag == "replace" and i2 - i1 == j2 - j1:
+                pair.update({j + 1: i + 1 for i, j in zip(range(i1, i2), range(j1, j2))})
+    else:
+        was, pair = {}, {}
+    nth = {}
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
     for path in known:
@@ -7245,6 +7356,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 crate = c.group(1)
             if not symbol and cited is not None:
                 cited.add(path)
+            if not symbol:
+                nth[number, path] = k = nth.get((number, path), -1) + 1
+                if placed is not None:
+                    placed.append((number, path, spec))
             if not symbol and lines_kept is not None and path not in lines_kept:
                 out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites lines: cite a "
                             f"symbol, `{path}#name`, or keep a file with no symbol in CITATION_LINES_KEPT"))
@@ -7277,7 +7392,23 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
-            if not symbol and line in unchanged and path in hunks:
+            reworded = False
+            if not symbol and hunks and line not in unchanged and path in hunks:
+                kept = was.get((pair.get(number), path), [])
+                reworded = k < len(kept) and kept[k] == spec
+            if not symbol and reworded:
+                new = moved_ranges(ranges, hunks[path], lambda old, now: True)
+                if new is None:
+                    out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
+                                "that this change edited or removed: place it again"))
+                    continue
+                if new != ranges:
+                    named = ", ".join(f"{a}-{b}" if "-" in part else str(a) for part, (a, b)
+                                      in zip(re.split(r",\s*", spec), new))
+                    out.append((number, path, spec, "moved", f"{doc}:{number}: `{path}:{spec}` is moved by "
+                                f"this change: it should name `{path}:{named}`"))
+                    continue
+            elif not symbol and line in unchanged and path in hunks:
                 before = base_file(path).split("\n") if base_file else []
                 new = moved_ranges(ranges, hunks[path], lambda old, now: path.endswith(".md")
                                    and old <= len(before) and now <= len(rows)

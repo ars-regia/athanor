@@ -464,7 +464,7 @@ pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
 /// `logical` pixels, rounded up to whole ones, in physical pixels at `scale`, as
 /// wp_fractional_scale_v1 computes them: in integers from the scale's 120ths, rounding half away
 /// from zero. Integer scales give an exact multiple.
-fn physical(logical: f32, scale: f32) -> Result<u16, Error> {
+pub(crate) fn physical(logical: f32, scale: f32) -> Result<u16, Error> {
     let scale120 = ((scale * 120.0).round() as u64).max(1);
     let logical = logical.ceil() as u64;
     Ok(u16::try_from((logical * scale120 + 60) / 120)?)
