@@ -19,6 +19,9 @@ StartLimitIntervalSec=60s
 Type=notify
 BusName=os.athanor.Settings1
 ExecStart=/usr/bin/athanor-settings
+# Clears the window state once a run ended well, so that only a failed run reopens its page
+# (doc_settings.md SE5); it is the same binary, and touches nothing but that state.
+ExecStopPost=/usr/bin/athanor-settings --stopped
 TimeoutStartSec=20s
 # SE5: a crashed Settings comes back at once and reopens its window at the target it left in
 # %t/athanor-settings/state. A window the user closed ends the run cleanly, until Sal keeps

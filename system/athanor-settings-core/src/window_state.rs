@@ -40,12 +40,14 @@ pub fn save(dir: &Path, target: Target) -> io::Result<()> {
     fs::rename(&temporary, dir.join(FILE))
 }
 
-/// Removes the state when the window closes. A file already gone is no error.
+/// Removes the state, and the marker of a reopened page still being drawn, when the window
+/// closes or the unit stops. A file already gone is no error.
 pub fn clear(dir: &Path) -> io::Result<()> {
     match fs::remove_file(dir.join(FILE)) {
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        other => other,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        other => other?,
     }
+    unmark(dir)
 }
 
 /// Marks the reopened page as being drawn ([`MARKER`]).
@@ -138,9 +140,11 @@ mod tests {
             load(&registry, &dir).expect("load"),
             Some(Target::Section("users", "fingerprint"))
         );
+        mark(&dir).expect("mark");
         clear(&dir).expect("clear");
         clear(&dir).expect("clear twice");
         assert_eq!(load(&registry, &dir).expect("no file"), None);
+        assert!(!dir.join(MARKER).exists(), "the marker outlived a clear");
         fs::write(dir.join(FILE), "x".repeat(4096)).expect("write");
         assert_eq!(load(&registry, &dir).expect("too long"), None);
         fs::remove_dir_all(&dir).expect("cleaned up");

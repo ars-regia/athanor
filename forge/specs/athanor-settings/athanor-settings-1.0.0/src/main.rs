@@ -25,6 +25,8 @@ use athanor_unit::dirs::{self, Dirs};
 use athanor_unit::{journal, sandbox};
 
 const UNIT: &str = "athanor-settings.service";
+/// The argument of the unit's `ExecStopPost=`.
+const STOPPED: &str = "--stopped";
 
 /// Whether `/proc/self/cgroup` puts this process in Settings' unit: the last component of its
 /// unified-hierarchy path.
@@ -67,9 +69,27 @@ fn forward() -> ExitCode {
     }
 }
 
+/// `ExecStopPost=`: a run that ended well, its window closed or the unit stopped, leaves no
+/// window to reopen; a run that failed keeps its state for the restart (SE5). A stop that
+/// also kills this process, `systemctl kill` say, leaves the state, and the next start
+/// reopens the page as after a crash.
+fn stopped(dirs: &Dirs) -> ExitCode {
+    if env::var("SERVICE_RESULT").as_deref() != Ok("success") {
+        return ExitCode::SUCCESS;
+    }
+    match window_state::clear(&dirs.unit_runtime) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(%error, "cannot clear the window state; the next start reopens it");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     athanor_unit::panic::install();
     journal::init();
+    let stop = env::args_os().nth(1).is_some_and(|arg| arg == STOPPED);
     // Before any toolkit or Wayland connection: the window runs only in its unit (SE4).
     match fs::read_to_string("/proc/self/cgroup") {
         Ok(cgroup) if in_unit(&cgroup) => {}
@@ -85,6 +105,9 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the cache");
         return ExitCode::FAILURE;
     };
+    if stop {
+        return stopped(&dirs);
+    }
     // SE6: before any thread. Step 1 writes its state file and dconf's flag under the runtime
     // directory, and fontconfig's cache; the other grants of SE6 come with the pages that write.
     let mut write = dirs::private_dirs(&dirs.runtime, &["athanor-settings", "dconf"]);
@@ -124,8 +147,9 @@ fn main() -> ExitCode {
     };
 
     let mut first = first;
-    // A `Show` that was accepted always opens a window: one that arrived while the last window
-    // was closing is still queued when the run ends, so the next run opens it.
+    // A `Show` dispatched while the last window was closing is still queued when the run ends,
+    // so the next run opens it. One that reaches the bus between the last dispatch and the exit
+    // is lost, and its caller sees the name vanish; SL1, which keeps the run, removes that gap.
     loop {
         let glib = match GlibSource::new() {
             Ok(glib) => glib,
