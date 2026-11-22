@@ -1420,9 +1420,12 @@ impl State {
             .filter(|window| !carried.contains(window))
             .find_map(|window| {
                 let bbox = self.space.element_bbox(window)?;
-                let location = self.space.element_location(window)? - window.geometry().loc;
-                let inside = bbox.to_f64().contains(pos)
-                    && window.is_in_input_region(&(pos - location.to_f64()));
+                let (at, offset) = (self.space.element_location(window)?, window.geometry().loc);
+                let location =
+                    Point::from((at.x.checked_sub(offset.x)?, at.y.checked_sub(offset.y)?));
+                let relative =
+                    Point::from((pos.x - f64::from(location.x), pos.y - f64::from(location.y)));
+                let inside = bbox.to_f64().contains(pos) && window.is_in_input_region(&relative);
                 inside.then_some((window, location))
             });
         let black = self

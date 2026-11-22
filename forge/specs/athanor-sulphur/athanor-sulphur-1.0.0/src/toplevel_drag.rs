@@ -85,7 +85,7 @@ impl<T> Marks<T> {
     fn mark(&mut self, source: &WlDataSource, mark: T) {
         self.by_source
             .insert(source.id(), (source.downgrade(), mark));
-        if self.by_source.len() >= 2 * self.kept.max(32) {
+        if self.by_source.len() >= self.kept.max(32).saturating_mul(2) {
             self.by_source.retain(|_, (source, _)| source.is_alive());
             self.kept = self.by_source.len();
             #[cfg(test)]
