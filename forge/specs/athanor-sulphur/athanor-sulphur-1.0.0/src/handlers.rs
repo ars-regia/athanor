@@ -297,6 +297,7 @@ impl CompositorHandler for State {
                 if unmapped {
                     self.forget_requests(&window);
                     self.hide_tile(&window);
+                    self.detach_unmapped(&window);
                 }
                 // A minimised window, or one on an inactive workspace, is placed and moved when
                 // it comes back (`unminimise`, `activate_workspace`).
@@ -306,6 +307,8 @@ impl CompositorHandler for State {
                     self.tile_shown(&window);
                     let landed = self.relocated(&window);
                     self.anchor_resized(&window);
+                    // A toplevel attached to a drag before its map goes to the drag's point.
+                    self.follow_drags();
                     // Also what a full-screen window's answer lifts (`marks::lifted`), which an
                     // answer to an earlier configure does as well.
                     if landed {
@@ -1820,7 +1823,8 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
 impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
 
 /// What `smithay::delegate_dispatch2!(State)` writes, with one step before Smithay's handler: a
-/// request `crate::layer::refused` refuses ends its client and never reaches that handler.
+/// request `crate::layer::refused` or `crate::toplevel_drag::refused_selection` refuses ends its
+/// client and never reaches that handler.
 impl<I, U> smithay::reexports::wayland_server::Dispatch<I, U> for State
 where
     I: Resource,
@@ -1836,7 +1840,9 @@ where
         dhandle: &DisplayHandle,
         data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
     ) {
-        if crate::layer::refused(resource, &request) {
+        if crate::layer::refused(resource, &request)
+            || crate::toplevel_drag::refused_selection(state, &request)
+        {
             return;
         }
         data.request(state, client, resource, request, dhandle, data_init);

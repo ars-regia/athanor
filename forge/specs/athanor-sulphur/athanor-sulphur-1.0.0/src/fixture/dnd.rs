@@ -1,6 +1,5 @@
 //! Fixtures of drag and drop between clients and of the drag icon (doc_own_stack.md decision
-//! 40, `dnd.rs`). Decision 37's toplevel drag, the last case the decision lists, has no fixture:
-//! the compositor offers no `xdg_toplevel_drag_manager_v1` to drag a toplevel with.
+//! 40, `dnd.rs`), and of decision 37's toplevel drag (`toplevel_drag`).
 
 use super::devices::show_lock_surface;
 use super::marks::{at, frame, BLACK, WHITE};
@@ -11,6 +10,10 @@ use std::io::Read;
 use wayland_client::protocol::{
     wl_data_device, wl_data_device_manager, wl_data_offer, wl_data_source,
 };
+
+// Decision 37: a toplevel moved by a drag.
+#[cfg(test)]
+mod toplevel_drag;
 
 /// The type a source offers, and the text it holds.
 const TEXT: &str = "text/plain;charset=utf-8";
@@ -131,6 +134,7 @@ impl Dispatch<wl_data_source::WlDataSource, DragSource> for Client {
 struct Party {
     local: Local,
     id: ClientId,
+    toplevel: xdg_toplevel::XdgToplevel,
     surface: wl_surface::WlSurface,
     manager: wl_data_device_manager::WlDataDeviceManager,
     device: wl_data_device::WlDataDevice,
@@ -140,7 +144,7 @@ struct Party {
 /// A new client, inside `context` if any, with its window at `at`.
 fn party(run: &mut Running, at: (i32, i32), context: Option<SecurityContext>) -> Party {
     let mut local = Local::connect(run, context);
-    local.toplevel(run);
+    let toplevel = local.toplevel(run);
     let id = local.id.clone().expect("an id");
     run.state.space.map_element(window_of(run, &id), at, false);
     let seat = local.seat.clone().expect("a seat");
@@ -152,6 +156,7 @@ fn party(run: &mut Running, at: (i32, i32), context: Option<SecurityContext>) ->
     Party {
         local,
         id,
+        toplevel,
         surface,
         manager,
         device,

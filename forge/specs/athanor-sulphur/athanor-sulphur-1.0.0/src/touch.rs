@@ -179,6 +179,7 @@ impl State {
                 time,
             },
         );
+        self.follow_drags();
     }
 
     /// A finger left the screen. The release of a touch the seat was never given, refused while

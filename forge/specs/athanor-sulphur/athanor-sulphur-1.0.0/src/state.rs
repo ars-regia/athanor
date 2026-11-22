@@ -35,6 +35,7 @@ use smithay::desktop::utils::{
     surface_primary_scanout_output, update_surface_primary_scanout_output,
     with_surfaces_surface_tree, OutputPresentationFeedback,
 };
+use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{
     layer_map_for_output, LayerSurface, PopupGrab, PopupManager, Space, Window, WindowSurfaceType,
 };
@@ -219,6 +220,8 @@ pub struct State {
     pub data_device_state: DataDeviceState,
     /// The icons of the drags in progress (`dnd.rs`).
     pub drag_icons: Vec<crate::dnd::DragIcon>,
+    /// The toplevels attached to drags (`toplevel_drag.rs`).
+    pub toplevel_drags: crate::toplevel_drag::ToplevelDrags,
     /// Primary selection and data control (`clipboard`).
     pub clipboard: crate::clipboard::Clipboard,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
@@ -433,6 +436,8 @@ impl State {
         // commit; nothing reads the type at 1.0, and the tag grants nothing.
         smithay::wayland::content_type::ContentTypeState::new::<Self>(&dh);
         crate::toplevel_tag::global(&dh);
+        // Decision 37. A toplevel attached to its client's drag follows it (`toplevel_drag.rs`).
+        crate::toplevel_drag::global(&dh);
         // Decision 33, wave 2b. A surface's presentation hint is kept, applied with the commit;
         // the DRM backend presents every frame with vsync (`tearing.rs`).
         crate::tearing::global(&dh);
@@ -499,6 +504,7 @@ impl State {
             xdg_activation_state,
             data_device_state,
             drag_icons: Vec::new(),
+            toplevel_drags: Default::default(),
             clipboard,
             syncobj_state: None,
             frame_stats: None,
@@ -1379,7 +1385,10 @@ impl State {
         let origin = shown.loc;
         let map = layer_map_for_output(output);
         let focused = self.focused_window();
-        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output);
+        // A window a drag carries is left out, here and below (decision 37).
+        let carried = self.carried_windows();
+        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output)
+            .filter(|window| !carried.contains(window));
         let above_top = lifted.and_then(|window| {
             let location = self.space.element_location(window)? - window.geometry().loc;
             window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
@@ -1403,11 +1412,27 @@ impl State {
         if above.is_some() {
             return above;
         }
-        let window = self.space.element_under(pos);
+        // `Space::element_under`.
+        let window = self
+            .space
+            .elements()
+            .rev()
+            .filter(|window| !carried.contains(window))
+            .find_map(|window| {
+                let bbox = self.space.element_bbox(window)?;
+                let (at, offset) = (self.space.element_location(window)?, window.geometry().loc);
+                let location =
+                    Point::from((at.x.checked_sub(offset.x)?, at.y.checked_sub(offset.y)?));
+                let relative =
+                    Point::from((pos.x - f64::from(location.x), pos.y - f64::from(location.y)));
+                let inside = bbox.to_f64().contains(pos) && window.is_in_input_region(&relative);
+                inside.then_some((window, location))
+            });
         let black = self
             .space
             .elements()
             .rev()
+            .filter(|above| !carried.contains(above))
             .take_while(|above| window.as_ref().is_none_or(|(window, _)| above != window))
             .any(|above| crate::marks::whole_on(above, shown));
         if black {
