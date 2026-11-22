@@ -315,6 +315,17 @@ class Resolution(unittest.TestCase):
         self.assertIn("is not a line range of its file", out[0])
         self.assertEqual(len(messages("The `x` is at `src/x.rs:3-5`.")), 1)
 
+    def test_a_path_under_an_abbreviation_reads_as_the_defined_path(self):
+        define = "- **S** (`pkg`, below `S`).\n"
+        self.assertEqual(messages(define + "The `zeta` is at `S/lib/y.rs:1`."), [])
+        out = messages(define + "The `zeta` is at `S/lib/y.rs:2`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("doc.md:2: `pkg/lib/y.rs:2` does not hold `zeta`", out[0])
+        out = messages("- **S** (`forge/s`, below `S`).\nThe `grant` is at `S/none.rs:1`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("`forge/s/none.rs:1` names a file that does not exist", out[0])
+        self.assertEqual(messages("The `zeta` is at `S/lib/y.rs:2`."), [])
+
     def test_every_entry_of_a_list_is_a_line_range(self):
         out = messages("The `grant` is at `src/x.rs:1, 9`.")
         self.assertEqual(len(out), 1)
@@ -399,6 +410,17 @@ class Moved(unittest.TestCase):
         out = self.found("The `grant` is at `src/x.rs:1, 3-4`.", {"src/x.rs": [(1, 0, 2)]}, extra={})
         self.assertEqual(len(out), 1)
         self.assertIn("it should name `src/x.rs:1, 5-6`", out[0])
+
+    def test_a_citation_under_an_abbreviation_is_moved_like_its_full_path(self):
+        path = "forge/specs/s/s-1.0.0/src/x.rs"
+        text = "- **S** (`forge/specs/s/s-1.0.0`, below `S`).\n  - The line `grant` is at `S/src/x.rs:1-4`."
+        out = self.found(text, {path: [(0, 0, 3)]}, extra={path: self.HEAD["src/x.rs"]})
+        self.assertEqual(len(out), 1)
+        self.assertIn(f"doc.md:2: `{path}:1-4` is moved by this change", out[0])
+        self.assertIn(f"it should name `{path}:4-7`", out[0])
+        out = self.found(text, {path: [(2, 1, 1)]}, extra={path: FILES["src/x.rs"]})
+        self.assertEqual(len(out), 1)
+        self.assertIn("edited or removed: place it again", out[0])
 
     def test_an_edited_or_removed_cited_line_is_left_to_a_reader(self):
         for hunk in ((2, 1, 1), (3, 2, 0)):

@@ -201,8 +201,8 @@ impl DndGrabHandler for State {
 impl State {
     /// Whether the press or the touch point `serial` names is still held: its button not
     /// released, or its finger not lifted. A popup's grab keeps the serial of the press that
-    /// opened it past the release, and a drag started with that serial is then refused.
-    fn held(&self, serial: Serial, type_: GrabType) -> bool {
+    /// opened it past the release, and a drag or a window grab named with it is then refused.
+    pub(crate) fn held(&self, serial: Serial, type_: GrabType) -> bool {
         match type_ {
             GrabType::Pointer => self
                 .grab_serials

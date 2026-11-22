@@ -11,6 +11,7 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupGrab,
     PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
+use smithay::input::dnd::GrabType;
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
@@ -922,10 +923,14 @@ impl State {
         let seat = Seat::<Self>::from_resource(seat)?;
         let client = surface.wl_surface().client()?.id();
         let pointer = seat.get_pointer().filter(|pointer| {
-            self.grab_serials.clicked(serial, &client) && pointer.has_grab(serial)
+            self.grab_serials.clicked(serial, &client)
+                && pointer.has_grab(serial)
+                && self.held(serial, GrabType::Pointer)
         });
         let touch = seat.get_touch().filter(|touch| {
-            self.grab_serials.touched(serial, &client) && touch.has_grab(serial)
+            self.grab_serials.touched(serial, &client)
+                && touch.has_grab(serial)
+                && self.held(serial, GrabType::Touch)
         });
         let grabbed = match (pointer, touch) {
             (Some(pointer), _) => {

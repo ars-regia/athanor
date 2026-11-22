@@ -314,8 +314,8 @@ pub struct State {
 #[derive(Debug, Default)]
 pub struct GrabSerials {
     pub button: Option<(Serial, ClientId)>,
-    /// The last button press and its button, until that button is released: a drag names a
-    /// press still held (`dnd.rs`).
+    /// The last button press and its button, until that button is released: a drag or a window
+    /// grab names a press still held (`dnd.rs`, `window_grab`).
     pub held_button: Option<(Serial, u32)>,
     pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
