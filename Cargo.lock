@@ -867,6 +867,7 @@ version = "1.0.0"
 dependencies = [
  "landlock",
  "nix 0.32.0",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "zbus 6.2.1",
