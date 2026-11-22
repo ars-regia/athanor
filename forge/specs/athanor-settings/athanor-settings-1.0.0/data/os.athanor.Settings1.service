@@ -1,0 +1,6 @@
+# doc_settings.md, SE4: a call to os.athanor.Settings1 starts Settings' unit when it is down,
+# so Settings' window runs only in athanor-settings.service. The bus never runs the program.
+[D-BUS Service]
+Name=os.athanor.Settings1
+Exec=/bin/false
+SystemdService=athanor-settings.service

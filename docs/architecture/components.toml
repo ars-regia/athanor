@@ -342,6 +342,15 @@ item = "SD22"
 purpose = "The session services' package: the binary, its guard unit and preset"
 
 [[component]]
+path = "forge/specs/athanor-settings"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_settings.md"
+item = "SE4"
+purpose = "Settings: the window drawn with Sal, its user unit, os.athanor.Settings1 and the forwarder"
+
+[[component]]
 path = "forge/specs/athanor-shelld"
 kind = "rpm spec"
 area = "shell"
@@ -739,6 +748,15 @@ status = "specified"
 spec = "doc_control_center.md"
 item = "CC3"
 purpose = "The shell's models of system services: D-Bus mirrors on zbus, off the interface thread, no GTK type"
+
+[[component]]
+path = "system/athanor-settings-core"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_settings.md"
+item = "SE2"
+purpose = "The logic of Settings with no toolkit type: page registry and search, deep-link grammar, writable keys, display revert, shortcut conflicts"
 
 [[component]]
 path = "system/athanor-style"
