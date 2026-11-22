@@ -35,7 +35,14 @@ const USAGE: &str =
 
 fn main() -> ExitCode {
     athanor_unit::panic::install();
-    let args: Vec<String> = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).skip(1).collect();
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    // A snapshot name is ASCII (`parse_id`): one that is not UTF-8 is a usage error.
+    if let [cmd, id, _] = args.as_slice() {
+        if cmd == "restore" && id.to_str().is_none() {
+            eprintln!("athanor-backup: the snapshot name is not UTF-8\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -45,26 +52,27 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: &[String]) -> Result<()> {
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+/// The words of the command are text; the path of `restore` stays the bytes the user typed.
+fn run(args: &[OsString]) -> Result<()> {
+    let words: Vec<Option<&str>> = args.iter().map(|arg| arg.to_str()).collect();
     if !matches!(
-        args.as_slice(),
-        ["init" | "create" | "prune" | "list"] | ["restore", _, _]
+        words.as_slice(),
+        [Some("init" | "create" | "prune" | "list")] | [Some("restore"), Some(_), Some(_)]
     ) {
         bail!("{USAGE}");
     }
     if !nix::unistd::geteuid().is_root() {
         bail!(
             "snapshots belong to root: run it as `sudo athanor-backup {}`",
-            args.join(" ")
+            args[0].to_string_lossy()
         );
     }
-    match args.as_slice() {
-        ["init"] => init(),
-        ["create"] => create(),
-        ["prune"] => prune(),
-        ["list"] => list(),
-        ["restore", id, path] => restore(id, Path::new(path)),
+    match (words.as_slice(), args) {
+        ([Some("init")], _) => init(),
+        ([Some("create")], _) => create(),
+        ([Some("prune")], _) => prune(),
+        ([Some("list")], _) => list(),
+        ([Some("restore"), Some(id), Some(_)], [_, _, path]) => restore(id, Path::new(path)),
         _ => bail!("{USAGE}"),
     }
 }
