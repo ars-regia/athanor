@@ -90,6 +90,12 @@ fn rtl() -> bool {
     })
 }
 
+/// Reads the direction at the compositor's start (`run`), so that the first slide's frame
+/// reads no catalog.
+pub(crate) fn settle_direction() {
+    rtl();
+}
+
 fn sliding(output: &Output) -> &Cell<Option<Slide>> {
     &output.user_data().get_or_insert(Sliding::default).0
 }

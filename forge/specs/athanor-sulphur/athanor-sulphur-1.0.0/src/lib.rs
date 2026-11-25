@@ -196,6 +196,8 @@ pub fn run() -> Result<(), Error> {
     screen_filter::start(&mut state, &event_loop.handle());
     // The theme of the focus outline (`doc_own_stack.md` decision 31).
     focus_theme::start(&mut state, &event_loop.handle());
+    // The workspace slide's direction, read from the bar's catalog before the first frame.
+    workspace::slide::settle_direction();
     let socket = state::listen(&event_loop.handle())?;
     // Under the user manager, as `athanor-sulphur.service` runs it, the satellite gets a
     // scope of its own (OS4).
