@@ -92,6 +92,14 @@ fn reading<T>(slot: &Cell<Option<Slide>>, read: impl FnOnce(Option<&Slide>) -> T
     value
 }
 
+/// Whether a slide runs on `output` now, so that its frame shows more than the workspace
+/// activated (`tearing::conditions`).
+pub(crate) fn running(output: &Output) -> bool {
+    reading(sliding(output), |slide| {
+        slide.is_some_and(|it| it.incoming.running(clock()))
+    })
+}
+
 /// A window of a workspace left, at its place, and how far from it it is drawn.
 pub(crate) type Leaving = (Window, Rectangle<i32, Logical>, Point<i32, Logical>);
 
