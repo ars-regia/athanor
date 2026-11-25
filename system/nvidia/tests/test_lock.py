@@ -486,6 +486,26 @@ class LegacyFedora45(unittest.TestCase):
             "legacy", "580.196.07", legacy_repo(settings(1), *driver, *companions, releases=[settings(1)]))}
         self.assertEqual(got["nvidia-settings-580xx"], LEGACY)
 
+    def test_a_package_the_first_tree_carries_is_never_read_from_the_second(self):
+        # updates/45 moved the driver past the pin: the pin is gone, not taken from releases/45.
+        moved = [package(n, 3, "580.205.01", "1.fc45", "x86_64", f"x/{n}-new.rpm", "b" * 64)
+                 for n in lock.BRANCHES["legacy"]["packages"] if n != "nvidia-settings-580xx"]
+        frozen = [package(n, 3, "580.196.07", "1.fc45", "x86_64", f"x/{n}-1.rpm", "c" * 64)
+                  for n in lock.BRANCHES["legacy"]["packages"]]
+        download = legacy_repo(*moved, *legacy_companions("d" * 64, version="620.73.04"),
+                               releases=[*frozen, *legacy_companions("e" * 64)])
+        with self.assertRaisesRegex(lock.NotPublished, "xorg-x11-drv-nvidia-580xx"):
+            lock.resolve("legacy", "580.196.07", download)
+        code, _, _ = run(["check", "legacy", "--version", "580.196.07"], download)
+        self.assertEqual(code, lock.NOT_PUBLISHED)
+        # Two trees with one release of different files never meet: the first tree's is taken.
+        settings = [package("nvidia-settings-580xx", 3, "580.196.07", "1.fc45", "x86_64", f"n/{d}.rpm", d * 64) for d in "fg"]
+        driver = [package(n, 3, "580.196.07", "1.fc45", "x86_64", f"x/{n}.rpm", "b" * 64)
+                  for n in lock.BRANCHES["legacy"]["packages"] if n != "nvidia-settings-580xx"]
+        got = {e["name"]: e for e in lock.resolve("legacy", "580.196.07", legacy_repo(
+            settings[0], *driver, *legacy_companions("d" * 64, version="620.73.04"), releases=[settings[1]]))}
+        self.assertEqual((got["nvidia-settings-580xx"]["base"], got["nvidia-settings-580xx"]["digest"]), (LEGACY, "f" * 64))
+
     def test_a_lock_may_name_either_tree_and_no_other(self):
         for url, refused in ((RELEASES + "a.rpm", False), (LEGACY + "a.rpm", False), ("https://evil.example/a.rpm", True)):
             with self.subTest(url=url), tempfile.TemporaryDirectory() as d:

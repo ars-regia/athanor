@@ -352,20 +352,24 @@ def evr_compare(one, two):
 
 def select(primary_xml, names, version, companions=(), floor=None):
     """`primary_xml` is one repository's metadata, or a list of (base URL, metadata) in order of
-    preference: at an equal version the earlier repository wins. Each entry records its `base`
-    ("" for a single repository). One entry per name at exactly `version`, and one per companion (a package whose version
+    preference: a name the earlier repository carries, at any version, is read from it alone, so
+    a set never mixes rebuilds of two trees nor falls back to an older tree when the first moved
+    past `version`. Each entry records its `base` ("" for a single repository). One entry per name at exactly `version`, and one per companion (a package whose version
     does not follow the driver's) at any version, for x86_64 or noarch. Each takes its newest
     published release: a repository may keep several rebuilds of one version, and the lock
     records the chosen file by SHA-256 either way. With `floor`, one of `names`, a companion
     older than that package's epoch:version is refused: the set requires it at least there."""
     releases = {name: [] for name in (*names, *companions)}
+    carrier = {}
     sources = [("", primary_xml)] if isinstance(primary_xml, bytes) else primary_xml
     for base, pkg in [(b, p) for b, x in sources for p in parse_xml(x).iter(f"{COMMON}package")]:
         name = pkg.findtext(f"{COMMON}name")
         if name not in releases:
             continue
         ver = attribute(pkg, f"{COMMON}version", "ver", name)
-        if pkg.findtext(f"{COMMON}arch") not in ARCHES or (name in names and ver != version):
+        if pkg.findtext(f"{COMMON}arch") not in ARCHES or carrier.setdefault(name, base) != base:
+            continue
+        if name in names and ver != version:
             continue
         checksum = attribute(pkg, f"{COMMON}checksum", "type", name)
         if checksum not in CHECKSUMS:
