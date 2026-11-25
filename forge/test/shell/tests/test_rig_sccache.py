@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import fake_v3
+
 SHELL = Path(__file__).resolve().parent.parent
 RIG = SHELL / "rig.sh"
 CACHE_VARS = ("ATHANOR_RIG_SCCACHE", "ATHANOR_RIG_SCCACHE_SIZE")
@@ -39,6 +41,7 @@ def runs(args, sccache=True, **env_extra):
         podman.write_text(f'#!/bin/sh\necho "$*" >> {tmp}/runs\n{probe}')
         podman.chmod(0o755)
         env = {k: v for k, v in os.environ.items() if k not in CACHE_VARS}
+        env.update(fake_v3.ENV)
         env.update(
             PATH=f"{tmp / 'path'}:{env['PATH']}", ATHANOR_RIG_OUT=str(tmp / "out")
         )

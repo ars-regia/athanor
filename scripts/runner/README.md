@@ -72,6 +72,12 @@ Pins and sizing are in `runner.env`: Fedora Cloud Base and actions/runner by SHA
 8 vCPUs and up to 12 GB (at least 6 GB, keeping 3 GB available on the host), CPU and
 I/O weights that leave the desktop responsive.
 
+The guest runs under `-cpu host` (`vm.sh` and `build-image.sh`): it sees the host CPU model and
+every feature flag, so it has x86-64-v3 exactly when the host has it. The workspace is built
+for x86-64-v3 (ADR-0143), and a named model such as `qemu64` would hide AVX2 and make its
+binaries die with SIGILL. `scripts/ci/check-x86-64-v3.sh` fails a job with a named cause when
+the host is below the level anyway.
+
 ## Install
 
 ```sh
