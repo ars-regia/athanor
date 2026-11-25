@@ -88,6 +88,7 @@ AREAS = {
         "system/athanor-search/",
         "system/athanor-preview/",
         "system/athanor-preview-render/",
+        "system/athanor-wallpaper/",
         "forge/specs/athanor-launcher/",
         "system/athanor-apps/",
         "system/athanor-controls/",

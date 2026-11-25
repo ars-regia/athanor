@@ -119,7 +119,7 @@ class ShellAreaTest(unittest.TestCase):
             package = tomllib.loads((ROOT / manifest).read_text()).get("package")
             if package:
                 crates[package["name"]] = posixpath.dirname(manifest)
-        built = set(re.findall(r"\s-p (athanor-[a-z0-9-]+)", (ROOT / "forge/test/shell/rig.sh").read_text()))
+        built = set(re.findall(r"""(?:^|[\s"'])-p[ =](athanor-[a-z0-9-]+)""", (ROOT / "forge/test/shell/rig.sh").read_text()))
         self.assertIn("athanor-settings", built)
         todo, reached = [crates[name] for name in built], set()
         while todo:
