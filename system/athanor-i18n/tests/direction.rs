@@ -5,7 +5,7 @@ use athanor_i18n::{is_rtl, Catalog, OVERRIDE_VARIABLE};
 
 /// The direction is the one the program's own catalog gives: by the override file when one is
 /// named, else by the catalog of the session's language, and left to right when that language
-/// has none.
+/// has none or the catalog cannot be read.
 #[test]
 fn the_direction_is_the_one_of_the_catalog_the_program_loads() {
     let ar = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ar.mo");
@@ -13,6 +13,22 @@ fn the_direction_is_the_one_of_the_catalog_the_program_loads() {
     std::env::set_var(OVERRIDE_VARIABLE, ar);
     assert!(is_rtl("athanor-bar"), "the override's Arabic");
     assert_eq!(is_rtl("athanor-bar"), bar("athanor-bar"));
+
+    let unreadable = |path: &str| {
+        std::env::set_var(OVERRIDE_VARIABLE, path);
+        assert!(
+            Catalog::load("athanor-bar").is_err(),
+            "{path} is no catalog"
+        );
+        !is_rtl("athanor-bar")
+    };
+    let missing = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/missing.mo");
+    assert!(unreadable(missing), "a missing override is English");
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ar.po");
+    assert!(
+        unreadable(source),
+        "an override that is not a .mo is English"
+    );
 
     std::env::remove_var(OVERRIDE_VARIABLE);
     std::env::remove_var("LC_ALL");
