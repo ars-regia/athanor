@@ -531,6 +531,14 @@ impl State {
         self.workspaces.iter().find(|strip| strip.output == output)
     }
 
+    /// Whether the active workspace of the output the keys act on is tiled: the tiling keys are
+    /// bound there only (OS13).
+    pub(crate) fn keyed_tiled(&self) -> bool {
+        self.keyed_strip()
+            .and_then(Strip::active_id)
+            .is_some_and(|id| self.is_tiled(id))
+    }
+
     /// The `n`-th workspace, from one, of the output the keys act on; its last when `n` is 0 or
     /// past it.
     fn nth_workspace(&self, n: u8) -> Option<WorkspaceId> {

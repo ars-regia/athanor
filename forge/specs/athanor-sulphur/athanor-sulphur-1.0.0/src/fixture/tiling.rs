@@ -2046,3 +2046,32 @@ fn super_g_floats_the_focused_tile_and_tiles_it_again() {
     assert!(run.state.is_tile(&above));
     run.stop();
 }
+
+/// On a workspace not tiled the tiling keys are no binding: each reaches the focused window
+/// whole, and the compositor does nothing with it (OS13, issue #1419).
+#[test]
+fn the_tiling_keys_reach_a_window_on_a_floating_workspace() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    let id = run.state.workspace_of(&window).expect("a workspace");
+    assert!(!run.state.is_tiled(id));
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_LEFT][..], "Super+Left"),
+        (&[KEY_LEFTMETA, KEY_L], "Super+L"),
+        (
+            &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT],
+            "Super+Shift+Right",
+        ),
+        (&[KEY_LEFTMETA, KEY_O], "Super+O"),
+        (&[KEY_LEFTMETA, KEY_R], "Super+R"),
+        (&[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_R], "Super+Shift+R"),
+        (&[KEY_LEFTMETA, KEY_G], "Super+G"),
+    ] {
+        reaches(&mut local, &mut run, codes, what);
+    }
+    assert!(!run.state.is_tiled(id), "Super+G tiles nothing");
+    run.stop();
+}

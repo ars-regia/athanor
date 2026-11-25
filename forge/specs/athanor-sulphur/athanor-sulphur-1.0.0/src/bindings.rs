@@ -407,6 +407,22 @@ impl State {
     }
 }
 
+impl Action {
+    /// Whether the action is one of OS13's tiling keys, bound only on a tiled workspace: on any
+    /// other the key goes to the focused client as an unbound key does.
+    pub(crate) fn tiling(&self) -> bool {
+        matches!(
+            self,
+            Self::FocusToward(_)
+                | Self::SwapToward(_)
+                | Self::TurnSplit
+                | Self::GrowTile
+                | Self::ShrinkTile
+                | Self::ToggleFloating
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
