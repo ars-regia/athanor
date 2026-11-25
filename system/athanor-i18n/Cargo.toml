@@ -7,3 +7,6 @@ description = "Reads gettext .mo catalogs in pure Rust, and the first weekday fr
 
 [dependencies]
 libc = { workspace = true }
+
+[lints]
+workspace = true

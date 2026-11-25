@@ -21,3 +21,6 @@ glib = { workspace = true }
 gio-unix = { workspace = true }
 tracing = { workspace = true }
 wayland-client = { workspace = true }
+
+[lints]
+workspace = true

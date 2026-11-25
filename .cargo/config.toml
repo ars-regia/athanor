@@ -1,8 +1,5 @@
 [build]
 rustflags = [
-    "-D", "unsafe_code",
-    "-W", "clippy::undocumented_unsafe_blocks",
-    "-W", "clippy::multiple_unsafe_ops_per_block",
     "-C", "link-arg=-Wl,-z,relro,-z,now",
     "-C", "relocation-model=pic",
     "-C", "force-frame-pointers=yes",
@@ -10,9 +7,6 @@ rustflags = [
 
 [target.'cfg(target_os = "linux")']
 rustflags = [
-    "-D", "unsafe_code",
-    "-W", "clippy::undocumented_unsafe_blocks",
-    "-W", "clippy::multiple_unsafe_ops_per_block",
     "-C", "link-arg=-Wl,-z,relro,-z,now",
     "-C", "relocation-model=pic",
     "-C", "force-frame-pointers=yes",

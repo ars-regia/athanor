@@ -27,3 +27,6 @@ tracing = { workspace = true }
 [[test]]
 name = "pages"
 required-features = ["gtk"]
+
+[lints]
+workspace = true

@@ -51,3 +51,6 @@ required-features = ["gtk"]
 name = "athanor-dock-toolkit"
 path = "src/toolkit/main.rs"
 required-features = ["toolkit"]
+
+[lints]
+workspace = true

@@ -35,3 +35,6 @@ libc = { workspace = true }
 # sendmsg with SCM_RIGHTS for the decoder's request.
 nix = { workspace = true, optional = true, features = ["socket", "uio"] }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

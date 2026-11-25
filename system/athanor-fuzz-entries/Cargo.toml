@@ -50,3 +50,6 @@ zbus = { workspace = true, optional = true }
 [package.metadata.cargo-machete]
 # Used by the athanor-update modules that lib.rs includes with #[path]; the scan reads only this crate's own sources.
 ignored = ["jiff", "serde", "tracing"]
+
+[lints]
+workspace = true

@@ -24,3 +24,6 @@ zbus = { workspace = true }
 [[test]]
 name = "confine"
 harness = false
+
+[lints]
+workspace = true

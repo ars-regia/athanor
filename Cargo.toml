@@ -148,3 +148,14 @@ overflow-checks = true
 [patch.crates-io]
 accesskit_atspi_common = { path = "system/athanor-sal/vendor/accesskit_atspi_common" }
 wayland-backend = { path = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend" }
+
+# The lint policy of every member (ADR-0075 decision 3, ADR-0143 decision 2): each member's
+# manifest says `lints.workspace = true`, which `verify.py build-policy` requires. A module that
+# needs `unsafe` allows it at its head and documents every block. Clippy's two warnings become
+# errors where clippy runs with `-D warnings`.
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
