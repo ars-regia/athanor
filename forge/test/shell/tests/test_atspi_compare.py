@@ -13,14 +13,17 @@ import atspi_compare as compare
 import golden_report as gr
 
 
-def node(role, name, states=(), value=""):
-    return {
+def node(role, name, states=(), value="", description=None):
+    out = {
         "depth": 0,
         "role": role,
         "name": name,
         "states": sorted(states),
         "value": value,
     }
+    if description is not None:
+        out["description"] = description
+    return out
 
 
 REFERENCE = [
@@ -40,6 +43,29 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(
             len(lines), 4, "the application and the unnamed panel are not spoken"
         )
+
+    def test_a_lost_or_changed_description_fails(self):
+        # SL4: a preference row's second line is its switch's description.
+        row = ["checkable", "showing"]
+        reference = [node("toggle button", "Dark", row, description="Follow the sun")]
+        for transcript, expected in [
+            ([node("toggle button", "Dark", row, description="Follow the sun")], []),
+            ([node("toggle button", "Dark", row)], ["''"]),
+            ([node("toggle button", "Dark", row, description="Other")], ["'Other'"]),
+        ]:
+            _, failures = compare.compare(reference, transcript)
+            self.assertEqual(
+                failures,
+                [
+                    f"toggle button 'Dark': description {got}, expected 'Follow the sun'"
+                    for got in expected
+                ],
+            )
+
+    def test_a_reference_without_a_description_expects_none(self):
+        reference = [node("toggle button", "Dark", ["showing"])]
+        transcript = [node("toggle button", "Dark", ["showing"], description="Extra")]
+        self.assertEqual(compare.compare(reference, transcript)[1], [])
 
     def test_a_missing_element_fails(self):
         _, failures = compare.compare(REFERENCE, REFERENCE[:-1])
