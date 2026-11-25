@@ -75,6 +75,9 @@ class ClassifyTest(unittest.TestCase):
             "system/athanor-sulphur-client/src/lib.rs",
             "system/athanor-sal/src/lib.rs",
             "Cargo.lock",
+            "system/athanor-edid/src/lib.rs",
+            "system/athanor-idle/src/lib.rs",
+            "system/athanor-settings-core/src/lib.rs",
             "Cargo.toml",
             ".cargo/config.toml",
         ):
@@ -87,6 +90,13 @@ class ClassifyTest(unittest.TestCase):
     def test_the_own_compositor_selects_the_visual_tests_and_its_package(self):
         self.assertEqual(
             changes.classify(["forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/main.rs"]),
+            {**NONE, "specs": True, "shell": True, "rust_audit": True},
+        )
+
+    def test_settings_alone_selects_the_visual_tests_and_its_package(self):
+        # rig.sh toolkit-window drives Settings (#1481).
+        self.assertEqual(
+            changes.classify(["forge/specs/athanor-settings/athanor-settings-1.0.0/src/main.rs"]),
             {**NONE, "specs": True, "shell": True, "rust_audit": True},
         )
 
