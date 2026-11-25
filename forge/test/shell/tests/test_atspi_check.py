@@ -74,6 +74,35 @@ class ExtentsTest(unittest.TestCase):
         found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [bar, popup]), FakeAtspi), 2)
         self.assertEqual(found, ["the showing 'button' 'Low' at (0, 50, 34, 32) is outside its window (0, 0, 1280, 56)"])
 
+    def test_a_popover_menu_hanging_out_of_the_window_holds_its_entries(self):
+        # GTK 4.24 keeps the popover's menu in the window's tree, below the window's edge.
+        entry = Fake("menu item", (405, 228, 168, 30), name="New window")
+        outside = Fake("menu item", (405, 500, 168, 30), name="Far")
+        menu = Fake("menu", (400, 220, 180, 220), [entry, outside])
+        frame = Fake("frame", (0, 0, 985, 225), [Fake("button", (10, 10, 80, 30), [menu], "Open a menu")])
+        found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
+        self.assertEqual(found, ["the showing 'menu item' 'Far' at (405, 500, 168, 30) is outside its window (400, 220, 180, 220)"])
+
+    def test_a_menu_away_from_its_window_is_a_problem_however_its_entries_fit(self):
+        entry = Fake("menu item", (5005, 5008, 168, 30), name="New window")
+        menu = Fake("menu", (5000, 5000, 180, 220), [entry])
+        frame = Fake("frame", (0, 0, 985, 225), [Fake("button", (10, 10, 80, 30), [menu], "Open a menu")])
+        found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
+        self.assertEqual(
+            found, ["the showing 'menu' '' at (5000, 5000, 180, 220) is away from its window (0, 0, 985, 225)"]
+        )
+
+    def test_a_menu_sharing_an_edge_with_its_window_touches_it_and_one_pixel_off_does_not(self):
+        # The window is (0, 0, 985, 225) and the menu 180 by 220: flush on each side, then 1 px away.
+        for x, y, touches in [
+            (985, 10, True), (-180, 10, True), (10, 225, True), (10, -220, True),
+            (986, 10, False), (-181, 10, False), (10, 226, False), (10, -221, False),
+        ]:
+            menu = Fake("menu", (x, y, 180, 220), [Fake("menu item", (x, y, 168, 30), name="New window")])
+            frame = Fake("frame", (0, 0, 985, 225), [Fake("button", (10, 10, 80, 30), [menu], "Open a menu")])
+            found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
+            self.assertEqual(found == [], touches, (x, y, found))
+
 
 class Fake:
     """An accessible of the AT-SPI calls with_extents() makes."""

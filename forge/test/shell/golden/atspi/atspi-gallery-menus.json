@@ -3,13 +3,16 @@
   "depth": 0,
   "role": "application",
   "name": "gallery_gtk.py",
+  "description": "gallery_gtk.py",
   "states": [],
-  "value": ""
+  "value": "",
+  "toolkit": "GTK 4.24.1"
  },
  {
   "depth": 1,
   "role": "frame",
   "name": "Gallery",
+  "description": "",
   "states": [
    "active",
    "sensitive",
@@ -22,6 +25,7 @@
   "depth": 2,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -34,6 +38,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -46,6 +51,7 @@
   "depth": 4,
   "role": "label",
   "name": "Pages",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -57,6 +63,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -69,6 +76,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Buttons",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -81,6 +89,7 @@
   "depth": 6,
   "role": "label",
   "name": "Buttons",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -92,6 +101,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Choices",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -104,6 +114,7 @@
   "depth": 6,
   "role": "label",
   "name": "Choices",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -115,6 +126,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Values",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -127,6 +139,7 @@
   "depth": 6,
   "role": "label",
   "name": "Values",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -138,6 +151,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Lists",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -150,6 +164,7 @@
   "depth": 6,
   "role": "label",
   "name": "Lists",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -161,6 +176,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Text",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -173,6 +189,7 @@
   "depth": 6,
   "role": "label",
   "name": "Text",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -184,6 +201,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "States",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -196,6 +214,7 @@
   "depth": 6,
   "role": "label",
   "name": "States",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -207,6 +226,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Calendar",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -219,6 +239,7 @@
   "depth": 6,
   "role": "label",
   "name": "Calendar",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -230,6 +251,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Dialogs",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -242,6 +264,7 @@
   "depth": 6,
   "role": "label",
   "name": "Dialogs",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -253,6 +276,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Menus",
+  "description": "",
   "states": [
    "focusable",
    "pressed",
@@ -266,6 +290,7 @@
   "depth": 6,
   "role": "label",
   "name": "Menus",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -277,6 +302,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -289,6 +315,7 @@
   "depth": 4,
   "role": "label",
   "name": "Menus",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -300,6 +327,7 @@
   "depth": 4,
   "role": "button",
   "name": "Open a menu",
+  "description": "",
   "states": [
    "expandable",
    "focusable",
@@ -314,6 +342,7 @@
   "depth": 5,
   "role": "label",
   "name": "Open a menu",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -325,6 +354,7 @@
   "depth": 5,
   "role": "menu",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -337,6 +367,7 @@
   "depth": 6,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -348,6 +379,7 @@
   "depth": 7,
   "role": "scroll pane",
   "name": "",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -360,6 +392,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -371,6 +404,7 @@
   "depth": 9,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -382,6 +416,7 @@
   "depth": 10,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -393,6 +428,7 @@
   "depth": 11,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -405,6 +441,7 @@
   "depth": 12,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -417,6 +454,7 @@
   "depth": 13,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -429,6 +467,7 @@
   "depth": 14,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -441,6 +480,7 @@
   "depth": 15,
   "role": "menu item",
   "name": "New window",
+  "description": "",
   "states": [
    "focusable",
    "focused",
@@ -454,6 +494,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -466,6 +507,7 @@
   "depth": 15,
   "role": "menu item",
   "name": "Show hidden files",
+  "description": "",
   "states": [
    "checkable",
    "checked",
@@ -480,6 +522,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -492,6 +535,7 @@
   "depth": 17,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -503,6 +547,7 @@
   "depth": 13,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -515,6 +560,7 @@
   "depth": 14,
   "role": "separator",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -527,6 +573,7 @@
   "depth": 14,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -539,6 +586,7 @@
   "depth": 15,
   "role": "menu item",
   "name": "Sort by name",
+  "description": "",
   "states": [
    "checkable",
    "checked",
@@ -553,6 +601,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -565,6 +614,7 @@
   "depth": 17,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -576,6 +626,7 @@
   "depth": 15,
   "role": "menu item",
   "name": "Sort by date",
+  "description": "",
   "states": [
    "checkable",
    "focusable",
@@ -589,6 +640,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -601,6 +653,7 @@
   "depth": 17,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -612,6 +665,7 @@
   "depth": 13,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -624,6 +678,7 @@
   "depth": 14,
   "role": "separator",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -636,6 +691,7 @@
   "depth": 14,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -648,6 +704,7 @@
   "depth": 15,
   "role": "menu item",
   "name": "Not available",
+  "description": "",
   "states": [
    "focusable",
    "showing",
@@ -659,6 +716,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -671,6 +729,7 @@
   "depth": 15,
   "role": "menu item",
   "name": "More",
+  "description": "",
   "states": [
    "expandable",
    "focusable",
@@ -685,6 +744,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -697,6 +757,7 @@
   "depth": 16,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -708,6 +769,7 @@
   "depth": 10,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -719,6 +781,7 @@
   "depth": 2,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -730,6 +793,7 @@
   "depth": 3,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -741,6 +805,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -752,6 +817,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -764,6 +830,7 @@
   "depth": 5,
   "role": "label",
   "name": "Gallery",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -775,6 +842,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -787,6 +855,7 @@
   "depth": 6,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -798,6 +867,7 @@
   "depth": 7,
   "role": "button",
   "name": "Minimize",
+  "description": "Minimize the window",
   "states": [
    "focusable",
    "sensitive",
@@ -810,6 +880,7 @@
   "depth": 7,
   "role": "button",
   "name": "Close",
+  "description": "Close the window",
   "states": [
    "focusable",
    "sensitive",
