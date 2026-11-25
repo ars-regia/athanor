@@ -8156,10 +8156,12 @@ DECISION_MODAL = r"\b(?:may|might|can|could|should|would|will)"
 DECISION_NEGATED = re.compile(
     rf"(?:\bnever|\bnot|\bcannot|n['’]t|\bnor|\bneither|\bno longer|{DECISION_MODAL})\s+(?:\w+\s+)?$", re.I)
 DECISION_NEGATION = re.compile(rf"\b(?:never|not|cannot|nor|neither|no longer)\b|n['’]t|{DECISION_MODAL}\b", re.I)
-# The hypothesis opens the clause of the amender ("If ADR-X amends"), not a clause before it
-# ("ADR-X decides whether the greeter moves and amends ADR-Y" is a claim).
+# The hypothesis word stands right before the amender and its verb: "If ADR-X amends", "If ADR-X
+# later amends", "if ADR-Y is ever amended by". Anything between them other than an auxiliary
+# or an adverb makes the sentence a claim, so a hypothesis earlier in it hides nothing.
 DECISION_HYPOTHESIS = re.compile(
-    r"\b(?:if|unless|whether|suppose|supposing)\s+[\[`*(]*ADR[- ]\d{4}(?:(?!\b(?:and|but)\b)[^,;])*$", re.I)
+    r"\b(?:if|unless|whether|suppose|supposing)\s+[\[`*(]*ADR[- ]\d{4}[\]`*)]*(?:\([^)]*\))?[\]`*)]*"
+    r"(?:\s+(?:is|are|was|were|be|been|being|ever|also|later|still|\w+ly))*\s+$", re.I)
 DECISION_NEW_SUBJECT = re.compile(rf";|\s(?:but|while|whereas)\s|,\s+and\s+(?={DECISION_MARK}ADR[- ]\d{{4}})", re.I)
 DECISION_GOVERNED = re.compile(r"\b(?:of|by|per|under|with|in|from|to|as|than)\s+[\[`*(]*$", re.I)
 # "which amends", "which now amends", "which, in turn, amends": up to three words, no ADR.
@@ -8205,7 +8207,7 @@ def decision_negated(before):
     """True when the verb that follows BEFORE is negated, modal or hypothetical: "never amends",
     "may amend", "If ADR-X amends", and "or amend" after a negation."""
     clause = DECISION_NEW_SUBJECT.split(before)[-1]
-    if DECISION_NEGATED.search(before) or DECISION_HYPOTHESIS.search(clause):
+    if DECISION_NEGATED.search(before) or DECISION_HYPOTHESIS.search(before):
         return True
     return re.search(r"\bor\s+(?:\w+ly\s+)?$", clause, re.I) is not None and DECISION_NEGATION.search(clause) is not None
 

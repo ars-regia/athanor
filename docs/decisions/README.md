@@ -87,14 +87,16 @@ does not restate it.
   spelled with a space; X is the subject of the clause: for "which amends" the nearest ADR
   before the pronoun, and when the clause names none or two joined by "and", the status of
   ADR-Y only has to read `amended by`. It does not read a negation ("never amends", "does not
-  amend", "is not amended by", "or amend" after a negation), a modal form ("may", "would") or
-  a clause that a hypothesis opens ("If ADR-X amends", "whether ADR-X amends"), a second target after one `amends`, "amended" without `by ADR-X` (a date, or a
-  specification item as in "VL8 as amended by ADR-0077"), an id that is not `ADR-NNNN` (A2-1,
+  amend", "is not amended by", "or amend" after a negation), a modal form ("may", "would"), a
+  hypothesis word right before the amender and its verb ("If ADR-X amends", "whether ADR-X
+  later amends", "if ADR-Y is ever amended by"), a second target after one `amends`, "amended"
+  without `by ADR-X` (a date, or a specification item as in "VL8 as amended by ADR-0077"), an id that is not `ADR-NNNN` (A2-1,
   W1-OLD) or that continues (ADR-00011, ADR-0001-x), "amends the text, the revision or the
   decision of ADR-Y", "which ADR-X amends", "amended by" more than 60 characters after the
-  target, `amends "ADR-Y"` in quotes, or `_ADR-Y_`. A relative clause reads "which" or "that"
-  with at most three words before the verb; any other shape that names a superseded record
-  first fails, and the sentence is reworded. Without a base, and on the first pull request,
+  target, `amends "ADR-Y"` or `amended by "ADR-X"` in quotes, or `_ADR-Y_`. A relative clause
+  reads "which" or "that" with at most three words before the verb. Any other shape is read as
+  a claim with the first ungoverned ADR as its subject, so a conditional or a relative clause
+  that the check misreads fails and the sentence is reworded; it never passes unread. Without a base, and on the first pull request,
   when the base lacks the list file, the ratchet against the base is skipped with a note.
 
 ## Approval
