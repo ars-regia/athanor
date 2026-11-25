@@ -7964,6 +7964,110 @@ def check_spec_deps():
     return r
 
 
+REFUSED_NAMES = "forge/config/refused-names.txt"
+REFUSED_NAMES_ALLOW = "forge/config/refused-names-allow.txt"
+# The sections of a specification that bind: its decisions and its acceptance criteria, under
+# the headings of ADR-0076 point 7 as the approved documents spell them ("Decisions",
+# "Interfaces and decisions", "Acceptance", "Acceptance criteria"). Context, rationale, open
+# doubts, "Decisions taken", amendments and revisions are history: they name what the document
+# replaces.
+REFUSED_NORMATIVE = re.compile(r"(?:\d+\. )?(?:Decisions|Interfaces and decisions|Acceptance\b.*)")
+REFUSED_ALLOW_ENTRY = re.compile(r"(\S+)\s+(\S+)\s+(#\d+)\s+(\d{4}-\d{2}-\d{2})")
+
+
+def refused_names_pattern(text):
+    """The compiled expression of the names REFUSED_NAMES lists, as one alternation."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    if not lines:
+        raise ValueError("no refused name")
+    return re.compile(r"(?<![\w-])(?:" + "|".join(lines) + r")(?!\w)", re.I)
+
+
+def parse_refused_allow(text):
+    """[(document, name, "#issue expiry")] from the text of REFUSED_NAMES_ALLOW, one
+    `DOCUMENT NAME #ISSUE YYYY-MM-DD` per line; raises ValueError on a malformed line, a date
+    that is none and a pair listed twice."""
+    entries, seen = [], set()
+    for number, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = REFUSED_ALLOW_ENTRY.fullmatch(line)
+        if not m:
+            raise ValueError(f"line {number}: expected `DOCUMENT NAME #ISSUE YYYY-MM-DD`: {line}")
+        doc, name, issue, expires = m.groups()
+        try:
+            datetime.date.fromisoformat(expires)
+        except ValueError:
+            raise ValueError(f"line {number}: {expires} is not a date") from None
+        if (doc, name) in seen:
+            raise ValueError(f"line {number}: {doc} {name} is listed twice")
+        seen.add((doc, name))
+        entries.append((doc, name, f"{issue} {expires}"))
+    return entries
+
+
+def refused_in_spec(text, pattern):
+    """The refused names (lower case) that the approved specification TEXT holds in a normative
+    section; empty for a document whose Status line does not say approved."""
+    status = re.search(r"^Status:(.*)$", text, re.M)
+    if not status or "approved" not in status.group(1).lower():
+        return set()
+    found, normative = set(), False
+    for line in text.splitlines():
+        heading = re.match(r"## (.*)", line)
+        if heading:
+            normative = REFUSED_NORMATIVE.fullmatch(heading.group(1).strip()) is not None
+        elif normative:
+            found.update(m.group(0).lower() for m in pattern.finditer(line))
+    return found
+
+
+def refused_names_problems(root=None, base=None, today=None):
+    """#1460: no approved specification under docs/architecture names a refused name in a
+    normative section unless REFUSED_NAMES_ALLOW lists the pair with an issue and an expiry
+    that has not passed, every entry still applies, and against BASE the list adds no entry."""
+    root = Path(root or ROOT)
+    today = today or datetime.date.today()
+    try:
+        pattern = refused_names_pattern(read(root / REFUSED_NAMES))
+    except (OSError, ValueError) as err:
+        return [f"{REFUSED_NAMES}: {err}"]
+    try:
+        entries = parse_refused_allow(read(root / REFUSED_NAMES_ALLOW))
+    except (OSError, ValueError) as err:
+        return [f"{REFUSED_NAMES_ALLOW}: {err}"]
+    hits = {(doc.name, name) for doc in sorted((root / "docs/architecture").glob("*.md"))
+            for name in refused_in_spec(read(doc), pattern)}
+    listed = {(doc, name) for doc, name, _ in entries}
+    problems = [f"docs/architecture/{doc} names `{name}` in a normative section, which ADR-0141 refuses: "
+                f"say what Athanor's own stack does, or move the sentence to a historical section ({REFUSED_NAMES})"
+                for doc, name in sorted(hits - listed)]
+    problems += [f"{REFUSED_NAMES_ALLOW}: {doc} no longer names `{name}` in a normative section; remove its entry"
+                 for doc, name in sorted(listed - hits)]
+    problems += [f"{REFUSED_NAMES_ALLOW}: {doc} {name} expired on {rest.split()[1]} ({rest.split()[0]})"
+                 for doc, name, rest in entries if datetime.date.fromisoformat(rest.split()[1]) < today]
+    if base is not None:
+        try:
+            before = own_base_entries(root, base, parse_refused_allow, REFUSED_NAMES_ALLOW)
+        except ValueError as err:
+            return problems + [f"{REFUSED_NAMES_ALLOW} at {base}: {err}"]
+        if before is not None:
+            problems += [f"{REFUSED_NAMES_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks"
+                         for doc, name, _ in entries if (doc, name) not in before]
+    return problems
+
+
+@check("refused-names", "No approved specification names a component ADR-0141 refuses in a normative section, unless refused-names-allow.txt lists it with an issue and an expiry, and the list only shrinks (#1460)")
+def check_refused_names():
+    r = Result()
+    for problem in refused_names_problems(base=BASE_REF):
+        r.fail(problem)
+    if BASE_REF is None:
+        r.note(f"no base revision (--known-red-base REF): entries added to {REFUSED_NAMES_ALLOW} were not checked")
+    return r
+
+
 def load_toml(name, text):
     """The parsed TOML `text`, or a ValueError that names the file `name`."""
     try:

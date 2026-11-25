@@ -1,0 +1,14 @@
+# The names ADR-0141 refuses to Athanor's own stack (scripts/verify.py refused-names, #1460), one
+# regular expression per line, read case-insensitively: a match is a name only when no letter,
+# digit, `_` or `-` precedes it. Decision 3 refuses every COSMIC package, cosmic-comp included, and
+# decision 7 the GTK layer-shell libraries, `xdg-user-dirs-gtk`, GTK4, libadwaita and libcosmic.
+# A `cosmic-NAME` is reported by its first word only (`cosmic-settings-daemon` reads
+# `cosmic-settings`).
+cosmic-[a-z][a-z0-9]*(?![a-z0-9])
+libcosmic
+pop-launcher
+gtk4-layer-shell
+gtk-layer-shell
+xdg-user-dirs-gtk
+gtk4
+libadwaita
