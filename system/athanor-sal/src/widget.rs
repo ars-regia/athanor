@@ -653,6 +653,15 @@ impl WindowButton {
             Self::Close => "Close",
         }
     }
+
+    /// The description assistive technologies read after the name: GTK 4.24's for the same
+    /// buttons, in English whatever the language, as the name.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Minimize => "Minimize the window",
+            Self::Close => "Close the window",
+        }
+    }
 }
 
 /// One node of the tree: what it is, where it sits and where it was laid out.
@@ -1472,10 +1481,15 @@ impl Ui {
         }
         // A dialog is not minimized on its own, as GTK's title bar hides the button of one.
         if !self.modal {
-            self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+            self.add_window_button(bar, WindowButton::Minimize);
         }
-        self.add(bar, Kind::WindowButton(WindowButton::Close));
+        self.add_window_button(bar, WindowButton::Close);
         self.title_bar = Some(bar);
+    }
+
+    fn add_window_button(&mut self, bar: WidgetId, button: WindowButton) {
+        let id = self.add(bar, Kind::WindowButton(button));
+        self.set_description(id, Some(button.description()));
     }
 
     /// Whether `id` names a widget of this `Ui` as it is now: not one [`Ui::remove_children`]
