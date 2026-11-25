@@ -54,6 +54,27 @@ write a new record that names the old one in its Context, then change only the `
 line of the old record to `superseded by <new id>` or `amended by <new id>`. A record
 that amends only part of another says which part in its Consequences.
 
+## Who owns which decision
+
+A decision lives in one document, the one that owns its kind. Every other document cites it and
+does not restate it.
+
+| Kind of decision | Owner |
+| --- | --- |
+| A direction: what Athanor is, what it refuses, how it is built, shipped, secured or run | The decision record (ADR) |
+| A contract: the interfaces, behaviour, limits and tests of a component | The specification, `docs/architecture/doc_<area>.md` |
+| What is in which release | `docs/operations/release-1.0.md`, and only that document |
+
+- **Release placement.** `docs/operations/release-1.0.md` is the only owner of release
+  placement. A record or a specification that needs a placement cites that document and does not
+  state one; a record that moves something between releases is a decision of direction, and
+  `release-1.0.md` takes its result in the same pull request.
+- **Amendments.** A record is never amended inside itself: an `## Amendment` heading in a
+  decision record is refused. An amendment is a new record that names the one it amends, and the
+  old record's `status` then reads `amended by <new id>` ("Superseding and amending", above). A document outside
+  `docs/decisions/` that says "ADR-X amends ADR-Y" is true only while the status of ADR-Y names
+  ADR-X. `scripts/verify.py decisions` checks both.
+
 ## Approval
 
 The maintainer approves every record. Once CODEOWNERS defines areas, the owner of the

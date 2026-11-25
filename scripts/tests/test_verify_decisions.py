@@ -114,6 +114,64 @@ class DecisionProblemsTest(unittest.TestCase):
                          index=row("A2-1", "0001", "0001-a.md").replace("[T]", "[Other]"))
         self.assertTrue(any("index title of A2-1" in p for p in verify.decision_problems(root)))
 
+    def test_an_amendment_heading_in_a_record_fails(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        f = root / "docs/decisions/0001-a.md"
+        f.write_text(f.read_text() + "\n## Amendment\n\nx\n")
+        problems = verify.decision_amendment_problems(root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("0001-a.md: has an '## Amendment' heading", problems[0])
+
+    def test_a_kept_heading_passes_and_a_kept_name_without_one_fails(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        f = root / "docs/decisions/0001-a.md"
+        kept = verify.DECISION_AMENDMENT_HEADING_KEPT
+        kept.add("0001-a.md")
+        self.addCleanup(kept.discard, "0001-a.md")
+        problems = verify.decision_amendment_problems(root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no longer has an '## Amendment' heading", problems[0])
+        f.write_text(f.read_text() + "\n## Amendment\n\nx\n")
+        self.assertEqual(verify.decision_amendment_problems(root), [])
+
+    def test_amendments_to_specifications_is_not_an_amendment(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        f = root / "docs/decisions/0001-a.md"
+        f.write_text(f.read_text() + "\n## Amendments to approved specifications\n\nx\n")
+        self.assertEqual(verify.decision_amendment_problems(root), [])
+
+    def claim(self, text, status="amended by ADR-0002"):
+        root = self.repo(
+            {"0001-a.md": ("ADR-0001", status), "0002-b.md": ("ADR-0002", "accepted")}
+        )
+        doc = root / "docs/architecture/doc_x.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text(text)
+        return verify.decision_amendment_problems(root)
+
+    def test_a_claim_the_status_confirms_passes(self):
+        self.assertEqual(self.claim("ADR-0002 decision 1 amends ADR-0001 decision 3.\n"), [])
+        self.assertEqual(self.claim("[ADR-0002](../decisions/0002-b.md)\namends\n[ADR-0001](x).\n"), [])
+        self.assertEqual(self.claim("It is moved, which amends ADR-0001.\n"), [])
+
+    def test_a_claim_the_status_does_not_confirm_fails(self):
+        problems = self.claim("ADR-0002 amends ADR-0001.\n", status="accepted")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_x.md: says ADR-0002 amends ADR-0001", problems[0])
+        problems = self.claim("ADR-0002 amends ADR-0001.\n", status="amended by ADR-0009")
+        self.assertEqual(len(problems), 1, problems)
+
+    def test_a_claim_without_an_amending_record_needs_an_amended_status(self):
+        problems = self.claim("It is moved, which amends ADR-0001.\n", status="accepted")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("says ADR-0001 is amended", problems[0])
+
+    def test_a_claim_in_a_fenced_block_is_not_read(self):
+        self.assertEqual(self.claim("```\nADR-0002 amends ADR-0001.\n```\n", status="accepted"), [])
+
+    def test_the_repository_amendments_pass(self):
+        self.assertEqual(verify.decision_amendment_problems(), [])
+
     def test_the_repository_records_pass(self):
         self.assertEqual(verify.decision_problems(), [])
 

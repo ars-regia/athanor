@@ -5240,7 +5240,7 @@ def decision_problems(root=None):
 @check("decisions", "decision records have valid front matter, unique ids, a matching README index and existing targets")
 def check_decisions():
     r = Result()
-    for problem in decision_problems():
+    for problem in decision_problems() + decision_amendment_problems():
         r.fail(problem)
     return r
 
@@ -7962,6 +7962,68 @@ def check_spec_deps():
     if BASE_REF is None:
         r.note(f"no base revision (--known-red-base REF): entries added to {SPEC_DEPS_ALLOW} were not checked")
     return r
+
+
+# An `## Amendment` heading, singular: "## Amendments to approved specifications" lists the
+# specification text a record changes, which is its decision and not an amendment of it.
+DECISION_AMENDMENT_HEADING = re.compile(r"^## Amendment\b", re.M)
+# The records that held an `## Amendment` heading when the check was added. An approved record's
+# text is not edited (docs/decisions/README.md, "Superseding and amending"), and known-red.txt
+# takes no entry its base does not list, so these three are named here. A record that no longer
+# has the heading fails until it leaves the set; the set only shrinks, and no record joins it (#1461).
+DECISION_AMENDMENT_HEADING_KEPT = {
+    "0121-own-compositor-and-toolkit.md",
+    "0122-own-compositor-optional-session-and-desktop-first.md",
+    "0126-toolkit-ready-to-leave-the-repository.md",
+}
+DECISION_AMENDS = re.compile(r"\bamends\s+\[?(ADR-\d{4})", re.I)
+DECISION_REF = re.compile(r"ADR-\d{4}")
+# Generated trees that no check opens (AGENTS.md, "Names and generated files").
+DECISION_PROSE_SKIP = {"graph-vaults", "graph-pages"}
+
+
+def decision_amendment_problems(root=None):
+    """#1461, the two ways a record is amended (docs/decisions/README.md, "Who owns which
+    decision"): no record holds an `## Amendment` heading, and every "ADR-X amends ADR-Y" that a
+    document outside docs/decisions states is confirmed by the status of ADR-Y. The amending
+    record is the ADR named before `amends` in the sentence; a sentence that names none ("which
+    amends ADR-Y") only needs Y to be `amended by` some record. The first ADR after `amends` is
+    read, not a list."""
+    root = Path(root or ROOT)
+    out, statuses = [], {}
+    for f in sorted((root / "docs" / "decisions").glob("[0-9][0-9][0-9][0-9]-*.md")):
+        text = read(f)
+        fm = decision_front_matter(text) or {}
+        statuses[fm.get("id", "")] = fm.get("status", "")
+        has_heading = DECISION_AMENDMENT_HEADING.search(text) is not None
+        if has_heading and f.name not in DECISION_AMENDMENT_HEADING_KEPT:
+            out.append(f"{f.name}: has an '## Amendment' heading: an amendment is a new record that names this one "
+                       "(docs/decisions/README.md, Who owns which decision)")
+        elif not has_heading and f.name in DECISION_AMENDMENT_HEADING_KEPT:
+            out.append(f"{f.name}: no longer has an '## Amendment' heading: remove it from DECISION_AMENDMENT_HEADING_KEPT")
+    docs = root / "docs"
+    for top, dirs, names in os.walk(docs):
+        dirs[:] = sorted(d for d in dirs if d not in DECISION_PROSE_SKIP)
+        if Path(top) == docs / "decisions":
+            dirs[:] = []
+            continue
+        for fname in sorted(n for n in names if n.endswith(".md")):
+            path = Path(top) / fname
+            rel = path.relative_to(root).as_posix()
+            for paragraph in "\n".join(prose_lines(read(path))).split("\n\n"):
+                for sentence in spec_sentences(" ".join(paragraph.split())):
+                    for m in DECISION_AMENDS.finditer(sentence):
+                        target = m.group(1)
+                        status = statuses.get(target)
+                        if status is None:
+                            continue
+                        amenders = [a for a in DECISION_REF.findall(sentence[:m.start()]) if a != target]
+                        if amenders and amenders[-1] not in status:
+                            out.append(f"{rel}: says {amenders[-1]} amends {target}, whose status "
+                                       f"'{status}' does not name {amenders[-1]}")
+                        elif not amenders and not status.startswith("amended by"):
+                            out.append(f"{rel}: says {target} is amended, but its status is '{status}'")
+    return out
 
 
 def load_toml(name, text):
