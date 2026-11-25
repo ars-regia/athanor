@@ -150,9 +150,12 @@ fn a_switch_under_reduced_motion_keeps_the_timer_of_the_slide() {
     let mut run = Running::start(None);
     let two = two_workspaces(&mut run);
     let output = output_at(&run, 0);
-    assert!(under_way(&output), "the first switch's slide has its timer");
-    run.state.bell.reduced_motion = true;
+    // A slide of its own: the fixture's pumps run the loop, whose timer may have ended the
+    // first one.
     assert!(run.state.activate_workspace(two.list[0]));
+    assert!(under_way(&output), "the slide has its timer");
+    run.state.bell.reduced_motion = true;
+    assert!(run.state.activate_workspace(two.list[1]));
     assert!(under_way(&output), "the slot keeps the timer");
     run.stop();
 }
