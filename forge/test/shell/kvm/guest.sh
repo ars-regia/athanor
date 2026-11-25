@@ -13,7 +13,7 @@
 # in the rig's output directory (rig.sh build-bar and build-dock). ATHANOR_RIG_OUT and
 # ATHANOR_REGISTRY mean what they mean to rig.sh; GUEST_MEMORY and GUEST_CPUS size the guest.
 #
-# Two boots. The first provisions: podman and git, and the newest kernel of the runner guest (Fedora Cloud 43, task 10 moves it), because
+# Two boots. The first provisions: podman and git, and the newest kernel of the runner guest (Fedora Cloud 45), because
 # the pinned image's kernel predates configfs support in vkms (Linux 6.19); Fedora's kernel
 # ships vkms in kernel-modules-core, so the Azoth kernel is not needed for it. The second
 # boot runs run-in-guest.sh and powers off. The cases do not gate a push (SH13), so a kernel
@@ -132,8 +132,8 @@ runcmd:
     set -eu
     command -v podman git > /dev/null
     dnf -y upgrade --refresh 'kernel*'
-    # Fedora 45 runs kmscon on tty1, which takes the vkms card as DRM master the moment
-    # vkms.sh builds it, and cosmic-comp then commits no output (#1486). The console
+    # Fedora 45 runs kmscon on tty1. With it, cosmic-comp cannot become DRM master of the
+    # vkms card and enables no output; with it masked, the cases pass (#1486). The console
     # is the serial port; no instance of the KMS console runs.
     systemctl mask kmsconvt@.service
     systemctl enable layout-outputs.service
