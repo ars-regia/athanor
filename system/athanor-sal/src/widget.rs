@@ -1465,8 +1465,9 @@ impl Ui {
     }
 
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
-    /// the tree, as GTK's does. Its buttons come first in the Tab order too, where GTK's Tab
-    /// never reaches them, so the keyboard can minimize and close the window.
+    /// the tree and its buttons first in the Tab order, where GTK's title bar is last in the
+    /// window and its Tab never reaches the buttons. The order is Sal's own: it lets the
+    /// keyboard reach Minimize and Close at once.
     pub fn add_title_bar(&mut self) {
         if self.title_bar.is_some() {
             return;
