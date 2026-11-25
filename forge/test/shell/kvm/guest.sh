@@ -132,6 +132,10 @@ runcmd:
     set -eu
     command -v podman git > /dev/null
     dnf -y upgrade --refresh 'kernel*'
+    # Fedora 45 runs kmscon on tty1, which takes the vkms card as DRM master the moment
+    # vkms.sh builds it, and cosmic-comp then commits no output (#1486). The console
+    # is the serial port; no instance of the KMS console runs.
+    systemctl mask kmsconvt@.service
     systemctl enable layout-outputs.service
     systemctl is-enabled --quiet layout-outputs.service
     echo ATHANOR-LAYOUT-OUTPUTS-PROVISIONED > /dev/ttyS0
