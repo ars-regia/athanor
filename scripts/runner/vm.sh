@@ -220,6 +220,9 @@ rm -f "$STATE/cache.raw" "$STATE/scratch.raw"
 truncate -s "$CACHE_DISK_SIZE" "$STATE/cache.raw"
 truncate -s "$SCRATCH_DISK_SIZE" "$STATE/scratch.raw"
 
+# `-cpu host` hands the host CPU model and its feature flags to the guest, so a guest has
+# x86-64-v3 exactly when the host does; a named model such as qemu64 would hide AVX2 and make
+# the workspace binaries die with SIGILL (ADR-0143, #1508). build-image.sh boots with it too.
 echo "runner $name ($id): booting, serial console in $LOGS/console.log"
 qemu-system-x86_64 \
   -machine q35,accel=kvm -cpu host -smp "$VM_CPUS" -m "$VM_MEMORY" \

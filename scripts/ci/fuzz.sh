@@ -22,6 +22,7 @@
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+bash "$root/scripts/ci/check-x86-64-v3.sh" # fuzz targets and mutants run at x86-64-v3 (#1508)
 out=${FUZZ_OUT:-$root/.scratch/fuzz}
 seconds=${FUZZ_SECONDS:-240}
 budget=${FUZZ_BUDGET_MINUTES:-150}

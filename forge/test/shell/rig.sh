@@ -773,6 +773,15 @@ require_for() { # require_for <surface>
 }
 
 case "${1:-}" in
+build-image | build-image-ref | build-inputs | publish-image | publish-build-image) ;;
+*)
+    # Every other command builds or runs the workspace, which targets x86-64-v3 (ADR-0143,
+    # #1508): a host below the level fails here with its CPU model, not later with SIGILL.
+    bash "$root/scripts/ci/check-x86-64-v3.sh"
+    ;;
+esac
+
+case "${1:-}" in
 build-image | build-image-ref | build-inputs) ;;
 build-* | no-gtk | cargo) cargo_cache_setup ;;
 esac
