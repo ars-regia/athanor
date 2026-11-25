@@ -73,11 +73,21 @@ fn clock() -> Instant {
 }
 
 /// Whether the bar, whose strip the slide follows, is drawn right to left, read once for the
-/// process; the tests set it (`right_to_left`).
+/// process; the tests set it (`right_to_left`). A catalog of the bar that cannot be read is
+/// logged, as the bar logs it, and the slide runs left to right, as the bar's strip does then.
 #[cfg(not(test))]
 fn rtl() -> bool {
     static RTL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *RTL.get_or_init(|| athanor_i18n::is_rtl("athanor-bar"))
+    *RTL.get_or_init(|| {
+        athanor_i18n::is_rtl("athanor-bar").unwrap_or_else(|(path, error)| {
+            tracing::error!(
+                path = %path.display(),
+                %error,
+                "the bar's translations are unavailable: the workspace slide runs left to right"
+            );
+            false
+        })
+    })
 }
 
 fn sliding(output: &Output) -> &Cell<Option<Slide>> {
