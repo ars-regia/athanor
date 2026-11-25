@@ -59,7 +59,7 @@ fn ease(t: f64) -> f64 {
 
 /// The time a slide reads; the tests set it (`advance`).
 #[cfg(not(test))]
-fn now() -> Instant {
+fn clock() -> Instant {
     Instant::now()
 }
 
@@ -99,7 +99,7 @@ impl State {
             return;
         };
         let slot = sliding(&output);
-        let now = now();
+        let now = clock();
         // A slot still set has its timer.
         let ticking = slot.get().is_some();
         let before = slot.take().filter(|slide| slide.running(now));
@@ -129,7 +129,7 @@ impl State {
                 .insert_source(Timer::from_duration(TICK), move |_, _, state| {
                     let slot = sliding(&ticked);
                     state.request_redraw();
-                    if slot.get().is_some_and(|slide| slide.running(now())) {
+                    if slot.get().is_some_and(|slide| slide.running(clock())) {
                         TimeoutAction::ToDuration(TICK)
                     } else {
                         slot.set(None);
@@ -147,7 +147,7 @@ impl State {
         if self.bell.reduced_motion {
             return Vec::new();
         }
-        let now = now();
+        let now = clock();
         self.space
             .outputs()
             .filter_map(|output| {
@@ -197,12 +197,13 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn now() -> Instant {
+fn clock() -> Instant {
     NOW.with(Cell::get).unwrap_or_else(Instant::now)
 }
 
 /// Stops the clock the slides read and takes it `by` further on.
 #[cfg(test)]
 pub(crate) fn advance(by: Duration) {
-    NOW.with(|clock| clock.set(Some(now() + by)));
+    let at = clock() + by;
+    NOW.with(|time| time.set(Some(at)));
 }
