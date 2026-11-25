@@ -318,9 +318,10 @@ impl Catalog {
 }
 
 /// Whether the program of `domain` is drawn right to left: by the language of the catalog
-/// [`Catalog::load`] gives it, the override included. Every program, the compositor's slide
-/// among them, settles its direction here, so two that read one catalog never disagree; a
-/// catalog that cannot be read gives English, left to right.
+/// [`Catalog::load`] gives it, the override included; a catalog that cannot be read gives
+/// English, left to right. The bar, the dock and the control center settle their direction
+/// here, and Sulphur's workspace slide by the bar's domain, so the slide and the bar's strip
+/// never disagree.
 pub fn is_rtl(domain: &str) -> bool {
     Catalog::load(domain).is_ok_and(|catalog| catalog.is_rtl())
 }
