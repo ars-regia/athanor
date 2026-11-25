@@ -131,11 +131,13 @@ class Release:
         return self.jobs
 
     def promoted(self, promotion_run):
+        # filter=all lists the jobs of every attempt: a re-run gives the promote job a new id, while
+        # the deployment status keeps the log_url of the attempt that moved :stable (#1475).
         found = run(
             "gh",
             "api",
             "--paginate",
-            f"repos/{self.repo}/actions/runs/{promotion_run}/jobs",
+            f"repos/{self.repo}/actions/runs/{promotion_run}/jobs?filter=all",
             "--jq",
             f'.jobs[] | select(.name == "{PROMOTE_JOB}" and .conclusion == "success") | .id',
         ).split()

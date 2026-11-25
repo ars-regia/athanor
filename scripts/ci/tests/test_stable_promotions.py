@@ -100,9 +100,9 @@ class StablePromotions(unittest.TestCase):
         self.fx["list"][EVID].append(tag)
         self.fx["bundles"][f"{EVID}:{tag}"] = str(path)
         job = 1000 + promotion_run
-        self.fx["api"][f"repos/{REPO}/actions/runs/{promotion_run}/jobs"] = {
-            "jobs": [{"id": job, "name": JOB, "conclusion": "success"}]
-        }
+        jobs = {"jobs": [{"id": job, "name": JOB, "conclusion": "success"}]}
+        for suffix in ("", "?filter=all"):
+            self.fx["api"][f"repos/{REPO}/actions/runs/{promotion_run}/jobs{suffix}"] = jobs
         if approved:
             self.fx["api"][DEPLOYMENTS].append({"id": job})
             self.fx["api"][f"repos/{REPO}/deployments/{job}/statuses"] = [
@@ -112,6 +112,16 @@ class StablePromotions(unittest.TestCase):
                     "log_url": f"https://github.com/{REPO}/actions/runs/{promotion_run}/job/{job}",
                 },
             ]
+
+    def test_a_rerun_run_keeps_its_record(self):
+        """The promote job succeeded in attempt 1; the run was re-run, so the job of attempt 2 has a new id."""
+        self.promotion(1, 7, "sha256:aa")
+        base = f"repos/{REPO}/actions/runs/7/jobs"
+        attempt2 = {"id": 9999, "name": JOB, "conclusion": "success", "run_attempt": 2}
+        self.fx["api"][base + "?filter=all"]["jobs"].append(attempt2)
+        self.fx["api"][base] = {"jobs": [attempt2]}  # without filter=all, the latest attempt only
+        r = self.check()
+        self.assertNotIn("not a record", r.stderr)
 
     def check(self):
         (self.dir / "fx.json").write_text(json.dumps(self.fx))
