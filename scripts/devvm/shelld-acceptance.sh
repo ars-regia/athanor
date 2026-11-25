@@ -22,7 +22,7 @@ source "$HERE/devvm.env"
 BIN=$ROOT/.scratch/shell-rig/bin
 DATA=$ROOT/forge/specs/athanor-shelld/athanor-shelld-1.0.0/data
 BUS_UNIT=athanor-shelld-acceptance-bus
-STAGES=(deploy unit sender crash-loop cleanup)
+STAGES=(deploy unit sender watchdog crash-loop cleanup)
 STAGE=
 CLEANED=0
 ACTIVE_BEFORE=()
@@ -91,6 +91,7 @@ new_main_pid() { # new_main_pid OLD-PID: active, with a different, real MainPID
     pid=$(unit show -p MainPID --value)
     [[ $pid != "$1" && $pid != 0 ]]
 }
+result_is() { [[ $(unit show -p Result --value) == "$1" ]]; }
 gave_up() { [[ $(unit show -p ActiveState,Result --value | paste -sd,) == inactive,success ]]; }
 
 # loaded UNIT: systemd knows this unit's file (LoadState=loaded) — false before deploy has
@@ -165,6 +166,51 @@ stage_sender() {
         fail "SetDoNotDisturb false"
     wait_until 5 in_session '! test -f ~/.local/state/athanor/shelld/do-not-disturb' ||
         fail "do-not-disturb still present after SetDoNotDisturb false"
+}
+
+stage_watchdog() {
+    # doc_session.md SN6: a daemon stopped with SIGSTOP sends no WATCHDOG=1, the manager ends the
+    # unit once WatchdogSec= (30 s) has passed, and Restart=on-failure starts it again. The
+    # next run overwrites Result within RestartSec= (100 ms), so a drop-in stretches the
+    # restart delay to 3 s: Result then reads "watchdog" while the unit is in auto-restart.
+    # The path is relative to the guest user's home, where SSH starts.
+    local pid round stamps dropin='.config/systemd/user/athanor-shelld.service.d/watchdog.conf'
+    if loaded athanor-shelld; then
+        unit stop || fail "stop athanor-shelld before watchdog"
+    fi
+    unit reset-failed || fail "reset-failed athanor-shelld before watchdog"
+    # shellcheck disable=SC2016 # $XDG_RUNTIME_DIR is expanded by the guest's shell
+    in_session "rm -f \$XDG_RUNTIME_DIR/athanor-shelld/failures" ||
+        fail "cannot clear the crash-loop record before watchdog"
+    printf '%s\n' '[Service]' 'RestartSec=3s' |
+        in_session "mkdir -p .config/systemd/user/athanor-shelld.service.d && cat > $dropin &&
+        systemctl --user daemon-reload"
+    unit start || fail "systemctl --user start athanor-shelld failed"
+    [[ $(unit show -p WatchdogUSec --value) == 30s ]] ||
+        fail "WatchdogUSec is '$(unit show -p WatchdogUSec --value)', not 30s"
+    pid=$(unit show -p MainPID --value)
+    unit kill --kill-whom=main -s SIGSTOP || fail "SIGSTOP to athanor-shelld $pid"
+    # 30 s of silence, plus the time systemd takes to end the stopped process.
+    wait_until 90 result_is watchdog ||
+        fail "Result is '$(unit show -p Result --value)' 90 s after SIGSTOP, not watchdog"
+    in_session "rm -f $dropin && systemctl --user daemon-reload" || fail "remove the watchdog drop-in"
+    wait_until 30 new_main_pid "$pid" || fail "no new active MainPID after the watchdog ended $pid"
+    # SH8: the watchdog end is a failed run (SERVICE_RESULT=watchdog), so the record holds one
+    # failure stamp beside the "running" line of the new run.
+    # shellcheck disable=SC2016 # $XDG_RUNTIME_DIR is expanded by the guest's shell
+    stamps=$(in_session "grep -c '^[0-9][0-9]*\$' \$XDG_RUNTIME_DIR/athanor-shelld/failures") ||
+        fail "no failure stamp in the crash-loop record after the watchdog"
+    [[ $stamps == 1 ]] || fail "the crash-loop record holds $stamps failure stamps, not 1"
+    # It counts towards the give-up: three SIGKILLs restart the daemon (failures 2 to 4), the
+    # fourth is the fifth failure and the next start gives up.
+    for round in 1 2 3; do
+        pid=$(unit show -p MainPID --value)
+        unit kill --kill-whom=main -s SIGKILL
+        wait_until 90 new_main_pid "$pid" || fail "round $round after the watchdog: no new MainPID"
+    done
+    unit kill --kill-whom=main -s SIGKILL
+    wait_until 90 gave_up ||
+        fail "after the watchdog and four kills the unit ended $(unit show -p ActiveState,Result --value | paste -sd,)"
 }
 
 stage_crash-loop() {
@@ -263,6 +309,7 @@ stage_cleanup() {
         }
     fi
     in_session "rm -f ~/.config/systemd/user/athanor-shelld.service.d/acceptance.conf \
+    ~/.config/systemd/user/athanor-shelld.service.d/watchdog.conf \
     ~/.config/systemd/user/$BUS_UNIT.socket ~/.config/systemd/user/$BUS_UNIT.service" || {
         echo "cleanup: removing the drop-in and the private-bus unit files failed" >&2
         failed=1
