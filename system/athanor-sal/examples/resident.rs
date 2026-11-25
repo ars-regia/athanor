@@ -3,7 +3,10 @@
 //! outlives its last window until a `quit` line: the rig's check of SL1 (doc_settings.md SE5,
 //! section 7; `toolkit_window_check.py`). Prints `opened`, `drawn` and `closed` for each window.
 //! With `--default` it opens one window at start and keeps the driver's default, under which
-//! that window's Close ends the run.
+//! that window's Close ends the run. A `raise` line asks the compositor for an xdg-activation
+//! token on the last window opened and raises the first with it, and `raise <token>` raises the
+//! first with `<token>`, as `Show` raises a window already open with the token of its caller
+//! (SL2, SE4); each prints `raised` once it asked.
 
 use athanor_sal::driver::{self, Application, Role, Shell, SurfaceId};
 use athanor_sal::{Event, Kind, Theme, Ui, WindowButton};
@@ -24,6 +27,8 @@ struct Resident {
     /// The lines read from the standard input since the last turn.
     lines: Arc<Mutex<Vec<String>>>,
     default: bool,
+    /// The windows open, the first opened first.
+    windows: Vec<SurfaceId>,
 }
 
 impl Application for Resident {
@@ -48,11 +53,23 @@ impl Application for Resident {
         for line in lines {
             match line.trim() {
                 "show" => match shell.open_window(window(), APP_ID) {
-                    Ok(_) => println!("opened"),
+                    Ok(id) => {
+                        self.windows.push(id);
+                        println!("opened");
+                    }
                     Err(error) => shell.fail(error),
                 },
+                "raise" => {
+                    let last = self.windows.last().copied();
+                    if shell.request_activation_token(last, None).is_none() {
+                        shell.fail("the compositor offers no xdg_activation_v1".into());
+                    }
+                }
                 "quit" => shell.quit(),
-                other => shell.fail(format!("unknown command {other:?}").into()),
+                other => match other.strip_prefix("raise ") {
+                    Some(token) => self.raise(shell, token),
+                    None => shell.fail(format!("unknown command {other:?}").into()),
+                },
             }
         }
     }
@@ -64,7 +81,22 @@ impl Application for Resident {
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
         if event == Event::Window(WindowButton::Close) {
             shell.close(surface);
+            self.windows.retain(|&id| id != surface);
             println!("closed");
+        }
+    }
+
+    fn activation_token(&mut self, shell: &mut Shell, _request: u64, token: String) {
+        self.raise(shell, &token);
+    }
+}
+
+impl Resident {
+    /// Asks the compositor to raise the first window open with `token`.
+    fn raise(&self, shell: &mut Shell, token: &str) {
+        match self.windows.first() {
+            Some(&first) if shell.activate_window(first, token) => println!("raised"),
+            _ => shell.fail("no open window was raised with the token".into()),
         }
     }
 }
@@ -84,7 +116,12 @@ fn main() -> ExitCode {
                 ping.ping();
             }
         });
-        driver::run_with(Resident { lines, default }, source)
+        let resident = Resident {
+            lines,
+            default,
+            windows: Vec::new(),
+        };
+        driver::run_with(resident, source)
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,

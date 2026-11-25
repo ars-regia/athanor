@@ -3694,6 +3694,48 @@ impl TokenHandler for App {
     }
 }
 
+impl Shell {
+    /// Asks the compositor to raise the open surface `id` with `token`, an xdg-activation-v1
+    /// token another application asked for and gave this one, as
+    /// `org.freedesktop.Application.Activate` gives it in `platform_data`. The compositor
+    /// decides: a token it did not grant, or no longer honours, raises nothing, and nothing tells
+    /// the application. `false` without the global, without an open surface `id`, or for a
+    /// token the request cannot carry, one with a NUL or longer than [`MAX_TOKEN_LEN`] bytes:
+    /// nothing was asked, and the caller goes on without raising it.
+    pub fn activate_window(&mut self, id: SurfaceId, token: &str) -> bool {
+        let surface = by_id(&self.surfaces, id, |s| s.id).map(Surface::wl_surface);
+        activate(self.activation.as_ref(), surface, token)
+    }
+}
+
+/// The item of `items` whose surface, as `id_of` reads it, is `id`.
+fn by_id<T>(items: &[T], id: SurfaceId, id_of: impl Fn(&T) -> SurfaceId) -> Option<&T> {
+    items.iter().find(|item| id_of(item) == id)
+}
+
+/// The longest token, in bytes, that xdg_activation_v1.activate carries.
+// Header 8, length 4, token, NUL and padding to 4, surface 4: at most the 4096 bytes of a message.
+const MAX_TOKEN_LEN: usize = 4096 - 8 - 4 - 4 - 1;
+
+/// Asks `activation` to raise `surface` with `token`: whether there were both to ask with and
+/// a token the request can carry. The request sends the token as a C string, and its
+/// conversion panics on a NUL inside it; a token longer than [`MAX_TOKEN_LEN`] makes a message
+/// the compositor refuses, and it ends the connection. Neither is ever asked with.
+fn activate(
+    activation: Option<&ActivationState>,
+    surface: Option<&wl_surface::WlSurface>,
+    token: &str,
+) -> bool {
+    let (Some(activation), Some(surface)) = (activation, surface) else {
+        return false;
+    };
+    if token.contains('\0') || token.len() > MAX_TOKEN_LEN {
+        return false;
+    }
+    activation.activate::<App>(surface, token.to_owned());
+    true
+}
+
 /// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
 /// area and Space outside a field, which activate, Ctrl+C, Ctrl+X and Ctrl+V, which copy, cut
 /// and paste once per press, the Menu key and F10, which open a context menu, and Escape, which
@@ -4932,5 +4974,246 @@ mod tests {
         ui.add(Ui::ROOT, Kind::Button("Network".into()));
         ui.sized_by_compositor = true;
         assert_eq!(resettle(&mut ui, 1.5, (0.0, 0.0)), ((0.0, 0.0), None));
+    }
+
+    use smithay_client_toolkit::globals::ProvidesBoundGlobal;
+
+    /// A request a client sent: its object, its opcode and its arguments, as on the wire.
+    type Request = (u32, u16, Vec<u8>);
+
+    /// The word at `at` of a message's arguments.
+    fn word(args: &[u8], at: usize) -> Option<u32> {
+        let bytes = args.get(at..at.checked_add(4)?)?;
+        Some(u32::from_ne_bytes(bytes.try_into().ok()?))
+    }
+
+    /// `text` as a Wayland string argument: its length with the NUL, then its bytes, padded.
+    fn string(text: &str) -> Vec<u8> {
+        let mut out = (text.len() as u32 + 1).to_ne_bytes().to_vec();
+        out.extend_from_slice(text.as_bytes());
+        out.resize((out.len() + 1).next_multiple_of(4), 0);
+        out
+    }
+
+    /// A message to `object`, as the compositor sends one.
+    fn message(object: u32, opcode: u16, args: &[u8]) -> Vec<u8> {
+        let mut out = object.to_ne_bytes().to_vec();
+        let size = 8 + args.len() as u32;
+        out.extend_from_slice(&((size << 16) | u32::from(opcode)).to_ne_bytes());
+        out.extend_from_slice(args);
+        out
+    }
+
+    /// The token and the wl_surface of an xdg_activation_v1.activate request's arguments.
+    fn activated(args: &[u8]) -> Option<(String, u32)> {
+        let length = word(args, 0)? as usize;
+        let text = args.get(4..4 + length.checked_sub(1)?)?;
+        let surface = word(args, 4 + length.next_multiple_of(4))?;
+        Some((String::from_utf8(text.to_vec()).ok()?, surface))
+    }
+
+    /// A compositor on `server` that offers `globals`, each an interface and its version,
+    /// answers each wl_display.sync, and returns the requests it read once the client closed
+    /// the connection: closing it any earlier would fail a flush the client still makes.
+    fn compositor(
+        mut server: UnixStream,
+        globals: &'static [(&'static str, u32)],
+    ) -> std::thread::JoinHandle<std::io::Result<Vec<Request>>> {
+        std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            loop {
+                let mut header = [0; 8];
+                match server.read_exact(&mut header) {
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    read => read?,
+                }
+                let [o0, o1, o2, o3, w0, w1, w2, w3] = header;
+                let object = u32::from_ne_bytes([o0, o1, o2, o3]);
+                let size_and_opcode = u32::from_ne_bytes([w0, w1, w2, w3]);
+                let mut args = vec![0; ((size_and_opcode >> 16) as usize).saturating_sub(8)];
+                server.read_exact(&mut args)?;
+                let opcode = size_and_opcode as u16;
+                let new_id = word(&args, 0).unwrap_or(0);
+                match (object, opcode) {
+                    // wl_display.get_registry: the globals, named from 1.
+                    (1, 1) => {
+                        for (name, (interface, version)) in (1u32..).zip(globals) {
+                            let mut global = name.to_ne_bytes().to_vec();
+                            global.extend(string(interface));
+                            global.extend_from_slice(&version.to_ne_bytes());
+                            server.write_all(&message(new_id, 0, &global))?;
+                        }
+                    }
+                    // wl_display.sync: wl_callback.done, then wl_display.delete_id, in one
+                    // write: the client may close once it reads done, and a second write
+                    // would then find no reader.
+                    (1, 0) => {
+                        let mut done = message(new_id, 0, &0u32.to_ne_bytes());
+                        done.extend(message(1, 1, &new_id.to_ne_bytes()));
+                        server.write_all(&done)?;
+                    }
+                    _ => {}
+                }
+                requests.push((object, opcode, args));
+            }
+            Ok(requests)
+        })
+    }
+
+    /// What a client of [`compositor`] asked: whether its action asked to raise its wl_surface,
+    /// the requests the compositor read, and the ids of its xdg_activation_v1, when offered, of
+    /// its wl_compositor and of its wl_surface.
+    struct Raised {
+        asked: bool,
+        requests: Vec<Request>,
+        activation: Option<u32>,
+        compositor: u32,
+        surface: u32,
+    }
+
+    impl Raised {
+        /// The token and the surface of each xdg_activation_v1.activate request (opcode 2).
+        fn activations(&self) -> Vec<Option<(String, u32)>> {
+            self.requests
+                .iter()
+                .filter(|(object, opcode, _)| Some(*object) == self.activation && *opcode == 2)
+                .map(|(_, _, args)| activated(args))
+                .collect()
+        }
+    }
+
+    /// Binds what a compositor offering `globals` offers, as the driver does, makes a wl_surface,
+    /// runs `act`, and ends with a roundtrip, after which the compositor has read everything,
+    /// then closes the connection, which ends the compositor's read.
+    fn raise(
+        globals: &'static [(&'static str, u32)],
+        act: impl FnOnce(Option<&ActivationState>, &wl_surface::WlSurface) -> bool,
+    ) -> Result<Raised, Error> {
+        let (client, server) = UnixStream::pair()?;
+        let thread = compositor(server, globals);
+        let conn = Connection::from_socket(client)?;
+        let (globals, queue) = registry_queue_init::<App>(&conn)?;
+        let qh = queue.handle();
+        let compositor = CompositorState::bind(&globals, &qh)?;
+        let surface = compositor.create_surface(&qh);
+        let activation = ActivationState::bind(&globals, &qh).ok();
+        let asked = act(activation.as_ref(), &surface);
+        conn.roundtrip()?;
+        let activation_id = match &activation {
+            Some(state) => Some(state.bound_global()?.id().protocol_id()),
+            None => None,
+        };
+        let compositor_id = compositor.wl_compositor().id().protocol_id();
+        let surface_id = surface.id().protocol_id();
+        drop((surface, activation, compositor, globals, qh, queue, conn));
+        let requests = thread
+            .join()
+            .map_err(|_| "the compositor's thread panicked")??;
+        Ok(Raised {
+            asked,
+            requests,
+            activation: activation_id,
+            compositor: compositor_id,
+            surface: surface_id,
+        })
+    }
+
+    const WITH_ACTIVATION: &[(&str, u32)] = &[("wl_compositor", 4), ("xdg_activation_v1", 1)];
+
+    /// SL2: a window is raised with the token it is given, on its own wl_surface.
+    #[test]
+    fn a_window_is_raised_with_the_token_it_is_given() -> Result<(), Error> {
+        let raised = raise(WITH_ACTIVATION, |activation, surface| {
+            activate(activation, Some(surface), "a-token-of-the-caller")
+        })?;
+        assert!(raised.asked);
+        let expected = Some(("a-token-of-the-caller".to_owned(), raised.surface));
+        assert_eq!(raised.activations(), [expected]);
+        Ok(())
+    }
+
+    /// Without xdg_activation_v1 nothing is asked: the caller goes on without raising.
+    #[test]
+    fn without_the_activation_global_no_window_is_raised() -> Result<(), Error> {
+        let raised = raise(&[("wl_compositor", 4)], |activation, surface| {
+            activate(activation, Some(surface), "a-token-of-the-caller")
+        })?;
+        assert!(!raised.asked);
+        assert_eq!(raised.activation, None);
+        // get_registry, sync, the wl_compositor bound, its wl_surface, the closing sync.
+        let sent: Vec<_> = raised.requests.iter().map(|(o, op, _)| (*o, *op)).collect();
+        assert_eq!(
+            sent,
+            [(1, 1), (1, 0), (2, 0), (raised.compositor, 0), (1, 0)]
+        );
+        Ok(())
+    }
+
+    /// Without a wl_surface, as `Shell::activate_window` has none for an id no longer open,
+    /// nothing is asked, though the global is bound.
+    #[test]
+    fn without_a_surface_no_window_is_raised() -> Result<(), Error> {
+        let raised = raise(WITH_ACTIVATION, |activation, _| {
+            activate(activation, None, "a-token-of-the-caller")
+        })?;
+        assert!(!raised.asked);
+        assert!(raised.activation.is_some(), "the global is bound");
+        assert!(raised.activations().is_empty());
+        Ok(())
+    }
+
+    /// A token with a NUL, which the request cannot carry, is not asked with: the request's
+    /// conversion of it to a C string would panic, and a panic aborts.
+    #[test]
+    fn a_token_with_a_nul_raises_nothing() -> Result<(), Error> {
+        let raised = raise(WITH_ACTIVATION, |activation, surface| {
+            activate(activation, Some(surface), "a-token\0of-the-caller")
+        })?;
+        assert!(!raised.asked);
+        assert!(raised.activation.is_some(), "the global is bound");
+        assert!(raised.activations().is_empty());
+        Ok(())
+    }
+
+    /// A token too long for one Wayland message is not asked with, and the longest that fits,
+    /// whose request takes the whole 4096 bytes, is.
+    #[test]
+    fn a_token_too_long_for_one_message_raises_nothing() -> Result<(), Error> {
+        let longest = "t".repeat(MAX_TOKEN_LEN);
+        let raised = raise(WITH_ACTIVATION, |activation, surface| {
+            activate(activation, Some(surface), &longest)
+        })?;
+        assert!(raised.asked);
+        assert_eq!(
+            raised.activations(),
+            [Some((longest.clone(), raised.surface))]
+        );
+        let sizes: Vec<_> = raised
+            .requests
+            .iter()
+            .filter(|(object, opcode, _)| Some(*object) == raised.activation && *opcode == 2)
+            .map(|(_, _, args)| 8 + args.len())
+            .collect();
+        assert_eq!(sizes, [4096]);
+
+        let too_long = "t".repeat(MAX_TOKEN_LEN + 1);
+        let raised = raise(WITH_ACTIVATION, |activation, surface| {
+            activate(activation, Some(surface), &too_long)
+        })?;
+        assert!(!raised.asked);
+        assert!(raised.activation.is_some(), "the global is bound");
+        assert!(raised.activations().is_empty());
+        Ok(())
+    }
+
+    /// `Shell::activate_window` raises the surface of its id, and none for an id no longer
+    /// open.
+    #[test]
+    fn the_surface_of_an_id_is_the_one_raised() {
+        let open = [(SurfaceId(1), "first"), (SurfaceId(2), "second")];
+        let id = |surface: &(SurfaceId, &str)| surface.0;
+        assert_eq!(by_id(&open, SurfaceId(2), id), Some(&open[1]));
+        assert_eq!(by_id(&open, SurfaceId(1), id), Some(&open[0]));
+        assert_eq!(by_id(&open, SurfaceId(3), id), None);
     }
 }
