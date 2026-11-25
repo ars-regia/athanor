@@ -19,7 +19,6 @@ SKIPPED = {
     "probe-sandbox": "runs bubblewrap in the rig, no workspace binary",
     "css-parse": "GTK parse gate of generated stylesheets, no workspace binary",
     "cosmic-keys": "compares COSMIC's key files with the overlay's",
-    "cosmic-preview": "captures cosmic-settings, which is not workspace code",
     "seal-bin": "hashes files",
     "verify-bin": "checks hashes",
 }
