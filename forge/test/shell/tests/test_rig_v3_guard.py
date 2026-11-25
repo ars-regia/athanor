@@ -38,10 +38,11 @@ def dispatch_labels(text):
 def guard(text):
     """The label patterns that skip the check, and those that run it."""
     match = re.search(
-        r"case \"\$\{1:-\}\" in ([^)]+)\) ;; ([^)]+)\) bash \"\$root/scripts/ci/check-x86-64-v3\.sh\" ;; esac",
+        r"case \"\$\{1:-\}\" in\s+([^)]+)\) ;;\s+([^)]+)\)\s+"
+        r"bash \"\$root/scripts/ci/check-x86-64-v3\.sh\"\s+;;\s+esac",
         text,
     )
-    assert match, "the guard line of rig.sh is gone or changed shape"
+    assert match, "the guard block of rig.sh is gone or changed shape"
     return [p.strip() for p in match.group(1).split("|")], [
         p.strip() for p in match.group(2).split("|")
     ]
