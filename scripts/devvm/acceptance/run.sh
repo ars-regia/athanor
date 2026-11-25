@@ -26,7 +26,7 @@ if [[ -n $ACC_CI ]]; then
   start=${1:-seed}
 else
   guard_no_ci
-  STAGES=(install migrate metered download sessions apply security postpone optout class securitygreenboot featurehold refuse older goback rotate recover console greenboot podman probes report)
+  STAGES=(install migrate metered download sessions apply security postpone optout class securitygreenboot featurehold refuse older goback rotate recover console greenboot podman probes removable report)
   start=${1:-install}
 fi
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
@@ -1016,6 +1016,39 @@ stage_probes() { # the runtime audit probes (issue #312), against expectations.t
   signed=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:stable")
   # The verdict names each check; a failure stops the run, and the facts stay in $ACC_STATE.
   python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" "$ACC_PORT" "$REPO:stable" "$signed" || die "FAIL  runtime probes (facts: $facts)"
+}
+
+# ADR-0025, doc_disks.md DK20 B (issue #1458): a filesystem mounted through udisks is nodev, nosuid
+# and noexec, and a program on it does not run. A vfat image on a loop device stands for a stick;
+# vfat has the per-filesystem defaults (uid=, gid=) the global `defaults` key must not displace.
+stage_removable() {
+  local out opt
+  # shellcheck disable=SC2016 # the script expands on the guest
+  out=$(guest_ssh 'set -eu
+img=$(mktemp /var/tmp/acc-removable.XXXXXX)
+loop=
+cleanup() {
+  if [ -n "$loop" ]; then
+    if findmnt -n -S "$loop" > /dev/null; then sudo udisksctl unmount -b "$loop" > /dev/null; fi
+    sudo udisksctl loop-delete -b "$loop" > /dev/null
+  fi
+  rm -f "$img"
+}
+trap cleanup EXIT
+truncate -s 16M "$img"
+mkfs.vfat -n ACCNOEXEC "$img" > /dev/null
+loop=$(sudo udisksctl loop-setup -f "$img" | sed -n "s/^Mapped file .* as \(\/dev\/loop[0-9]*\)\.$/\1/p")
+test -n "$loop"
+sudo udisksctl mount -b "$loop" > /dev/null
+mnt=$(findmnt -n -o TARGET -S "$loop")
+printf "#!/bin/sh\nexit 0\n" | sudo tee "$mnt/run.sh" > /dev/null
+echo "OPTIONS $(findmnt -n -o OPTIONS -S "$loop")"
+if sudo "$mnt/run.sh"; then echo EXEC_RAN; else echo EXEC_REFUSED; fi') || die "FAIL  removable: the mount or its probe failed"
+  for opt in noexec nodev nosuid; do
+    grep -Eq "^OPTIONS (.*,)?$opt(,|$)" <<< "$out" || die "FAIL  removable: the udisks mount lacks $opt: $out"
+  done
+  grep -q '^EXEC_REFUSED$' <<< "$out" || die "FAIL  removable: a file ran from the udisks mount: $out"
+  pass "DK20 B: a udisks mount carries noexec, nodev and nosuid and runs nothing"
 }
 
 stage_report() {
