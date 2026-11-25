@@ -31,6 +31,7 @@ class FixtureTest(unittest.TestCase):
         for rel in ("Cargo.toml", "Cargo.lock", ".cargo/config.toml", "flake.nix", "flake.lock",
                     "forge/scripts/build_spec.sh", "forge/scripts/run_spec_build.sh",
                     "forge/scripts/fetch_sources.sh", "forge/scripts/check_shim_link_order.py",
+                    "forge/scripts/check_elf_hardening.py",
                     "system/style/gen.py", "system/other/x.py"):
             (self.root / rel).write_text("x\n")
         self.write_spec("%build\ncargo build --release\n")
@@ -52,7 +53,8 @@ class InputsTest(FixtureTest):
         inputs = dag.package_inputs("dock")
         for expected in ("../Cargo.toml", "../Cargo.lock", "../.cargo/config.toml", "../flake.lock",
                          "../flake.nix", "builder", "scripts/build_spec.sh", "scripts/run_spec_build.sh",
-                         "scripts/fetch_sources.sh", "scripts/check_shim_link_order.py", "specs/athanor-dock"):
+                         "scripts/fetch_sources.sh", "scripts/check_shim_link_order.py",
+                         "scripts/check_elf_hardening.py", "specs/athanor-dock"):
             self.assertIn(expected, inputs)
 
     def test_a_spec_with_a_source_does_not_read_the_workspace(self):

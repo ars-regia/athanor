@@ -88,8 +88,8 @@ def path_dependencies(spec_dir):
     return sorted(found)
 
 
-# Repo files every package build runs, whatever the package: the stages of build_spec.sh and
-# the check an in-place Rust build calls, plus the builder's identity (the Nix flake carries
+# Repo files every package build runs, whatever the package: the stages of build_spec.sh, the
+# check an in-place Rust build calls and the one build_spec.sh runs on every RPM, plus the builder's identity (the Nix flake carries
 # rustc and rpm; forge/builder/ is what Spec Build Check also treats as a builder input).
 # Paths are relative to the forge directory, the working directory of the jobs.
 BUILD_INPUTS = (
@@ -97,6 +97,7 @@ BUILD_INPUTS = (
     "scripts/run_spec_build.sh",
     "scripts/fetch_sources.sh",
     "scripts/check_shim_link_order.py",
+    "scripts/check_elf_hardening.py",
     "builder",
     "../flake.nix",
     "../flake.lock",

@@ -14,7 +14,8 @@ Reads the files changed since BASE (git diff BASE...HEAD) and writes:
 
 Only what the DAG builds is built: the custom_packages of forge/config/packages.json, from
 dag_orchestrator.py --list-spec-dirs. A change to what every spec build goes through (the
-builder image, forge/config/rpmmacros, build_spec.sh, run_spec_build.sh, fetch_sources.sh)
+builder image, forge/config/rpmmacros, build_spec.sh, run_spec_build.sh, fetch_sources.sh,
+check_elf_hardening.py)
 rebuilds all of them; any other change builds the DAG's spec directories it touches. Every other
 changed directory is named and skipped: the kernel (Kernel Build builds it), Nix-built packages,
 specs the DAG does not list, and directories the change deleted or that hold no .spec.
@@ -34,6 +35,7 @@ SHARED_INPUTS = BUILDER_INPUTS + (
     "forge/scripts/build_spec.sh",
     "forge/scripts/run_spec_build.sh",
     "forge/scripts/fetch_sources.sh",
+    "forge/scripts/check_elf_hardening.py",
 )
 
 

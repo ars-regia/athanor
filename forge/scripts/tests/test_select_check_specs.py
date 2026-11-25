@@ -34,7 +34,7 @@ class SelectTest(unittest.TestCase):
         self.assertEqual(specs, ALL_BUILT)
 
     def test_the_shared_build_scripts_rebuild_every_dag_spec(self):
-        for script in ("build_spec.sh", "run_spec_build.sh", "fetch_sources.sh"):
+        for script in ("build_spec.sh", "run_spec_build.sh", "fetch_sources.sh", "check_elf_hardening.py"):
             with self.subTest(script=script):
                 builder, specs, _ = select(f"forge/scripts/{script}")
                 self.assertFalse(builder)
