@@ -23,7 +23,13 @@ if grep -q 'x86-64-v3 (supported' <<< "$report"; then
     exit 0
 fi
 
-model=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' "$cpuinfo" | head -n 1)
+# One sed that quits at the first model line: no pipe to `head`, which would end it with SIGPIPE
+# (status 141 under pipefail) on a long file. An unreadable file keeps the named message.
+if [ -r "$cpuinfo" ]; then
+    model=$(sed -n '/^model name/{s/^[^:]*: *//p;q}' "$cpuinfo")
+else
+    model="unknown ($cpuinfo unreadable)"
+fi
 if grep -q 'x86-64-v3' <<< "$report"; then
     cause="the loader does not list x86-64-v3 as supported"
 else

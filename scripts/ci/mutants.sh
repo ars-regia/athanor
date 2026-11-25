@@ -21,7 +21,9 @@ set -euo pipefail
 command -v cargo-mutants >/dev/null || { echo "mutants.sh: cargo-mutants is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
-bash "$root/scripts/ci/check-x86-64-v3.sh" # fuzz targets and mutants run at x86-64-v3 (#1508)
+# Not redundant: without MUTANTS_IN_RIG cargo runs on this machine and never reaches rig.sh; in the rig
+# mode rig.sh checks again, which is cheap.
+bash "$root/scripts/ci/check-x86-64-v3.sh"
 out=${MUTANTS_OUT:-$root/.scratch/mutants}
 mkdir -p "$out"
 out=$(realpath "$out")

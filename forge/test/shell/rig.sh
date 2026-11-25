@@ -772,11 +772,13 @@ require_for() { # require_for <surface>
     esac
 }
 
+# The commands that build or run workspace code, which targets x86-64-v3 (ADR-0143, #1508): a
+# host below the level fails here with its CPU model, not later with SIGILL. The image recipes,
+# seal-bin, verify-bin, probe-sandbox, css-parse, cosmic-keys, cosmic-preview, golden-report
+# (which calls the others) and an unknown command run none, so they skip it.
 case "${1:-}" in
-build-image | build-image-ref | build-inputs | publish-image | publish-build-image) ;;
-*)
-    # Every other command builds or runs the workspace, which targets x86-64-v3 (ADR-0143,
-    # #1508): a host below the level fails here with its CPU model, not later with SIGILL.
+build-image | build-image-ref | build-inputs) ;;
+build-* | no-gtk | cargo | cosmic-comp-version | compositor-* | *-e2e | toolkit-* | dock-roundtrip | layer-guard | greeter-preview | bar-preview | launcher-window-preview | atspi | orca | measure-chooser | input-method)
     bash "$root/scripts/ci/check-x86-64-v3.sh"
     ;;
 esac
