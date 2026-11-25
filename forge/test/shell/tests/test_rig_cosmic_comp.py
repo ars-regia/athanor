@@ -16,12 +16,15 @@ import textwrap
 import unittest
 from pathlib import Path
 
+import fake_v3
+
 ROOT = Path(__file__).resolve().parents[4]
 COPIED = (
     "forge/test/shell/rig.sh",
     "forge/test/shell/spec_nevr.awk",
     "forge/test/shell/rig-image.digest",
     "forge/scripts/run_spec_build.sh",
+    "scripts/ci/check-x86-64-v3.sh",
     "forge/scripts/retry.sh",
     "forge/scripts/check_idempotency.sh",
     "forge/scripts/registry_probe.sh",
@@ -272,6 +275,7 @@ class Rig:
             ATHANOR_RIG_OUT=str(self.out),
             HOME=str(self.tmp),
             RETRY_ATTEMPTS="1",
+            **fake_v3.ENV,
         )
         return env
 

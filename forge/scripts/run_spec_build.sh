@@ -28,6 +28,10 @@ fedora=$(grep -m1 -oP '^FROM \K\S*/fedora:[0-9]+@sha256:[0-9a-f]{64}' "$root/sys
     exit 1
 }
 
+# The builds export RUSTFLAGS with target-cpu=x86-64-v3 (forge/config/rpmmacros): build scripts,
+# proc macros and %check run on this host (#1508).
+bash "$root/scripts/ci/check-x86-64-v3.sh"
+
 # Pulled first and with retries, as dag_package.sh pulls the builder: a registry hiccup fails
 # here, not after the build.
 bash "$root/forge/scripts/retry.sh" podman pull -q "$fedora" > /dev/null
