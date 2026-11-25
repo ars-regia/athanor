@@ -11,6 +11,15 @@ description = "Builds COSMIC's system defaults for the Calmo identity with COSMI
 # the derived theme is the one the shipped Settings would compute from the same inputs.
 [workspace]
 
+# The root's [workspace.lints] (ADR-0075 decision 3), which a workspace root of its own does not
+# inherit; `verify.py build-policy` holds the copy to the root's.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+
 [dependencies]
 cosmic-theme = { git = "https://github.com/pop-os/libcosmic", rev = "2a73fbc0edfe1525381bf999e241d73def79b222" }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic", rev = "2a73fbc0edfe1525381bf999e241d73def79b222" }

@@ -8286,6 +8286,14 @@ BUILD_POLICY_PROFILES = {
     "dev": {"panic": "abort"},
     "release": {"lto": True, "codegen-units": 1, "panic": "abort"},
 }
+# The manifests of the repository's own crates that are workspace roots of their own: they do not
+# inherit [workspace.lints], so each carries a copy as [lints]. The vendored crates of [patch] are
+# not here: they are upstream's code with upstream's unsafe, and take no workspace lints.
+SEPARATE_WORKSPACES = (
+    GALLERY_MANIFEST,
+    "fuzz/Cargo.toml",
+    "forge/tools/calmo-cosmic-theme/Cargo.toml",
+)
 # Files whose every line runs or sets up an RPM build of the workspace; a spec counts only when it
 # builds in place, and flake.nix only in the Env list of builderImage.
 BUILD_POLICY_SCRIPTS = (
@@ -8378,12 +8386,13 @@ def build_policy_problems(load, texts):
         for profile in sorted(data.get("profile", {})):
             out.append(f"{manifest}: [profile.{profile}] in a workspace member, which cargo "
                        "ignores: the profiles are the root Cargo.toml's")
-    gallery = load(GALLERY_MANIFEST)
-    if gallery is None:
-        out.append(f"{GALLERY_MANIFEST}: missing")
-    elif gallery.get("lints") != lints:
-        out.append(f"{GALLERY_MANIFEST}: [lints] is not the root's [workspace.lints]: a workspace "
-                   "root of its own does not inherit them, so it carries a copy")
+    for manifest in SEPARATE_WORKSPACES:
+        data = load(manifest)
+        if data is None:
+            out.append(f"{manifest}: missing")
+        elif data.get("lints") != lints:
+            out.append(f"{manifest}: [lints] is not the root's [workspace.lints]: a workspace "
+                       "root of its own does not inherit them, so it carries a copy")
     config = load(".cargo/config.toml") or {}
     tables = {"[build]": config.get("build", {}).get("rustflags")}
     tables |= {f"[target.'{name}']": table.get("rustflags")

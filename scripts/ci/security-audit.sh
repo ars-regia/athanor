@@ -12,7 +12,7 @@ out="${AUDIT_OUT:-$root/audit-out}"
 mkdir -p "$out"
 cd "$root"
 
-# Warnings fail the job: the unsafe lints of .cargo/config.toml are set to warn there.
+# Warnings fail the job: the clippy unsafe lints of Cargo.toml's [workspace.lints] are set to warn there.
 # cargo unifies features across the packages of one invocation: glycin drives zbus with
 # async-io, the rest of the workspace with tokio, so the preview decoder is linted alone.
 cargo clippy --workspace --exclude athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee "$out/clippy.log"

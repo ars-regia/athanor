@@ -43,7 +43,7 @@ def tree():
         "system/b/Cargo.toml": {"lints": {"workspace": True}},
         "system/a/vendor/v/Cargo.toml": {},
         "fuzz/f/Cargo.toml": {},
-        verify.GALLERY_MANIFEST: {"lints": copy.deepcopy(LINTS)},
+        **{m: {"lints": copy.deepcopy(LINTS)} for m in verify.SEPARATE_WORKSPACES},
         ".cargo/config.toml": {
             "build": {"rustflags": list(FLAGS)},
             "target": {'cfg(target_os = "linux")': {"rustflags": list(FLAGS)}},
@@ -141,6 +141,17 @@ class BuildPolicyTest(unittest.TestCase):
             [f.split(": sets ")[1].split(",")[0] for f in found],
             ["CARGO_PROFILE_RELEASE_LTO", "CARGO_ENCODED_RUSTFLAGS"],
         )
+
+    def test_a_separate_workspace_without_the_lints_fails(self):
+        for manifest in (
+            "fuzz/Cargo.toml",
+            "forge/tools/calmo-cosmic-theme/Cargo.toml",
+        ):
+            files = tree()
+            del files[manifest]["lints"]
+            found = problems(files)
+            self.assertEqual(len(found), 1, manifest)
+            self.assertIn(f"{manifest}: [lints] is not the root's", found[0])
 
     def test_a_profile_in_a_member_fails(self):
         files = tree()
