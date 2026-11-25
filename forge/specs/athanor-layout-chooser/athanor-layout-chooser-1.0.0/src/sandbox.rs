@@ -69,10 +69,7 @@ fn opened<T>(paths: &[PathBuf], open: fn(&Path) -> io::Result<T>) -> io::Result<
         .iter()
         .filter_map(|path| match open(path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => Some(Err(io::Error::new(
-                error.kind(),
-                format!("{} is not granted: {error}", path.display()),
-            ))),
+            Err(error) => Some(Err(dirs::not_granted(path, error))),
             Ok(fd) => Some(Ok(fd)),
         })
         .collect()

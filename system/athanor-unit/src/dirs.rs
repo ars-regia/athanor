@@ -151,6 +151,20 @@ pub fn private_dirs(runtime: &Path, names: &[&str]) -> Vec<Checked> {
         .collect()
 }
 
+/// `error`, which a check of this module returned for `path`, as the error a confining caller
+/// stops with: "`path` is not granted: `error`", of the same kind. The whole message is one
+/// line, as `refused` makes it, so that the caller puts nothing raw in front of the refusal: a
+/// newline in the path would otherwise forge a record of the journal it is logged to.
+pub fn not_granted(path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        crate::text::line(
+            &format!("{} is not granted: {error}", path.display()),
+            usize::MAX,
+        ),
+    )
+}
+
 fn refused(path: &Path, why: &str) -> io::Error {
     // The path, a link's name and its target are the user's to choose: one line, so that a
     // newline in them cannot forge a record of the journal the refusal is logged to.
@@ -582,6 +596,16 @@ mod tests {
             message.contains("a<2>b/d does not have mode 0700"),
             "{message:?}"
         );
+    }
+
+    #[test]
+    fn a_grant_refusal_is_one_line_of_the_same_kind() {
+        // A path holding a newline, a journal priority and a right-to-left override.
+        let path = Path::new("/run/a\n<2>b\u{202e}c");
+        let error = not_granted(path, io::Error::new(io::ErrorKind::NotFound, "gone"));
+        assert_eq!(error.kind(), io::ErrorKind::NotFound, "{error}");
+        let message = error.to_string();
+        assert_eq!(message, "/run/a<2>bc is not granted: gone", "{message:?}");
     }
 
     #[test]

@@ -31,8 +31,8 @@ pub fn confine(runtime_dir: Option<&OsStr>) -> Result<(), Box<dyn Error>> {
         .map(Path::new)
         .filter(|dir| dir.is_absolute())
         .ok_or("XDG_RUNTIME_DIR is unset or not absolute")?;
-    let runtime_dir = dirs::own_dir(runtime_dir)
-        .map_err(|error| format!("{} is not granted: {error}", runtime_dir.display()))?;
+    let runtime_dir =
+        dirs::own_dir(runtime_dir).map_err(|error| dirs::not_granted(runtime_dir, error))?;
     sandbox::ensure_single_threaded()?;
     sandbox::restrict_writes(&[runtime_dir], &[])?;
     // After Landlock, as the greeter's `forbid_core_dumps`: no core file by any path, the

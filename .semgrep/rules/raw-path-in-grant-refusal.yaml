@@ -1,0 +1,26 @@
+# #1467: a refusal of a Landlock grant names the path it refuses, and the path is the user's to
+# choose. Put raw in front of the refusal with `path.display()`, a newline in it forges a record
+# of the journal the refusal is logged to. `athanor_unit::dirs::not_granted` builds that error
+# through `text::line`; a caller uses it. No verify.py check reads format strings.
+#
+# Semgrep 1.183 matches a Rust macro's arguments as tokens: `format!(...)` and a fixed format
+# string match, but `format!($FMT, $P.display())` and `$P.display()` match nothing inside the
+# macro, so the rule reads the text. It keys on the wording, "not granted", in a string argument
+# of a macro whose arguments call `.display()`, before or after that string, with at most one
+# level of parentheses among them; a refusal worded otherwise is not seen.
+rules:
+  - id: raw-path-in-grant-refusal
+    languages: [rust]
+    severity: ERROR
+    message: >-
+      A grant refusal puts a path's display() raw in its message (#1467): a newline in the path
+      forges a journal record. Build it with athanor_unit::dirs::not_granted, or pass the text
+      through athanor_unit::text::line.
+    patterns:
+      - pattern-either:
+          # format!("{} is not granted: {error}", path.display()), write!(f, "...", ...)
+          - pattern-regex: '\b\w+!\((?:[^()"]|\([^()]*\))*"[^"]*\bnot granted\b[^"]*"(?:[^()]|\([^()]*\))*?\.display\(\)'
+          # tracing::warn!(%error, path = %dir.display(), "not granted: ...")
+          - pattern-regex: '\b\w+!\((?:[^()"]|\([^()]*\))*?\.display\(\)(?:[^()"]|\([^()]*\))*"[^"]*\bnot granted\b'
+      # The message is made one line: `dirs::refused` and `dirs::not_granted` build it so.
+      - pattern-not-regex: '\btext::line\(\s*&format!\(\s*"[^"]*"(?:[^()]|\([^()]*\))*\)'
