@@ -2,7 +2,10 @@
 
 import importlib.util
 import pathlib
+import posixpath
 import re
+import subprocess
+import tomllib
 import unittest
 
 import yaml
@@ -106,6 +109,32 @@ class ShellAreaTest(unittest.TestCase):
         glob = "/" + "*" * 2
         as_area = {p[: -len(glob) + 1] if p.endswith(glob) else p for p in triggers["push"]["paths"]}
         self.assertEqual(as_area, set(changes.AREAS["shell"]))
+
+    def test_every_crate_the_rig_builds_is_in_the_shell_area(self):
+        # Each `-p <crate>` of rig.sh, and every crate it reaches by a path dependency, is under
+        # a prefix of the area: otherwise a change to it alone runs no rig job (#1481).
+        listed = ["git", "-C", str(ROOT), "ls-files", "*Cargo.toml"]
+        crates = {}
+        for manifest in subprocess.run(listed, capture_output=True, text=True, check=True).stdout.split():
+            package = tomllib.loads((ROOT / manifest).read_text()).get("package")
+            if package:
+                crates[package["name"]] = posixpath.dirname(manifest)
+        built = set(re.findall(r"\s-p (athanor-[a-z0-9-]+)", (ROOT / "forge/test/shell/rig.sh").read_text()))
+        self.assertIn("athanor-settings", built)
+        todo, reached = [crates[name] for name in built], set()
+        while todo:
+            crate = todo.pop()
+            if crate in reached:
+                continue
+            reached.add(crate)
+            manifest = tomllib.loads((ROOT / crate / "Cargo.toml").read_text())
+            for table in [manifest, *manifest.get("target", {}).values()]:
+                for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+                    for dep in table.get(kind, {}).values():
+                        if isinstance(dep, dict) and "path" in dep:
+                            todo.append(posixpath.normpath(posixpath.join(crate, dep["path"])))
+        shell = changes.AREAS["shell"]
+        self.assertEqual(sorted(c for c in reached if not any(f"{c}/".startswith(p) for p in shell)), [])
 
 
 class RustAuditTest(unittest.TestCase):

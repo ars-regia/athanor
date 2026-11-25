@@ -73,7 +73,11 @@ AREAS = {
         "forge/specs/athanor-layout-chooser/",
         "system/athanor-sulphur-client/",
         "system/athanor-sal/",
+        "system/athanor-settings-core/",
         "forge/specs/athanor-sulphur/",
+        # Path dependencies of the compositor.
+        "system/athanor-edid/",
+        "system/athanor-idle/",
         # The compositor the rig runs: rig.sh cosmic-comp-version builds the spec's.
         "forge/specs/cosmic-comp/",
         "system/athanor-i18n/",
@@ -89,6 +93,7 @@ AREAS = {
         "system/athanor-controls/",
         "system/athanor-services/",
         "forge/specs/athanor-control-center/",
+        "forge/specs/athanor-settings/",
         "system/athanor-unit/",
         "system/athanor-trust-state/",
         "forge/test/shell/",
