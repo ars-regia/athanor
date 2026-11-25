@@ -7,7 +7,8 @@
 //! space and the input goes to the windows activated, at their places, from the first frame. A
 //! switch during a slide starts from where the slide stands, so nothing jumps, and every
 //! workspace still on its way out keeps its own motion until it is off the output. Under reduced
-//! motion (doc_accessibility.md AX9) there is no slide. The slide is horizontal: Sulphur has no
+//! motion (doc_accessibility.md AX9) there is no slide: a switch under it, or reduced motion
+//! turned on, ends the slide under way. The slide is horizontal: Sulphur has no
 //! vertical workspace layout, cosmic-comp's `workspace_layout`.
 
 use crate::state::State;
@@ -34,6 +35,15 @@ struct Slide {
     /// The workspaces left that may still be on the output, the oldest first: one entry a
     /// workspace, each gone once its motion is over, so no more than the output's workspaces.
     leaving: Vec<(WorkspaceId, Motion)>,
+    /// Ended before its time, under reduced motion (`end`).
+    ended: bool,
+}
+
+impl Slide {
+    /// Whether the workspace activated is still on its way at `now`.
+    fn running(&self, now: Instant) -> bool {
+        !self.ended && self.incoming.running(now)
+    }
 }
 
 /// A workspace's way across the output, in widths of the output from its place.
@@ -108,11 +118,22 @@ fn reading<T>(slot: &Cell<Option<Slide>>, read: impl FnOnce(Option<&Slide>) -> T
     value
 }
 
+/// Ends the slide in `slot`, which keeps it for its timer to clear on its next tick: a slot
+/// emptied here would let the next switch start a second timer beside the one still ticking.
+fn end(slot: &Cell<Option<Slide>>) {
+    let slide = slot.take().map(|slide| Slide {
+        ended: true,
+        ..slide
+    });
+    slot.set(slide);
+}
+
 /// Whether a slide runs on `output` now, so that its frame shows more than the workspace
-/// activated (`tearing::conditions`).
+/// activated (`tearing::conditions`). It reads the slot alone, as the frame does (`slides`):
+/// reduced motion ends the slide in it.
 pub(crate) fn running(output: &Output) -> bool {
     reading(sliding(output), |slide| {
-        slide.is_some_and(|it| it.incoming.running(clock()))
+        slide.is_some_and(|it| it.running(clock()))
     })
 }
 
@@ -152,6 +173,7 @@ impl State {
             return;
         };
         if self.bell.reduced_motion {
+            end(sliding(&output));
             return;
         }
         // Taken only once the slide starts: a slot still set has its timer, and one emptied on
@@ -162,7 +184,7 @@ impl State {
         let ticking = before.is_some();
         let direction = if (into > from) != rtl() { 1.0 } else { -1.0 };
         let (stands, mut leaving) = before
-            .filter(|slide| slide.incoming.running(now))
+            .filter(|slide| slide.running(now))
             .map_or((0.0, Vec::new()), |slide| {
                 (slide.incoming.at(now), slide.leaving)
             });
@@ -183,7 +205,11 @@ impl State {
             from: coming,
             to: 0.0,
         };
-        slot.set(Some(Slide { incoming, leaving }));
+        slot.set(Some(Slide {
+            incoming,
+            leaving,
+            ended: false,
+        }));
         if ticking {
             return;
         }
@@ -196,8 +222,7 @@ impl State {
                     // The workspaces left started no later than the one activated: they are
                     // over by the time it is.
                     let now = clock();
-                    let running =
-                        |slide: Option<&Slide>| slide.is_some_and(|it| it.incoming.running(now));
+                    let running = |slide: Option<&Slide>| slide.is_some_and(|it| it.running(now));
                     if reading(slot, running) {
                         TimeoutAction::ToDuration(TICK)
                     } else {
@@ -211,11 +236,22 @@ impl State {
         }
     }
 
-    /// What this frame shows of each output's slide.
-    pub(crate) fn slides(&self) -> Vec<Shown> {
-        if self.bell.reduced_motion {
-            return Vec::new();
+    /// Turns reduced motion on or off (AX9): on, it ends the slides under way, so that no
+    /// later frame slides and none refuses the tear for a slide (`running`).
+    pub(crate) fn set_reduced_motion(&mut self, on: bool) {
+        self.bell.reduced_motion = on;
+        if on {
+            for output in self.space.outputs() {
+                if let Some(sliding) = output.user_data().get::<Sliding>() {
+                    end(&sliding.0);
+                }
+            }
         }
+    }
+
+    /// What this frame shows of each output's slide, read from the slot alone, as `running`
+    /// reads it.
+    pub(crate) fn slides(&self) -> Vec<Shown> {
         let now = clock();
         self.space
             .outputs()
@@ -227,7 +263,7 @@ impl State {
     }
 
     fn shown(&self, output: &Output, slide: &Slide, now: Instant) -> Option<Shown> {
-        if !slide.incoming.running(now) {
+        if !slide.running(now) {
             return None;
         }
         let width = f64::from(self.space.output_geometry(output)?.size.w);

@@ -4,7 +4,7 @@
 use super::full_screen::{enter, window};
 use super::marks::{at, clear_the_fixture, frame, paint};
 use super::*;
-use crate::workspace::slide::{DURATION, advance, right_to_left, under_way};
+use crate::workspace::slide::{DURATION, advance, right_to_left, running, under_way};
 use crate::workspace::WorkspaceId;
 
 /// Where the window of the first workspace stands, and the one of the second.
@@ -235,6 +235,42 @@ fn a_popup_slides_with_its_window() {
         background(&at(&half, middle.x, middle.y)),
         "nothing of it at its place half way in"
     );
+    run.stop();
+}
+
+/// A switch under reduced motion ends the slide under way: with reduced motion off again before
+/// the slide's time is over, the workspace activated is at its place, the one left is not drawn,
+/// and no slide refuses the tear.
+#[test]
+fn a_switch_under_reduced_motion_ends_the_slide() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    assert!(run.state.activate_workspace(two.list[0]));
+    run.state.bell.reduced_motion = true;
+    assert!(run.state.activate_workspace(two.list[1]));
+    run.state.bell.reduced_motion = false;
+    assert!(!running(&output), "no slide refuses the tear");
+    let (first, second) = at_places(&mut run);
+    assert_eq!(second, two.blue, "the second at its place");
+    assert!(background(&first), "the first is not drawn");
+    run.stop();
+}
+
+/// Reduced motion turned on during a slide ends it: the next frame shows the workspace activated
+/// at its place, and no slide refuses the tear.
+#[test]
+fn reduced_motion_turned_on_ends_the_slide_under_way() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    assert!(run.state.activate_workspace(two.list[0]));
+    assert!(running(&output), "the slide runs");
+    run.state.set_reduced_motion(true);
+    assert!(!running(&output), "no slide refuses the tear");
+    let (first, second) = at_places(&mut run);
+    assert_eq!(first, two.red, "the first at its place");
+    assert!(background(&second), "the second is not drawn");
     run.stop();
 }
 
