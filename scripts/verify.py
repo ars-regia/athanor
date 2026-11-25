@@ -8275,8 +8275,24 @@ def check_lock_versions():
 
 
 # The variables that, in the environment of a cargo build, replace the rustflags of
-# .cargo/config.toml or a [profile] setting of Cargo.toml (#1350, ADR-0143 decision 2).
-BUILD_POLICY_ENV = re.compile(r"\b(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_PROFILE_\w+)\b")
+# .cargo/config.toml or a [profile] setting of Cargo.toml (#1350, ADR-0143 decision 2): RUSTFLAGS
+# and every name that ends in it (CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS,
+# CARGO_TARGET_<triple>_RUSTFLAGS), and CARGO_PROFILE_*. `\b` does not split a name at `_`, so
+# the prefix is matched as part of the name.
+BUILD_POLICY_ENV = re.compile(r"\b(\w*RUSTFLAGS|CARGO_PROFILE_\w+)(?!\w)")
+# The profile settings of ADR-0075 decision 3 and the panic rule of AGENTS.md. Cargo reads
+# profiles only from the root manifest of a workspace and ignores a member's.
+BUILD_POLICY_PROFILES = {
+    "dev": {"panic": "abort"},
+    "release": {"lto": True, "codegen-units": 1, "panic": "abort"},
+}
+# Files whose every line runs or sets up an RPM build of the workspace; a spec counts only when it
+# builds in place, and flake.nix only in the Env list of builderImage.
+BUILD_POLICY_SCRIPTS = (
+    "forge/config/rpmmacros",
+    "forge/scripts/build_spec.sh",
+    "forge/scripts/run_spec_build.sh",
+)
 # The lints of ADR-0075 decision 3, with their level, in the root's [workspace.lints].
 BUILD_POLICY_LINTS = {
     "rust": {"unsafe_code": "deny"},
@@ -8297,6 +8313,13 @@ def spec_builds_in_place(text):
     """Whether a spec has no Source, so build_spec.sh builds it in the checkout, where cargo
     reads the root's Cargo.toml and .cargo/config.toml (`in_place` of build_spec.sh)."""
     return not re.search(r"(?mi)^\s*Source\d*\s*:", text)
+
+
+def builder_env(text):
+    """flake.nix's text with every line outside the Env list of builderImage blanked, so the line
+    numbers stay the file's; None when there is no such list."""
+    m = re.search(r"\bbuilderImage\s*=.*?\bEnv\s*=\s*\[(.*?)\];", text, re.S)
+    return None if m is None else "\n" * text[: m.start(1)].count("\n") + m.group(1)
 
 
 def workspace_members(load):
@@ -8327,9 +8350,18 @@ def workspace_members(load):
 
 def build_policy_problems(load, texts):
     """The findings of the build-policy check. `load(name)` is a parsed TOML file of the
-    repository, or None; `texts` maps forge/config/rpmmacros and every forge spec to its text."""
+    repository, or None; `texts` maps every forge spec, flake.nix and the files of
+    BUILD_POLICY_SCRIPTS to their text."""
     out = []
-    lints = load("Cargo.toml").get("workspace", {}).get("lints", {})
+    root = load("Cargo.toml")
+    lints = root.get("workspace", {}).get("lints", {})
+    for profile, wanted in BUILD_POLICY_PROFILES.items():
+        for key, value in wanted.items():
+            have = root.get("profile", {}).get(profile, {}).get(key)
+            # True == 1 in Python, and neither `lto = 1` nor `codegen-units = true` is the policy.
+            if type(have) is not type(value) or have != value:
+                out.append(f"Cargo.toml: [profile.{profile}] does not set {key} = "
+                           f"{json.dumps(value)} (ADR-0075 decision 3)")
     for tool, wanted in BUILD_POLICY_LINTS.items():
         for lint, level in wanted.items():
             if lints.get(tool, {}).get(lint) != level:
@@ -8339,9 +8371,13 @@ def build_policy_problems(load, texts):
         data = load(manifest)
         if data is None:
             out.append(f"{manifest}: a workspace member without a manifest")
-        elif data.get("lints", {}).get("workspace") is not True:
+            continue
+        if data.get("lints", {}).get("workspace") is not True:
             out.append(f"{manifest}: a workspace member without `lints.workspace = true`: it "
                        "builds without the workspace's lint policy")
+        for profile in sorted(data.get("profile", {})):
+            out.append(f"{manifest}: [profile.{profile}] in a workspace member, which cargo "
+                       "ignores: the profiles are the root Cargo.toml's")
     gallery = load(GALLERY_MANIFEST)
     if gallery is None:
         out.append(f"{GALLERY_MANIFEST}: missing")
@@ -8363,7 +8399,12 @@ def build_policy_problems(load, texts):
                 out.append(f".cargo/config.toml: {name} sets the lint flag {flag}: lints belong in "
                            "Cargo.toml's [workspace.lints]")
     for name, text in sorted(texts.items()):
-        if name != "forge/config/rpmmacros" and not spec_builds_in_place(text):
+        if name == "flake.nix":
+            text = builder_env(text)
+            if text is None:
+                out.append("flake.nix: no Env list in builderImage, the builder's environment")
+                continue
+        elif name not in BUILD_POLICY_SCRIPTS and not spec_builds_in_place(text):
             continue
         for number, variable in policy_env_lines(text):
             out.append(f"{name}:{number}: sets {variable}, which replaces the build policy of "
@@ -8382,11 +8423,12 @@ def check_build_policy():
 
     try:
         texts = {rel(p): read(p) for p in sorted((ROOT / "forge/specs").glob("*/*.spec"))}
-        texts["forge/config/rpmmacros"] = read(ROOT / "forge/config/rpmmacros")
+        for name in (*BUILD_POLICY_SCRIPTS, "flake.nix"):
+            texts[name] = read(ROOT / name)
         for problem in build_policy_problems(load, texts):
             r.fail(problem)
     except (OSError, ValueError) as e:
-        r.fail(f"a manifest, .cargo/config.toml, rpmmacros or a spec could not be read: {e}")
+        r.fail(f"a manifest, .cargo/config.toml, a spec or a build script could not be read: {e}")
     return r
 
 
