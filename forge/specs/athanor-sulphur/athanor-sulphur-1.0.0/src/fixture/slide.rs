@@ -3,7 +3,7 @@
 
 use super::marks::{at, frame, paint};
 use super::*;
-use crate::workspace::slide::{DURATION, advance, right_to_left};
+use crate::workspace::slide::{DURATION, advance, right_to_left, under_way};
 use crate::workspace::WorkspaceId;
 
 /// Where the window of the first workspace stands, and the one of the second.
@@ -176,6 +176,60 @@ fn a_third_switch_keeps_the_first_leaving() {
     let middle = |(x, y): (i32, i32), by: i32| at(&shown, x + SIZE / 2 + by, y + SIZE / 2);
     assert_eq!(middle(FIRST, -640), two.red, "the first, where it stood");
     assert_eq!(middle(SECOND, 640), two.blue, "the second, where it stood");
+    run.stop();
+}
+
+/// Once the slide is over nothing of the workspace left is drawn, and its timer is gone, so no
+/// more frames are asked for.
+#[test]
+fn the_slide_ends_and_asks_for_no_more_frames() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    assert!(run.state.activate_workspace(two.list[0]));
+    assert!(under_way(&output), "the slide has its timer");
+    advance(DURATION);
+    // The timer ticks on the loop's own clock, every 4 ms.
+    for _ in 0..5 {
+        run.event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+            .expect("dispatch");
+    }
+    assert!(!under_way(&output), "the timer is gone");
+    let (first, second) = at_places(&mut run);
+    assert_eq!(first, two.red, "at its place");
+    assert!(background(&second), "the second is not drawn");
+    run.stop();
+}
+
+/// A slide on one output leaves the frame of the other still.
+#[test]
+fn a_slide_leaves_the_other_output_still() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let second = output_at(&run, 1);
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    paint(&mut run, &mut local, SIZE, SIZE, [0, 255, 0, 255]);
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    let place = area.loc + Point::from((100, 100));
+    run.state.space.map_element(window.clone(), place, false);
+    run.state.settle(&window);
+    assert_eq!(
+        run.state.workspace_of(&window),
+        run.state.active_workspace(&second)
+    );
+    // The switch moves the keyboard, and the outline with it, at once: the frame half way
+    // through is the one after.
+    assert!(run.state.activate_workspace(two.list[0]));
+    advance(DURATION / 2);
+    let during = run.state.capture(1).expect("a frame");
+    advance(DURATION);
+    let after = run.state.capture(1).expect("a frame");
+    let green = during.as_chunks::<4>().0.contains(&[0, 255, 0, 255]);
+    assert!(green, "the second output shows its window");
+    assert!(during == after, "the second output's frame is the same");
     run.stop();
 }
 

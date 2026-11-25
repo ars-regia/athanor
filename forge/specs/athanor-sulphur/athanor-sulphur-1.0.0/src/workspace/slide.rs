@@ -269,3 +269,8 @@ pub(crate) fn right_to_left(on: bool) {
     RTL.with(|rtl| rtl.set(on));
 }
 
+/// Whether a slide is under way on `output`, with its timer.
+#[cfg(test)]
+pub(crate) fn under_way(output: &Output) -> bool {
+    reading(sliding(output), |slide| slide.is_some())
+}
