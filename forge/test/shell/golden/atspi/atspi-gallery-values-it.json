@@ -3,13 +3,16 @@
   "depth": 0,
   "role": "application",
   "name": "gallery_gtk.py",
+  "description": "gallery_gtk.py",
   "states": [],
-  "value": ""
+  "value": "",
+  "toolkit": "GTK 4.24.1"
  },
  {
   "depth": 1,
   "role": "frame",
   "name": "Galleria",
+  "description": "",
   "states": [
    "active",
    "sensitive",
@@ -22,6 +25,7 @@
   "depth": 2,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -34,6 +38,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -46,6 +51,7 @@
   "depth": 4,
   "role": "label",
   "name": "Pagine",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -57,6 +63,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -69,6 +76,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Pulsanti",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -81,6 +89,7 @@
   "depth": 6,
   "role": "label",
   "name": "Pulsanti",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -92,6 +101,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Scelte",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -104,6 +114,7 @@
   "depth": 6,
   "role": "label",
   "name": "Scelte",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -115,6 +126,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Valori",
+  "description": "",
   "states": [
    "focusable",
    "focused",
@@ -129,6 +141,7 @@
   "depth": 6,
   "role": "label",
   "name": "Valori",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -140,6 +153,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Elenchi",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -152,6 +166,7 @@
   "depth": 6,
   "role": "label",
   "name": "Elenchi",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -163,6 +178,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Testo",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -175,6 +191,7 @@
   "depth": 6,
   "role": "label",
   "name": "Testo",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -186,6 +203,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Stati",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -198,6 +216,7 @@
   "depth": 6,
   "role": "label",
   "name": "Stati",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -209,6 +228,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Calendario",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -221,6 +241,7 @@
   "depth": 6,
   "role": "label",
   "name": "Calendario",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -232,6 +253,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Dialoghi",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -244,6 +266,7 @@
   "depth": 6,
   "role": "label",
   "name": "Dialoghi",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -255,6 +278,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Menu",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -267,6 +291,7 @@
   "depth": 6,
   "role": "label",
   "name": "Menu",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -278,6 +303,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -290,6 +316,7 @@
   "depth": 4,
   "role": "label",
   "name": "Valori",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -301,6 +328,7 @@
   "depth": 4,
   "role": "slider",
   "name": "Un cursore",
+  "description": "",
   "states": [
    "focusable",
    "horizontal",
@@ -314,6 +342,7 @@
   "depth": 2,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -325,6 +354,7 @@
   "depth": 3,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -336,6 +366,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -347,6 +378,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -359,6 +391,7 @@
   "depth": 5,
   "role": "label",
   "name": "Galleria",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -370,6 +403,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -382,6 +416,7 @@
   "depth": 6,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -393,6 +428,7 @@
   "depth": 7,
   "role": "button",
   "name": "Minimize",
+  "description": "Minimize the window",
   "states": [
    "focusable",
    "sensitive",
@@ -405,6 +441,7 @@
   "depth": 7,
   "role": "button",
   "name": "Close",
+  "description": "Close the window",
   "states": [
    "focusable",
    "sensitive",

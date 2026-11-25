@@ -254,6 +254,32 @@ def arrow_counterparts(reference, candidates):
     return counterparts
 
 
+def toolkit_mismatch(reference, transcript):
+    """Names the two GTK versions when a reference and a transcript were both read from GTK, at
+    different versions (the application's node holds "GTK <version>"), else None: the drift of the
+    GTK is then the first suspect of a failure, and the reference is recorded again."""
+    seen = [nodes[0].get("toolkit", "") if nodes else "" for nodes in (reference, transcript)]
+    if all(toolkit.startswith("GTK ") for toolkit in seen) and seen[0] != seen[1]:
+        return f"the reference was recorded from {seen[0]}, the transcript is from {seen[1]}"
+    return None
+
+
+def fit(ref, node):
+    """How well `node` answers `ref`, lower is better: the role, then the same description, then
+    the states missing; min() keeps the first of equals, the tree's order."""
+    if node["role"] == ref["role"]:
+        role = 0
+    elif same_role(node["role"], ref["role"]):
+        role = 1
+    elif gallery_switch(ref["role"], node["role"], ref["name"]):
+        role = 2
+    else:
+        role = 3
+    description = int(node.get("description", "") != ref.get("description", ""))
+    missing = len(set(ref["states"]) - MOMENTARY - set(node["states"]))
+    return role, description, missing
+
+
 def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
     """Returns (lines, failures): a verdict per element of the reference, and the failures.
     `exempt` maps the name of an element decision 28 hides to its (cause, issue); `indicator`
@@ -276,20 +302,19 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
         if id(ref) in bars:
             lines.append(f"{ref['role']} {ref['name']!r}: no counterpart; note: {INDICATOR}")
             continue
-        # Among the nodes of its name, the one of its role, then one of a role said alike (a
-        # toolkit's frame and its panel may share the name of GTK's grouping), then a switch's
-        # toggle button (SWITCH), so that a popover's frame named as its switch does not take
-        # its place, then any (maintainer decision, 2026-11-14).
+        # Among the nodes of its name, the best: the role first (its own, then one said alike, a
+        # toolkit's frame and its panel may share the name of GTK's grouping, then a switch's
+        # toggle button (SWITCH), so that a popover's frame named as its switch does not take its
+        # place, then any, maintainer decision, 2026-11-14), then the same description,
+        # then the fewest states missing, then the first in the tree: nodes of one name may come
+        # in another order (a dialog's title bar, GTK's last, is Sal's first). Nodes of one name,
+        # role and description are told apart only by their states, each reference node taking
+        # its best in turn and extra states costing nothing: a state that moved between two such
+        # siblings is not reported (test_a_state_that_moved_between_identical_siblings...).
+        # The pairing is greedy: a reference node may take the candidate a later one needed
+        # (test_a_greedy_pairing_can_take_the_candidate_a_later_node_needed).
         named = [node for node in candidates if node["name"] == ref["name"]]
-        match = (
-            next((node for node in named if node["role"] == ref["role"]), None)
-            or next((node for node in named if same_role(node["role"], ref["role"])), None)
-            or next(
-                (node for node in named if gallery_switch(ref["role"], node["role"], ref["name"])),
-                None,
-            )
-            or next(iter(named), None)
-        )
+        match = min(named, key=lambda node: fit(ref, node), default=None)
         match = counterparts.get(id(ref), match)
         label = f"{ref['role']} {ref['name']!r}"
         if ref["name"] in exempt:
@@ -344,6 +369,9 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
             f"transcript {match['role']!r} {match['states']} {match['value']!r}; "
             f"{verdict}{': ' + detail if detail else ''}"
         )
+    mismatch = toolkit_mismatch(reference, transcript)
+    if failures and mismatch:
+        failures.append(mismatch)
     return lines, failures
 
 

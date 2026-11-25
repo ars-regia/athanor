@@ -3,13 +3,16 @@
   "depth": 0,
   "role": "application",
   "name": "gallery_gtk.py",
+  "description": "gallery_gtk.py",
   "states": [],
-  "value": ""
+  "value": "",
+  "toolkit": "GTK 4.24.1"
  },
  {
   "depth": 1,
   "role": "frame",
   "name": "Gallery",
+  "description": "",
   "states": [
    "active",
    "sensitive",
@@ -22,6 +25,7 @@
   "depth": 2,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -34,6 +38,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -46,6 +51,7 @@
   "depth": 4,
   "role": "label",
   "name": "Pages",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -57,6 +63,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -69,6 +76,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Buttons",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -81,6 +89,7 @@
   "depth": 6,
   "role": "label",
   "name": "Buttons",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -92,6 +101,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Choices",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -104,6 +114,7 @@
   "depth": 6,
   "role": "label",
   "name": "Choices",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -115,6 +126,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Values",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -127,6 +139,7 @@
   "depth": 6,
   "role": "label",
   "name": "Values",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -138,6 +151,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Lists",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -150,6 +164,7 @@
   "depth": 6,
   "role": "label",
   "name": "Lists",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -161,6 +176,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Text",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -173,6 +189,7 @@
   "depth": 6,
   "role": "label",
   "name": "Text",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -184,6 +201,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "States",
+  "description": "",
   "states": [
    "focusable",
    "focused",
@@ -198,6 +216,7 @@
   "depth": 6,
   "role": "label",
   "name": "States",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -209,6 +228,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Calendar",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -221,6 +241,7 @@
   "depth": 6,
   "role": "label",
   "name": "Calendar",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -232,6 +253,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Dialogs",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -244,6 +266,7 @@
   "depth": 6,
   "role": "label",
   "name": "Dialogs",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -255,6 +278,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Menus",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -267,6 +291,7 @@
   "depth": 6,
   "role": "label",
   "name": "Menus",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -278,6 +303,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -290,6 +316,7 @@
   "depth": 4,
   "role": "label",
   "name": "States",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -301,6 +328,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -313,6 +341,7 @@
   "depth": 5,
   "role": "label",
   "name": "Enable the button",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -322,8 +351,9 @@
  },
  {
   "depth": 5,
-  "role": "check box",
+  "role": "switch",
   "name": "Enable the button",
+  "description": "",
   "states": [
    "checkable",
    "focusable",
@@ -337,6 +367,7 @@
   "depth": 4,
   "role": "button",
   "name": "Waits for the switch",
+  "description": "",
   "states": [
    "focusable",
    "showing",
@@ -348,6 +379,7 @@
   "depth": 5,
   "role": "label",
   "name": "Waits for the switch",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -359,6 +391,7 @@
   "depth": 2,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -370,6 +403,7 @@
   "depth": 3,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -381,6 +415,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -392,6 +427,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -404,6 +440,7 @@
   "depth": 5,
   "role": "label",
   "name": "Gallery",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -415,6 +452,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -427,6 +465,7 @@
   "depth": 6,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -438,6 +477,7 @@
   "depth": 7,
   "role": "button",
   "name": "Minimize",
+  "description": "Minimize the window",
   "states": [
    "focusable",
    "sensitive",
@@ -450,6 +490,7 @@
   "depth": 7,
   "role": "button",
   "name": "Close",
+  "description": "Close the window",
   "states": [
    "focusable",
    "sensitive",
