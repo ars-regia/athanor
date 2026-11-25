@@ -411,7 +411,10 @@ impl<T: PartialEq + Clone> Tree<T> {
             return;
         };
         // Inward, no further than the middle of the tile, so that no side crosses another.
-        let (x, y) = (by.max(-(tile.size.w / 2)), by.max(-(tile.size.h / 2)));
+        let (x, y) = (
+            by.max((tile.size.w / 2).saturating_neg()),
+            by.max((tile.size.h / 2).saturating_neg()),
+        );
         let to = Rectangle::new(
             (tile.loc.x.saturating_sub(x), tile.loc.y.saturating_sub(y)).into(),
             (
