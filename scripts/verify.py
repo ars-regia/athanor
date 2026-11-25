@@ -7224,8 +7224,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     citations whose text the change writes are read so, not the whole of an edited line: an
     amendment of an approved text is appended to a line whose old citations it must not rewrite,
     and an edit of a sentence would otherwise fail on every tokenless citation it happens to sit
-    beside. The tokenless citations that the documents held when the rule came are tracked in an
-    issue and are converted to `path#name` in batches. Limit: without `hunks`, and for
+    beside. The tokenless citations that the documents held when the rule came are tracked in
+    #1498 and are converted to `path#name` in batches. Limit: without `hunks`, and for
     those, a sentence with no such token is not checked; a citation that names a wrong place
     holding the token is not seen, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
