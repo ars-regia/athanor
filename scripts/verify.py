@@ -8288,7 +8288,8 @@ def refused_scan(text, pattern, history):
     sections, and of the text before the first heading, that name a refused name; SECTIONS counts
     the normative sections, those whose heading HISTORY (refused_history) does not match. A
     paragraph, a list item or a table row is cut into sentences (spec_sentences), a line of a
-    code fence stands alone, and a `## ` line inside a fence is no heading. A fence closes on the
+    code fence stands alone, and a `# ` or `## ` line inside a fence is no heading. A heading of level 1 or 2 ends the
+    section before it, so a `# ` heading after a history section is read. A fence closes on the
     same character, at least as long as it opened (CommonMark)."""
     status = spec_status(text)
     if status is not None and not spec_approved(status):
@@ -8316,10 +8317,10 @@ def refused_scan(text, pattern, history):
         elif m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
             flush()
             fence = m.group(1)
-        elif line.startswith("## "):
+        elif line.startswith(("# ", "## ")):
             flush()
-            normative = history.fullmatch(" ".join(line[3:].split())) is None
-            sections += normative
+            normative = history.fullmatch(" ".join(line.lstrip("#").split())) is None
+            sections += normative and line.startswith("## ")
         elif not line.strip():
             flush()
         else:

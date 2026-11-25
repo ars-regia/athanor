@@ -502,6 +502,15 @@ class RefusedNames(unittest.TestCase):
         )
         self.assertEqual(len(self.problems()), 1)
 
+    def test_a_level_one_heading_ends_a_history_section(self):
+        head = APPROVED + "## 2. Decisions\n\nNone.\n\n"
+        body = "x\n\n# Part two\n\nIt uses libcosmic.\n"
+        problems = self.under("1. Context", body, head)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("names `libcosmic`", problems[0])
+        body = "x\n\n## Part two\n\nIt uses libcosmic.\n"
+        self.assertEqual(len(self.under("1. Context", body, head)), 1)
+
     def test_a_fence_closes_on_the_same_character_and_length(self):
         for body in (
             "````\n```\n## 6. Decisions taken\nIt uses libadwaita.\n````\n",
