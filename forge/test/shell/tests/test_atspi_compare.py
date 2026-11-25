@@ -487,6 +487,18 @@ class CompareTest(unittest.TestCase):
                 self.assertEqual(compare.main([str(paths["atspi-bar"]), str(paths["t"])]), 1)
                 self.assertEqual(compare.main([str(paths["atspi-bar-calendar"]), str(paths["t"])]), 0)
 
+    def test_a_failure_against_another_gtk_names_both_versions(self):
+        def gtk(version, name):
+            first = dict(node("application", "gallery_gtk.py"), toolkit=f"GTK {version}")
+            return [first, node("button", name)]
+
+        reference, transcript = gtk("4.20.0", "Gallery"), gtk("4.24.1", "Gallery frame")
+        failures = compare.compare(reference, transcript)[1]
+        self.assertEqual(failures[-1], "the reference was recorded from GTK 4.20.0, the transcript is from GTK 4.24.1")
+        # The same GTK, or a toolkit that is not GTK's, adds nothing.
+        self.assertEqual(len(compare.compare(gtk("4.24.1", "Gallery"), transcript)[1]), 1)
+        self.assertEqual(len(compare.compare(reference, [node("button", "Gallery frame")])[1]), 1)
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)

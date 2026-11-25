@@ -254,6 +254,16 @@ def arrow_counterparts(reference, candidates):
     return counterparts
 
 
+def toolkit_mismatch(reference, transcript):
+    """Names the two GTK versions when a reference and a transcript were both read from GTK, at
+    different versions (the application's node holds "GTK <version>"), else None: the drift of the
+    GTK is then the first suspect of a failure, and the reference is recorded again."""
+    seen = [nodes[0].get("toolkit", "") if nodes else "" for nodes in (reference, transcript)]
+    if all(toolkit.startswith("GTK ") for toolkit in seen) and seen[0] != seen[1]:
+        return f"the reference was recorded from {seen[0]}, the transcript is from {seen[1]}"
+    return None
+
+
 def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
     """Returns (lines, failures): a verdict per element of the reference, and the failures.
     `exempt` maps the name of an element decision 28 hides to its (cause, issue); `indicator`
@@ -344,6 +354,9 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
             f"transcript {match['role']!r} {match['states']} {match['value']!r}; "
             f"{verdict}{': ' + detail if detail else ''}"
         )
+    mismatch = toolkit_mismatch(reference, transcript)
+    if failures and mismatch:
+        failures.append(mismatch)
     return lines, failures
 
 

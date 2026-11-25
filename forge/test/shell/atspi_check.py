@@ -8,7 +8,8 @@ are found, which is what an empty or missing tree looks like. With ATSPI_REQUIRE
 set, a showing node must carry that name: the greeter's seal says its badge so (section 7,
 item 3). An environment variable, because scene.sh splits RIG_HOLD on spaces.
 With ATSPI_TRANSCRIPT set, the tree is also written there as JSON, every node with its role,
-name, description, states and value, for atspi_compare.py (doc_own_stack.md, OS8).
+name, description, states and value, for atspi_compare.py (doc_own_stack.md, OS8); the
+application's node also names its toolkit and version ("GTK 4.24.1").
 AX17 (doc_accessibility.md): every showing interactive widget has extents inside its window; a
 password field gives out only the invisible character over Text.GetText and
 Text.GetStringAtOffset (AX4); with ATSPI_RING set, the focused control's ring has a contrast of
@@ -148,8 +149,13 @@ def transcript(accessible, Atspi, depth=0, out=None):
     """Every node, depth first: its role, name, description, sorted state names and value."""
     out = [] if out is None else out
     states = sorted(state.value_nick for state in accessible.get_state_set().get_states())
-    out.append({"depth": depth, "role": accessible.get_role_name(), "name": accessible.get_name() or "",
-                "description": accessible.get_description() or "", "states": states, "value": value_of(accessible, Atspi)})
+    node = {"depth": depth, "role": accessible.get_role_name(), "name": accessible.get_name() or "",
+            "description": accessible.get_description() or "", "states": states, "value": value_of(accessible, Atspi)}
+    if depth == 0 and accessible.get_toolkit_name():
+        # The toolkit and version the tree was read from, so a reference names its GTK
+        # (atspi_compare.toolkit_mismatch).
+        node["toolkit"] = f"{accessible.get_toolkit_name()} {accessible.get_toolkit_version() or ''}".strip()
+    out.append(node)
     for child in children(accessible):
         transcript(child, Atspi, depth + 1, out)
     return out
