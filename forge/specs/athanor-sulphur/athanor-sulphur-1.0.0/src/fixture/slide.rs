@@ -159,3 +159,23 @@ fn a_right_to_left_language_mirrors_the_slide() {
     run.stop();
 }
 
+/// A third switch during a slide keeps the first workspace left on its way out: it is drawn
+/// where it stood, and the second beside the one activated.
+#[test]
+fn a_third_switch_keeps_the_first_leaving() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    assert!(run.state.activate_workspace(two.list[0]));
+    advance(DURATION);
+    let list = workspaces_of(&run, 0);
+    assert_eq!(list.len(), 3, "an empty workspace after the second");
+    assert!(run.state.activate_workspace(list[1]));
+    advance(DURATION / 2);
+    assert!(run.state.activate_workspace(list[2]));
+    let shown = frame(&mut run);
+    let middle = |(x, y): (i32, i32), by: i32| at(&shown, x + SIZE / 2 + by, y + SIZE / 2);
+    assert_eq!(middle(FIRST, -640), two.red, "the first, where it stood");
+    assert_eq!(middle(SECOND, 640), two.blue, "the second, where it stood");
+    run.stop();
+}
+

@@ -5,12 +5,11 @@
 //! from the catalog it loads (`athanor_i18n::is_rtl`), so the two never disagree. Only the
 //! drawing moves: the switch itself is made at once, so the windows left are already out of the
 //! space and the input goes to the windows activated, at their places, from the first frame. A
-//! switch during a slide starts from where the slide stands, so nothing jumps; the workspace
-//! left before that one is no longer drawn. Under reduced motion (doc_accessibility.md AX9)
-//! there is no slide. The slide is horizontal: Sulphur has no vertical workspace layout,
-//! cosmic-comp's `workspace_layout`.
+//! switch during a slide starts from where the slide stands, so nothing jumps, and every
+//! workspace still on its way out keeps its own motion until it is off the output. Under reduced
+//! motion (doc_accessibility.md AX9) there is no slide. The slide is horizontal: Sulphur has no
+//! vertical workspace layout, cosmic-comp's `workspace_layout`.
 
-use crate::dnd::moved;
 use crate::state::State;
 use crate::workspace::WorkspaceId;
 use smithay::desktop::Window;
@@ -29,27 +28,32 @@ const TICK: Duration = Duration::from_millis(4);
 #[derive(Default)]
 struct Sliding(Cell<Option<Slide>>);
 
-#[derive(Clone, Copy)]
 struct Slide {
-    started: Instant,
-    /// Where the workspace activated starts from its place, in widths of the output.
-    from: f64,
-    /// 1 towards a later workspace, -1 towards an earlier one.
-    direction: f64,
-    /// The workspace left, drawn beside the one activated.
-    left: WorkspaceId,
+    /// The workspace activated, coming to its place.
+    incoming: Motion,
+    /// The workspaces left that may still be on the output, the oldest first: one entry a
+    /// workspace, each gone once its motion is over, so no more than the output's workspaces.
+    leaving: Vec<(WorkspaceId, Motion)>,
 }
 
-impl Slide {
+/// A workspace's way across the output, in widths of the output from its place.
+#[derive(Clone, Copy)]
+struct Motion {
+    started: Instant,
+    from: f64,
+    to: f64,
+}
+
+impl Motion {
     fn running(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.started) < DURATION
     }
 
-    /// Where the workspace activated stands at `now` from its place, in widths of the output.
+    /// Where the workspace stands at `now`.
     fn at(&self, now: Instant) -> f64 {
         let done =
             now.saturating_duration_since(self.started).as_secs_f64() / DURATION.as_secs_f64();
-        self.from * (1.0 - ease(done.min(1.0)))
+        self.to + (self.from - self.to) * (1.0 - ease(done.min(1.0)))
     }
 }
 
@@ -80,27 +84,34 @@ fn sliding(output: &Output) -> &Cell<Option<Slide>> {
     &output.user_data().get_or_insert(Sliding::default).0
 }
 
+/// What `read` makes of the slide in `slot`, which keeps it.
+fn reading<T>(slot: &Cell<Option<Slide>>, read: impl FnOnce(Option<&Slide>) -> T) -> T {
+    let slide = slot.take();
+    let value = read(slide.as_ref());
+    slot.set(slide);
+    value
+}
+
+/// A window of a workspace left, at its place, and how far from it it is drawn.
+pub(crate) type Leaving = (Window, Rectangle<i32, Logical>, Point<i32, Logical>);
+
 /// What a frame shows of an output's slide (`Marks::slides`).
 pub struct Shown {
     pub(crate) output: Output,
     /// How far from their places the windows of the workspace activated are drawn.
-    pub(crate) shift: Point<i32, Logical>,
-    pub(crate) incoming: Vec<Window>,
-    /// The windows of the workspace left, bottom first, where they are drawn.
-    pub(crate) leaving: Vec<(Window, Rectangle<i32, Logical>)>,
+    shift: Point<i32, Logical>,
+    incoming: Vec<Window>,
+    /// The windows of the workspaces left, bottom first.
+    pub(crate) leaving: Vec<Leaving>,
 }
 
 impl Shown {
-    /// Where `window`, at `located`, is drawn.
-    pub(crate) fn shifted(
-        &self,
-        window: &Window,
-        located: Rectangle<i32, Logical>,
-    ) -> Rectangle<i32, Logical> {
+    /// How far from its place `window`, in the space, is drawn.
+    pub(crate) fn shift(&self, window: &Window) -> Point<i32, Logical> {
         if self.incoming.contains(window) {
-            Rectangle::new(moved(located.loc, self.shift), located.size)
+            self.shift
         } else {
-            located
+            Point::default()
         }
     }
 }
@@ -114,8 +125,8 @@ impl State {
         let slot = sliding(&output);
         let now = clock();
         // A slot still set has its timer.
-        let ticking = slot.get().is_some();
-        let before = slot.take().filter(|slide| slide.running(now));
+        let before = slot.take();
+        let ticking = before.is_some();
         let list = self.workspaces(&output);
         let place = |id| list.iter().position(|kept| *kept == id);
         let (Some(from), Some(into)) = (place(left), place(to)) else {
@@ -125,14 +136,29 @@ impl State {
             return;
         }
         let direction = if (into > from) != rtl() { 1.0 } else { -1.0 };
-        // The workspace left starts where it stands, the one activated beside it.
-        let stands = before.map_or(0.0, |slide| slide.at(now));
-        slot.set(Some(Slide {
+        let (stands, mut leaving) = before
+            .filter(|slide| slide.incoming.running(now))
+            .map_or((0.0, Vec::new()), |slide| {
+                (slide.incoming.at(now), slide.leaving)
+            });
+        leaving.retain(|(_, motion)| motion.running(now));
+        // A workspace still on its way out comes back from where it stands, any other in
+        // beside the one left, which goes out from where it stands.
+        let back = leaving.iter().find(|(id, _)| *id == to);
+        let coming = back.map_or(stands + direction, |(_, motion)| motion.at(now));
+        leaving.retain(|(id, _)| *id != to && *id != left);
+        let out = Motion {
             started: now,
-            from: stands + direction,
-            direction,
-            left,
-        }));
+            from: stands,
+            to: -direction,
+        };
+        leaving.push((left, out));
+        let incoming = Motion {
+            started: now,
+            from: coming,
+            to: 0.0,
+        };
+        slot.set(Some(Slide { incoming, leaving }));
         if ticking {
             return;
         }
@@ -142,7 +168,12 @@ impl State {
                 .insert_source(Timer::from_duration(TICK), move |_, _, state| {
                     let slot = sliding(&ticked);
                     state.request_redraw();
-                    if slot.get().is_some_and(|slide| slide.running(clock())) {
+                    // The workspaces left started no later than the one activated: they are
+                    // over by the time it is.
+                    let now = clock();
+                    let running =
+                        |slide: Option<&Slide>| slide.is_some_and(|it| it.incoming.running(now));
+                    if reading(slot, running) {
                         TimeoutAction::ToDuration(TICK)
                     } else {
                         slot.set(None);
@@ -164,42 +195,46 @@ impl State {
         self.space
             .outputs()
             .filter_map(|output| {
-                let slide = output
-                    .user_data()
-                    .get::<Sliding>()?
-                    .0
-                    .get()
-                    .filter(|slide| slide.running(now))?;
-                let width = f64::from(self.space.output_geometry(output)?.size.w);
-                let active = self.active_workspace(output)?;
-                let shift = |by: f64| Point::from(((by * width).round() as i32, 0));
-                let at = slide.at(now);
-                let incoming = self
-                    .space
-                    .elements()
-                    .filter(|window| self.workspace_of(window) == Some(active))
-                    .cloned()
-                    .collect();
-                let leaving = self
-                    .parked
-                    .iter()
-                    .filter(|(window, _)| self.workspace_of(window) == Some(slide.left))
-                    .map(|(window, kept)| {
-                        let drawn = moved(*kept, shift(at - slide.direction));
-                        (
-                            window.clone(),
-                            Rectangle::new(drawn, window.geometry().size),
-                        )
-                    })
-                    .collect();
-                Some(Shown {
-                    output: output.clone(),
-                    shift: shift(at),
-                    incoming,
-                    leaving,
-                })
+                let slot = &output.user_data().get::<Sliding>()?.0;
+                reading(slot, |slide| self.shown(output, slide?, now))
             })
             .collect()
+    }
+
+    fn shown(&self, output: &Output, slide: &Slide, now: Instant) -> Option<Shown> {
+        if !slide.incoming.running(now) {
+            return None;
+        }
+        let width = f64::from(self.space.output_geometry(output)?.size.w);
+        let active = self.active_workspace(output)?;
+        let shift = |by: f64| Point::from(((by * width).round() as i32, 0));
+        let incoming = self
+            .space
+            .elements()
+            .filter(|window| self.workspace_of(window) == Some(active))
+            .cloned()
+            .collect();
+        let leaving = slide
+            .leaving
+            .iter()
+            .filter(|(_, motion)| motion.running(now))
+            .flat_map(|(id, motion)| {
+                let by = shift(motion.at(now));
+                self.parked
+                    .iter()
+                    .filter(move |(window, _)| self.workspace_of(window) == Some(*id))
+                    .map(move |(window, kept)| {
+                        let located = Rectangle::new(*kept, window.geometry().size);
+                        (window.clone(), located, by)
+                    })
+            })
+            .collect();
+        Some(Shown {
+            output: output.clone(),
+            shift: shift(slide.incoming.at(now)),
+            incoming,
+            leaving,
+        })
     }
 }
 
@@ -233,3 +268,4 @@ pub(crate) fn advance(by: Duration) {
 pub(crate) fn right_to_left(on: bool) {
     RTL.with(|rtl| rtl.set(on));
 }
+

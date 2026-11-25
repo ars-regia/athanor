@@ -10,6 +10,7 @@
 //! window at a fractional offset, they land a pixel apart (#918). The divider lies inside the
 //! window's geometry, where decision 31 places no mark, as the maintainer chose on 2026-11-04.
 
+use crate::dnd::moved;
 use crate::focus_theme::{Edge, Outline};
 use crate::state::{full_screen_area, inset, laid_out, unconfined};
 use smithay::backend::renderer::element::memory::{
@@ -972,6 +973,7 @@ fn window_elements<R>(
     elements: &mut Vec<Stacked<R>>,
     window: &Window,
     located: Rectangle<i32, Logical>,
+    shift: Point<i32, Logical>,
     marks: &Marks,
     place: &Place,
 ) where
@@ -981,6 +983,8 @@ fn window_elements<R>(
     let Some(toplevel) = window.toplevel() else {
         return;
     };
+    // A workspace slide draws the window `shift` from its place.
+    let located = Rectangle::new(moved(located.loc, shift), located.size);
     let surface = toplevel.wl_surface();
     let offset = window.geometry().loc;
     let drawn_at = located.loc - offset;
@@ -1182,8 +1186,7 @@ where
         .partition(|layer| layer.layer() == Layer::Overlay);
     let lifted = lifted(marks.focused.as_ref(), space, output);
     let slide = marks.slides.iter().find(|shown| shown.output == *output);
-    let shifted =
-        |window: &Window, located| slide.map_or(located, |shown| shown.shifted(window, located));
+    let shift = |window: &Window| slide.map_or_else(Point::default, |shown| shown.shift(window));
     let places = space.output_geometry(output).map(|geometry| {
         // As `State::window_area_on`, which would take the map's lock again.
         let area = laid_out(output).map(|size| inset(geometry, size, map.non_exclusive_zone()));
@@ -1202,8 +1205,8 @@ where
     layers(renderer, overlay, &mut elements);
     if let Some((window, place)) = lifted.zip(places.as_ref()) {
         if let Some(located) = space.element_geometry(window) {
-            let located = shifted(window, located);
-            window_elements(renderer, &mut elements, window, located, marks, place);
+            let by = shift(window);
+            window_elements(renderer, &mut elements, window, located, by, marks, place);
         }
     }
     layers(renderer, top, &mut elements);
@@ -1213,13 +1216,13 @@ where
                 .element_bbox(window)
                 .is_some_and(|bbox| place.output.overlaps(bbox));
             if let Some(located) = space.element_geometry(window).filter(|_| overlaps) {
-                let located = shifted(window, located);
-                window_elements(renderer, &mut elements, window, located, marks, place);
+                let by = shift(window);
+                window_elements(renderer, &mut elements, window, located, by, marks, place);
             }
         }
-        // The workspace left, out of the space, below the one activated.
-        for (window, located) in slide.iter().flat_map(|shown| shown.leaving.iter().rev()) {
-            window_elements(renderer, &mut elements, window, *located, marks, place);
+        // The workspaces left, out of the space, below the one activated.
+        for (window, located, by) in slide.iter().flat_map(|shown| shown.leaving.iter().rev()) {
+            window_elements(renderer, &mut elements, window, *located, *by, marks, place);
         }
     }
     layers(renderer, lower, &mut elements);
