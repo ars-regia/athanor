@@ -3,7 +3,7 @@
 //! them: a window placed on the last one adds an empty one after it, and a workspace emptied that
 //! is neither the last nor the active one is removed; the active one emptied stays until it is
 //! left. The windows of an inactive workspace leave the space, keeping their place, and come back
-//! there when it is activated again, at once, drawn sliding in (`slide.rs`). Each output is a
+//! there when it is activated again, at once, drawn sliding in (`slide`). Each output is a
 //! workspace group of the protocol, each workspace offers `activate`, applied at the manager's
 //! `commit`, and its coordinates are its place in its group.
 // ponytail: no pinned workspace and no reordering yet; the overview's private interface adds them
@@ -28,6 +28,8 @@ use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, R
 use smithay::utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::cell::Cell;
+
+pub(crate) mod slide;
 
 /// A workspace, by a number the compositor never gives another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

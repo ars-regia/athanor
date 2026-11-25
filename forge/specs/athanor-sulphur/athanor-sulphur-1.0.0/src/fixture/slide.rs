@@ -1,9 +1,9 @@
-//! VL9 (`slide.rs`): the workspace switch slides for 200 ms, read from the frame, and AX9's
-//! reduced motion makes it at once.
+//! VL9 (`workspace/slide.rs`): the workspace switch slides for 200 ms, read from the frame,
+//! and AX9's reduced motion makes it at once.
 
 use super::marks::{at, frame, paint};
 use super::*;
-use crate::slide::{DURATION, advance};
+use crate::workspace::slide::{DURATION, advance};
 use crate::workspace::WorkspaceId;
 
 /// Where the window of the first workspace stands, and the one of the second.

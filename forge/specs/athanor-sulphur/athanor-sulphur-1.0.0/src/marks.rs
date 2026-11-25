@@ -300,8 +300,8 @@ pub struct Marks {
     pub blurred: crate::background_effect::Regions,
     /// The drag icons and where each goes (`State::drawn_drag_icons`).
     pub drag: Vec<(WlSurface, Point<i32, Logical>)>,
-    /// The workspace slides under way (`slide.rs`).
-    pub slides: Vec<crate::slide::Shown>,
+    /// The workspace slides under way (`workspace/slide.rs`).
+    pub slides: Vec<crate::workspace::slide::Shown>,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,

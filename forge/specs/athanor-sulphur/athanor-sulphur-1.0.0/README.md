@@ -107,7 +107,7 @@ last, which a window placed on it turns into a new empty one after it, and a wor
 that is neither the last nor the active one is removed. A window maps on the first output's
 active workspace; the windows of an inactive one leave the space, keeping their place, and come
 back there when it is activated, at once; they are drawn sliding in with `EaseInOutCubic` for
-200 ms (`src/slide.rs`, doc_visual_language.md VL9), or shown at once under reduced motion. A window on an inactive workspace
+200 ms (`src/workspace/slide.rs`, doc_visual_language.md VL9), or shown at once under reduced motion. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
 first; an xdg-activation token switches no workspace. A client gets one for a serial of its
 own input since it took the keyboard, or, outside a security context, for a button press
