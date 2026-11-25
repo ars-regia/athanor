@@ -6,6 +6,7 @@
 //! slide starts from where the slide stands, so nothing jumps; the workspace left before that one
 //! is no longer drawn. Under reduced motion (doc_accessibility.md AX9) there is no slide.
 
+use crate::dnd::moved;
 use crate::state::State;
 use crate::workspace::WorkspaceId;
 use smithay::desktop::Window;
@@ -85,7 +86,7 @@ impl Shown {
         located: Rectangle<i32, Logical>,
     ) -> Rectangle<i32, Logical> {
         if self.incoming.contains(window) {
-            Rectangle::new(located.loc + self.shift, located.size)
+            Rectangle::new(moved(located.loc, self.shift), located.size)
         } else {
             located
         }
@@ -172,7 +173,7 @@ impl State {
                     .iter()
                     .filter(|(window, _)| self.workspace_of(window) == Some(slide.left))
                     .map(|(window, kept)| {
-                        let drawn = *kept + shift(at - slide.direction);
+                        let drawn = moved(*kept, shift(at - slide.direction));
                         (
                             window.clone(),
                             Rectangle::new(drawn, window.geometry().size),
