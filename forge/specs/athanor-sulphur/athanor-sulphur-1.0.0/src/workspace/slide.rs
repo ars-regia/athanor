@@ -130,11 +130,6 @@ impl State {
         let Some(output) = self.output_of_workspace(to) else {
             return;
         };
-        let slot = sliding(&output);
-        let now = clock();
-        // A slot still set has its timer.
-        let before = slot.take();
-        let ticking = before.is_some();
         let list = self.workspaces(&output);
         let place = |id| list.iter().position(|kept| *kept == id);
         let (Some(from), Some(into)) = (place(left), place(to)) else {
@@ -143,6 +138,12 @@ impl State {
         if self.bell.reduced_motion {
             return;
         }
+        // Taken only once the slide starts: a slot still set has its timer, and one emptied on
+        // the returns above would start a second.
+        let slot = sliding(&output);
+        let now = clock();
+        let before = slot.take();
+        let ticking = before.is_some();
         let direction = if (into > from) != rtl() { 1.0 } else { -1.0 };
         let (stands, mut leaving) = before
             .filter(|slide| slide.incoming.running(now))

@@ -143,6 +143,20 @@ fn reduced_motion_switches_at_once() {
     run.stop();
 }
 
+/// A switch under reduced motion leaves the slide under way with its timer: a slot it emptied
+/// would make the next switch start a second timer beside the one still ticking.
+#[test]
+fn a_switch_under_reduced_motion_keeps_the_timer_of_the_slide() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    assert!(under_way(&output), "the first switch's slide has its timer");
+    run.state.bell.reduced_motion = true;
+    assert!(run.state.activate_workspace(two.list[0]));
+    assert!(under_way(&output), "the slot keeps the timer");
+    run.stop();
+}
+
 /// Under a right-to-left language the slide mirrors: the earlier workspace comes in from the
 /// right. Three quarters through, the ease leaves a sixteenth to go, 80 pixels.
 #[test]
