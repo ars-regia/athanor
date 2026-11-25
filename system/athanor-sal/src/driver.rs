@@ -3700,7 +3700,8 @@ impl Shell {
     /// `org.freedesktop.Application.Activate` gives it in `platform_data`. The compositor
     /// decides: a token it did not grant, or no longer honours, raises nothing, and nothing tells
     /// the application. `false` without the global, without an open surface `id`, or for a
-    /// token the request cannot carry, one with a NUL or longer than [`MAX_TOKEN_LEN`] bytes:
+    /// token the request cannot carry, one with a NUL or longer than 4079 bytes, the most one
+    /// Wayland message holds:
     /// nothing was asked, and the caller goes on without raising it.
     pub fn activate_window(&mut self, id: SurfaceId, token: &str) -> bool {
         let surface = by_id(&self.surfaces, id, |s| s.id).map(Surface::wl_surface);
