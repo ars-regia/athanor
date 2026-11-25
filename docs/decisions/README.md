@@ -66,14 +66,20 @@ does not restate it.
 | What is in which release | `docs/operations/release-1.0.md`, and only that document |
 
 - **Release placement.** `docs/operations/release-1.0.md` is the only owner of release
-  placement. A record or a specification that needs a placement cites that document and does not
-  state one; a record that moves something between releases is a decision of direction, and
-  `release-1.0.md` takes its result in the same pull request.
+  placement. The records decide the changes (ADR-0141 decisions 2 and 4, ADR-0138, ADR-0135) and
+  `release-1.0.md` states the result (its section 5). A record that moves something between
+  releases is a decision of direction, and `release-1.0.md` takes its result in the same pull
+  request; a specification that needs a placement cites that document and does not state one.
 - **Amendments.** A record is never amended inside itself: an `## Amendment` heading in a
-  decision record is refused. An amendment is a new record that names the one it amends, and the
+  decision record is refused, except in the three records named below. An amendment is a new record that names the one it amends, and the
   old record's `status` then reads `amended by <new id>` ("Superseding and amending", above). A document outside
   `docs/decisions/` that says "ADR-X amends ADR-Y" is true only while the status of ADR-Y names
-  ADR-X. `scripts/verify.py decisions` checks both.
+  ADR-X. `scripts/verify.py decisions` checks both. The check knows a record by its front-matter id and
+  by `ADR-NNNN`, its file number, and reads each list item as a sentence of its own. It reads
+  "amends ADR-Y", "amends `ADR-Y`", "amends decision 3 of ADR-Y" and "ADR-Y is amended by
+  ADR-X", outside code fences; "amended" alone and a list of targets after one `amends` are not
+  read. ADRs 0121, 0122 and 0126 keep their `## Amendment` heading through
+  `DECISION_AMENDMENT_HEADING_KEPT` in `scripts/verify.py`; the set only shrinks.
 
 ## Approval
 
@@ -84,7 +90,10 @@ area approves records tagged with it.
 
 `python3 scripts/verify.py decisions` verifies the front matter of every record, that
 ids are unique, that this index lists every record and nothing else, and that every
-`superseded by` or `amended by` target exists.
+`superseded by` or `amended by` target exists. It also checks the two ways
+a record is amended (see "Who owns which decision"): no `## Amendment` heading outside the
+three kept records, and every "ADR-X amends ADR-Y" of a document outside this folder is
+confirmed by the status of ADR-Y.
 
 ## Index
 

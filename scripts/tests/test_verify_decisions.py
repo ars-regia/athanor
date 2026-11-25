@@ -169,6 +169,41 @@ class DecisionProblemsTest(unittest.TestCase):
     def test_a_claim_in_a_fenced_block_is_not_read(self):
         self.assertEqual(self.claim("```\nADR-0002 amends ADR-0001.\n```\n", status="accepted"), [])
 
+    def test_a_record_is_known_by_its_file_number_too(self):
+        root = self.repo(
+            {"0001-a.md": ("W1-OLD", "amended by ADR-0002"), "0002-b.md": ("W1-NEW", "accepted")}
+        )
+        doc = root / "docs/architecture/doc_x.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text("ADR-0002 amends ADR-0001.\n")
+        self.assertEqual(verify.decision_amendment_problems(root), [])
+        doc.write_text("ADR-0002 amends ADR-0001.\n")
+        (root / "docs/decisions/0001-a.md").write_text(
+            (root / "docs/decisions/0001-a.md").read_text().replace("amended by ADR-0002", "accepted")
+        )
+        self.assertEqual(len(verify.decision_amendment_problems(root)), 1)
+
+    def test_a_list_item_is_a_sentence_of_its_own(self):
+        text = "- ADR-0002 amends ADR-0003\n- it also amends ADR-0001\n"
+        self.assertEqual(verify.decision_claims(text), [("ADR-0003", "ADR-0002"), ("ADR-0001", None)])
+
+    def test_the_claim_forms_are_read(self):
+        for text, claims in {
+            "ADR-0002 amends `ADR-0001`.": [("ADR-0001", "ADR-0002")],
+            "ADR-0002 amends decision 3 of ADR-0001.": [("ADR-0001", "ADR-0002")],
+            "ADR-0001 is amended by ADR-0002.": [("ADR-0001", "ADR-0002")],
+            "ADR-0001 (decision 3) was amended by ADR-0002.": [("ADR-0001", "ADR-0002")],
+            "It is amended later.": [],
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(verify.decision_claims(text), claims)
+
+    def test_an_amendment_heading_in_a_code_fence_is_not_read(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        f = root / "docs/decisions/0001-a.md"
+        f.write_text(f.read_text() + "\n```\n## Amendment\n```\n")
+        self.assertEqual(verify.decision_amendment_problems(root), [])
+
     def test_the_repository_amendments_pass(self):
         self.assertEqual(verify.decision_amendment_problems(), [])
 

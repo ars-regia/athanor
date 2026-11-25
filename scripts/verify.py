@@ -8126,26 +8126,66 @@ DECISION_AMENDMENT_HEADING_KEPT = {
     "0122-own-compositor-optional-session-and-desktop-first.md",
     "0126-toolkit-ready-to-leave-the-repository.md",
 }
-DECISION_AMENDS = re.compile(r"\bamends\s+\[?(ADR-\d{4})", re.I)
-DECISION_REF = re.compile(r"ADR-\d{4}")
+# The claims of one sentence that a document outside docs/decisions makes: "ADR-X amends ADR-Y",
+# also "amends `ADR-Y`", "amends decision 3 of ADR-Y" and "ADR-Y is amended by ADR-X" (a link or a
+# parenthesis may follow the id). Only the first ADR after `amends` is read, not a list, and
+# "amended" alone, "amending", "amendment of" and a record that does not use the id `ADR-NNNN` are
+# not read.
+DECISION_AMENDS = re.compile(r"\bamends\s+(?:decision\s+\d+\s+of\s+)?[\[`]*(ADR-\d{4})", re.I)
+DECISION_AMENDED_BY = re.compile(
+    r"(ADR-\d{4})[\]`]*(?:\([^)]*\))?(?:\s*\([^)]*\))?,?\s+(?:(?:is|was|are|were|also|and)\s+)*"
+    r"amended\s+by\s+[\[`]*(ADR-\d{4})",
+    re.I,
+)
+DECISION_REF = re.compile(r"ADR-\d{4}", re.I)
+# A list item or a table row is a sentence of its own, with or without a final period.
+DECISION_UNIT = re.compile(r"\s*(?:[-*+]|\d+[.)]|\|)\s")
 # Generated trees that no check opens (AGENTS.md, "Names and generated files").
 DECISION_PROSE_SKIP = {"graph-vaults", "graph-pages"}
 
 
+def decision_claims(text):
+    """[(target, amender)] of the amendment claims of the Markdown TEXT, outside code fences:
+    AMENDER is the ADR named before `amends` in its sentence, or None when the sentence names
+    none ("which amends ADR-Y"); a claim "ADR-Y is amended by ADR-X" names both."""
+    claims = []
+    for paragraph in "\n".join(prose_lines(text)).split("\n\n"):
+        units = []
+        for line in paragraph.splitlines():
+            if not units or DECISION_UNIT.match(line):
+                units.append(line)
+            else:
+                units[-1] += " " + line
+        for unit in units:
+            for sentence in spec_sentences(" ".join(unit.split())):
+                for m in DECISION_AMENDS.finditer(sentence):
+                    target = m.group(1).upper()
+                    before = [a.upper() for a in DECISION_REF.findall(sentence[:m.start()])]
+                    amenders = [a for a in before if a != target]
+                    claims.append((target, amenders[-1] if amenders else None))
+                for m in DECISION_AMENDED_BY.finditer(sentence):
+                    if m.group(1).upper() != m.group(2).upper():
+                        claims.append((m.group(1).upper(), m.group(2).upper()))
+    return claims
+
+
 def decision_amendment_problems(root=None):
     """#1461, the two ways a record is amended (docs/decisions/README.md, "Who owns which
-    decision"): no record holds an `## Amendment` heading, and every "ADR-X amends ADR-Y" that a
-    document outside docs/decisions states is confirmed by the status of ADR-Y. The amending
-    record is the ADR named before `amends` in the sentence; a sentence that names none ("which
-    amends ADR-Y") only needs Y to be `amended by` some record. The first ADR after `amends` is
-    read, not a list."""
+    decision"): no record holds an `## Amendment` heading outside a code fence, and every "ADR-X
+    amends ADR-Y" that a document outside docs/decisions states (decision_claims) is confirmed by
+    the status of ADR-Y, which names ADR-X by its id or by its file number. A record is known by
+    its front-matter id and by `ADR-NNNN`, its file number (ADR-0074 item 6)."""
     root = Path(root or ROOT)
-    out, statuses = [], {}
+    out, statuses, aliases = [], {}, {}
     for f in sorted((root / "docs" / "decisions").glob("[0-9][0-9][0-9][0-9]-*.md")):
         text = read(f)
         fm = decision_front_matter(text) or {}
-        statuses[fm.get("id", "")] = fm.get("status", "")
-        has_heading = DECISION_AMENDMENT_HEADING.search(text) is not None
+        alias = f"ADR-{f.name[:4]}"
+        for key in {fm.get("id", ""), alias} - {""}:
+            statuses[key] = fm.get("status", "")
+        aliases[alias] = fm.get("id", alias)
+        aliases[fm.get("id", alias)] = alias
+        has_heading = DECISION_AMENDMENT_HEADING.search("\n".join(prose_lines(text))) is not None
         if has_heading and f.name not in DECISION_AMENDMENT_HEADING_KEPT:
             out.append(f"{f.name}: has an '## Amendment' heading: an amendment is a new record that names this one "
                        "(docs/decisions/README.md, Who owns which decision)")
@@ -8160,19 +8200,18 @@ def decision_amendment_problems(root=None):
         for fname in sorted(n for n in names if n.endswith(".md")):
             path = Path(top) / fname
             rel = path.relative_to(root).as_posix()
-            for paragraph in "\n".join(prose_lines(read(path))).split("\n\n"):
-                for sentence in spec_sentences(" ".join(paragraph.split())):
-                    for m in DECISION_AMENDS.finditer(sentence):
-                        target = m.group(1)
-                        status = statuses.get(target)
-                        if status is None:
-                            continue
-                        amenders = [a for a in DECISION_REF.findall(sentence[:m.start()]) if a != target]
-                        if amenders and amenders[-1] not in status:
-                            out.append(f"{rel}: says {amenders[-1]} amends {target}, whose status "
-                                       f"'{status}' does not name {amenders[-1]}")
-                        elif not amenders and not status.startswith("amended by"):
-                            out.append(f"{rel}: says {target} is amended, but its status is '{status}'")
+            for target, amender in decision_claims(read(path)):
+                status = statuses.get(target)
+                if status is None:
+                    continue
+                if amender is None:
+                    if not status.startswith("amended by"):
+                        out.append(f"{rel}: says {target} is amended, but its status is '{status}'")
+                    continue
+                named = {amender, aliases.get(amender, amender)}
+                if not any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", status) for n in named):
+                    out.append(f"{rel}: says {amender} amends {target}, whose status "
+                               f"'{status}' does not name {amender}")
     return out
 
 
