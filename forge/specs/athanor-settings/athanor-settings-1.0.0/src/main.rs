@@ -78,11 +78,11 @@ fn forward() -> ExitCode {
 /// a failed `ExecStopPost=` would fail the run, and `Restart=on-failure` would bring the
 /// window back. It runs before every other step of `main`, which could fail, and
 /// needs only the directory systemd names in `RUNTIME_DIRECTORY`.
-fn stopped() -> ExitCode {
-    if env::var("SERVICE_RESULT").as_deref() != Ok("success") {
+fn stopped(service_result: Option<&str>, runtime_directory: Option<&str>) -> ExitCode {
+    if service_result != Some("success") {
         return ExitCode::SUCCESS;
     }
-    let dir = env::var("RUNTIME_DIRECTORY").ok().and_then(|dirs| {
+    let dir = runtime_directory.and_then(|dirs| {
         dirs.split(':')
             .map(PathBuf::from)
             .find(|dir| dir.ends_with("athanor-settings"))
@@ -103,7 +103,10 @@ fn main() -> ExitCode {
     athanor_unit::panic::install();
     journal::init();
     if env::args_os().nth(1).is_some_and(|arg| arg == STOPPED) {
-        return stopped();
+        return stopped(
+            env::var("SERVICE_RESULT").ok().as_deref(),
+            env::var("RUNTIME_DIRECTORY").ok().as_deref(),
+        );
     }
     // Before any toolkit or Wayland connection: the window runs only in its unit (SE4).
     match fs::read_to_string("/proc/self/cgroup") {
@@ -190,6 +193,66 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use athanor_settings_core::target::Target;
+
+    /// A new runtime directory named as systemd names Settings' own, holding a saved state and
+    /// the marker of a reopened page: `(the directory RUNTIME_DIRECTORY names, its parent)`.
+    fn saved(name: &str) -> (String, PathBuf) {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos();
+        let parent = env::temp_dir().join(format!(
+            "athanor-settings-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        let dir = parent.join("athanor-settings");
+        fs::create_dir_all(&dir).expect("create the test directory");
+        window_state::save(&dir, Target::Landing).expect("save the state");
+        window_state::mark(&dir).expect("mark the reopen");
+        (dir.to_string_lossy().into_owned(), parent)
+    }
+
+    fn kept(dir: &str) -> bool {
+        let dir = PathBuf::from(dir);
+        dir.join(window_state::FILE).exists() && dir.join(window_state::MARKER).exists()
+    }
+
+    /// `ExitCode` has no equality; its debug text names the status.
+    fn exits_zero(code: ExitCode) -> bool {
+        format!("{code:?}") == format!("{:?}", ExitCode::SUCCESS)
+    }
+
+    #[test]
+    fn a_successful_stop_clears_the_state_and_a_failed_one_keeps_it() {
+        let (dir, parent) = saved("stop-success");
+        assert!(exits_zero(stopped(Some("success"), Some(&dir))));
+        assert!(!PathBuf::from(&dir).join(window_state::FILE).exists());
+        assert!(!PathBuf::from(&dir).join(window_state::MARKER).exists());
+        fs::remove_dir_all(parent).expect("remove the test directory");
+
+        for result in [Some("exit-code"), Some("signal"), Some("timeout"), Some(""), None] {
+            let (dir, parent) = saved("stop-failed");
+            assert!(exits_zero(stopped(result, Some(&dir))));
+            assert!(kept(&dir), "{result:?} keeps the state");
+            fs::remove_dir_all(parent).expect("remove the test directory");
+        }
+    }
+
+    #[test]
+    fn a_failed_clear_still_exits_zero() {
+        // `state` a directory: removing it as a file fails, and the clear returns the error.
+        let (dir, parent) = saved("stop-clear-fails");
+        let state = PathBuf::from(&dir).join(window_state::FILE);
+        fs::remove_file(&state).expect("remove the state file");
+        fs::create_dir(&state).expect("create a directory in its place");
+        assert!(window_state::clear(&PathBuf::from(&dir)).is_err());
+        assert!(exits_zero(stopped(Some("success"), Some(&dir))));
+        // No directory of Settings among the names, or none at all.
+        assert!(exits_zero(stopped(Some("success"), Some("/run/user/1000/other"))));
+        assert!(exits_zero(stopped(Some("success"), None)));
+        fs::remove_dir_all(parent).expect("remove the test directory");
+    }
 
     #[test]
     fn only_the_unit_cgroup_runs_the_window() {

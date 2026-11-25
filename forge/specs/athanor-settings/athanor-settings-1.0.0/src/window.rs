@@ -451,6 +451,13 @@ fn now() -> i64 {
         .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX))
 }
 
+/// Whether a Close of `surface` closes Settings' window (SE5): the window has no id before its
+/// first frame, so any surface is it then; afterwards only the one it drew on. Generic, as
+/// `SurfaceId` has no constructor outside Sal.
+fn closes_window<T: PartialEq>(window: Option<T>, surface: T) -> bool {
+    window.is_none_or(|window| window == surface)
+}
+
 impl Application for Settings {
     fn start(&mut self) -> Vec<(Ui, Role)> {
         let role = Role::Window {
@@ -476,8 +483,7 @@ impl Application for Settings {
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
         if event == Event::Window(WindowButton::Close) {
             shell.close(surface);
-            // The window has no id before its first frame; any other surface is not it.
-            if self.window.is_none_or(|window| window == surface) {
+            if closes_window(self.window, surface) {
                 self.close_window();
             }
             return;
@@ -767,6 +773,13 @@ mod tests {
         assert_eq!(state(), Some(Target::Page("about")));
         assert!(!marker.exists(), "only a page reopened after a crash is marked");
         std::fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[test]
+    fn a_close_ends_the_window_before_its_first_frame_and_on_its_own_surface_only() {
+        assert!(closes_window(None, 7), "before the first frame any surface is the window");
+        assert!(closes_window(Some(7), 7));
+        assert!(!closes_window(Some(7), 8), "a dialog's Close leaves the window open");
     }
 
     const NOW: i64 = 1_800_000_000;
