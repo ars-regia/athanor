@@ -255,12 +255,20 @@ def problems(data):
 
 
 def rpm_executables(rpm, into):
-    """The /usr/bin/athanor-* files of RPM, unpacked under into."""
+    """The /usr/bin/athanor-* files of RPM, unpacked under into. rpm names the payload's files
+    `./usr/...`, GNU cpio's own archives `usr/...`: both spellings match."""
     payload = subprocess.run(
         ["rpm2cpio", str(rpm)], check=True, capture_output=True
     ).stdout
     subprocess.run(
-        ["cpio", "-idm", "--quiet", "--no-absolute-filenames", f"./{PREFIX}*"],
+        [
+            "cpio",
+            "-idm",
+            "--quiet",
+            "--no-absolute-filenames",
+            f"./{PREFIX}*",
+            f"{PREFIX}*",
+        ],
         cwd=into,
         input=payload,
         check=True,

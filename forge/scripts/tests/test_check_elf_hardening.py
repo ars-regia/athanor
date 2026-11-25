@@ -3,12 +3,15 @@ RELRO or immediate binding, or was built without frame pointers, and build_spec.
 every RPM it builds (#1350; python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
+import io
+import os
 import pathlib
 import shutil
 import struct
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
@@ -146,6 +149,60 @@ class ProblemsTest(unittest.TestCase):
         )
         with self.assertRaises(check.ElfError):
             check.frame_pointer_share(frames)
+
+
+@unittest.skipUnless(shutil.which("cpio"), "cpio is not on PATH")
+class MainTest(unittest.TestCase):
+    """main() on an RPM, through the real cpio: rpm2cpio is a stand-in on PATH that prints the
+    cpio archive the test passes as the RPM."""
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+        bin_dir = self.dir / "bin"
+        bin_dir.mkdir()
+        fake = bin_dir / "rpm2cpio"
+        fake.write_text('#!/bin/sh\nexec cat "$1"\n')
+        fake.chmod(0o755)
+        patcher = mock.patch.dict(
+            os.environ, {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def rpm(self, files):
+        """A cpio archive of files, {path under the root: bytes}, standing for an RPM."""
+        tree = self.dir / "tree"
+        for name, data in files.items():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_bytes(data)
+        listing = "".join(f"./{name}\n" for name in files)
+        archive = subprocess.run(
+            ["cpio", "-o", "-H", "newc", "--quiet"],
+            cwd=tree,
+            input=listing.encode(),
+            check=True,
+            capture_output=True,
+        ).stdout
+        out = self.dir / "package.rpm"
+        out.write_bytes(archive)
+        return str(out)
+
+    def test_an_rpm_without_athanor_executables_passes(self):
+        rpm = self.rpm({"usr/bin/matugen": elf(e_type=2), "usr/share/doc/x": b"x"})
+        self.assertEqual(check.main([rpm]), 0)
+
+    def test_a_weak_athanor_executable_fails_and_a_script_is_skipped(self):
+        rpm = self.rpm(
+            {
+                "usr/bin/athanor-bar": elf(relro=False),
+                "usr/bin/athanor-session": b"#!/bin/sh\n",
+            }
+        )
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(check.main([rpm]), 1)
+        self.assertIn("/usr/bin/athanor-bar: no PT_GNU_RELRO", err.getvalue())
+        self.assertNotIn("athanor-session", err.getvalue())
 
 
 @unittest.skipUnless(shutil.which("rustc"), "rustc is not on PATH")
