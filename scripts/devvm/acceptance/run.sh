@@ -1020,9 +1020,9 @@ stage_probes() { # the runtime audit probes (issue #312), against expectations.t
 
 # ADR-0025, doc_disks.md DK20 B (issue #1458): a filesystem mounted through udisks is nodev, nosuid
 # and noexec, and a program on it does not run. A vfat image on a loop device stands for a stick.
-# vfat's own defaults (uid=, gid=, showexec) must survive the global `defaults` key: the options
-# must still show uid= and gid= (the caller is root through sudo), and showexec gives run.bat an
-# x bit, so a refusal is noexec's and nothing else's. The positive control mounts the same image
+# vfat's own defaults must survive the global `defaults` key: the options must still show
+# shortname=mixed, showexec, utf8 and flush (the kernel omits uid= and gid= for root, the caller
+# through sudo), and showexec gives run.bat an x bit, so a refusal is noexec's and nothing else's. The positive control mounts the same image
 # with `-o exec`: if that does not run, the refusal under the default mount would prove nothing.
 # Every cleanup step runs on its own; a failed one is reported on stderr and fails the stage.
 stage_removable() {
@@ -1063,13 +1063,13 @@ probe default
 sudo udisksctl unmount -b "$loop" > /dev/null || exit 1
 sudo udisksctl mount -b "$loop" -o exec > /dev/null || exit 1
 probe exec') || die "FAIL  removable: the mount, a probe or the cleanup failed: $out"
-  for opt in noexec nodev nosuid 'uid=[0-9]+' 'gid=[0-9]+'; do
+  for opt in noexec nodev nosuid shortname=mixed showexec utf8 flush; do
     grep -Eq "^OPTIONS default (.*,)?$opt(,|$)" <<< "$out" || die "FAIL  removable: the default udisks mount lacks $opt: $out"
   done
   grep -q '^EXEC_REFUSED default$' <<< "$out" || die "FAIL  removable: a file ran from the default udisks mount: $out"
   grep -q '^EXEC_RAN exec$' <<< "$out" || die "FAIL  removable: the control mounted with exec did not run the file, so the refusal proves nothing: $out"
   grep -q '^CLEANUP_FAILED 0$' <<< "$out" || die "FAIL  removable: the cleanup failed: $out"
-  pass "DK20 B: a udisks mount carries noexec, nodev and nosuid, keeps vfat's uid= and gid=, and runs nothing; with exec the same file runs"
+  pass "DK20 B: a udisks mount carries noexec, nodev and nosuid, keeps vfat's own defaults, and runs nothing; with exec the same file runs"
 }
 
 stage_report() {
