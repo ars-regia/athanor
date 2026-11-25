@@ -90,6 +90,11 @@ MARKERS = (
     # wallpaper in it, still up after logging in at the greeter.
     (b"SESSION_ALIVE", "session-alive"),
     (b"SESSION_DEAD", "session-dead"),
+    # And to GRANTS_PROBE: no service of the session lost a Landlock grant or refused to
+    # confine itself, or one did, or the journal could not be read.
+    (b"GRANTS_KEPT", "grants-kept"),
+    (b"GRANTS_LOST", "grants-lost"),
+    (b"GRANTS_UNREADABLE", "grants-unreadable"),
     # And to SETTINGS_PROBE: the settings application started inside that session, still
     # running after it has had time to open its window or to die trying.
     (b"SETTINGS_ALIVE", "settings-alive"),
@@ -429,6 +434,13 @@ SESSION_PROBE_WAIT = 85.0
 # user manager is the one the desktop runs in, so `systemctl --user` here sees the very
 # units the greeter's login started.
 SESSION_DIAGNOSTICS = (
+    # First, and with no line cap: the status and the whole journal of each unit the probe
+    # names as down. The runs since 2026-11-22 named athanor-shelld.service in `down:` while the
+    # status below, cut by `head -60`, never reached it and the journal tail was full of other
+    # units. The units are asked again here rather than read back from the probe's answer,
+    # which is how the probe found them; one that is active by now is not worth the lines.
+    b"for u in " + SESSION_UNITS + b'; do systemctl --user -q is-active "$u" ||'
+    b' { systemctl --user status "$u" --no-pager -l; journalctl --user -b --no-pager -u "$u"; }; done',
     b"loginctl list-sessions --no-pager",
     b"systemctl --user list-units --failed --no-pager",
     b"systemctl --user status athanor-session.target athanor-desktop.service"
@@ -454,6 +466,23 @@ SESSION_DIAGNOSTICS = (
     # The crashing thread's stack, when systemd-coredump caught the dump.
     b"coredumpctl info --no-pager 2>&1 | grep -aE 'Signal|Command Line|#[0-9]+ ' | head -30",
 )
+# The session's user journal of this boot, asked once the session is up and before anything
+# else is started in it: a service that loses a Landlock grant keeps running with a warning
+# (`not granted: it fails the check`, system/athanor-unit/src/dirs.rs), and one that cannot
+# confine itself says `cannot confine` and refuses to run. Neither made a run fail until
+# #1490, where athanor-shelld died of the first and the bar, the dock and the launcher ran
+# on without grants for the same reason. The answer is the marker, and after GRANTS_LOST its
+# count and the lines, up to twenty, so that the log names the unit. A journal that cannot
+# be read, or reads empty with the session up, is not an answer of no lines: `-q` keeps
+# journalctl's notices, a permission warning among them, out of what is read.
+GRANTS_PROBE = (
+    b"if j=$(journalctl --user -b -q --no-pager) && [ -n \"$j\" ]; then"
+    b" l=$(printf '%s\n' \"$j\" | grep -aE 'cannot confine|not granted' | head -20);"
+    b" if [ -n \"$l\" ]; then printf 'GRANTS_%s %s\n' LOST \"$(printf '%s\n' \"$l\" | wc -l)\";"
+    b" printf '%s\n' \"$l\"; else printf 'GRANTS_%s\n' KEPT; fi;"
+    b" else printf 'GRANTS_%s\n' UNREADABLE; fi"
+)
+GRANTS_PROBE_WAIT = 5.0
 # With the desktop up, start the settings application inside it. The serial login shares
 # the account's user manager with the desktop, and that manager carries the session's
 # WAYLAND_DISPLAY, so a transient unit started here opens on the seat. The application is
@@ -690,6 +719,11 @@ def main() -> int:
     def open_settings() -> None:
         """Start Settings inside the desktop session and ask the guest whether its
         window came up and stayed. The picture is taken when the answer arrives."""
+        # The upgrade case starts from the published :stable, whose services may still
+        # lose grants that the candidate no longer does; only the candidate is asked.
+        if not HOLD:
+            ask(GRANTS_PROBE, GRANTS_PROBE_WAIT)
+            note("grants-asked")
         # The session's memory is read first, so that Settings is not part of it.
         ask(MEMORY_PROBE, MEMORY_PROBE_WAIT)
         ask(SETTINGS_PROBE, SETTINGS_PROBE_WAIT)
