@@ -1,5 +1,5 @@
-"""Unit tests of scripts/verify.py spec-deps, #1289: a specification names no dependency that
-no Cargo.toml uses (python3 -B -m unittest discover -s scripts/tests -v)."""
+"""Unit tests of scripts/verify.py spec-deps, #1289, #1510: a specification names no dependency that
+no Cargo.toml of its components uses (python3 -B -m unittest discover -s scripts/tests -v)."""
 
 import importlib.util
 import pathlib
@@ -13,6 +13,14 @@ verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
 DOC = "docs/architecture/doc_x.md"
+DOC_BAR = "docs/architecture/doc_bar.md"
+DOC_FREE = "docs/architecture/doc_free.md"
+COMPONENTS = (
+    '[[component]]\npath = "Cargo.toml"\nspec = "doc_x.md"\n\n'
+    '[[component]]\npath = "bar"\nspec = "doc_x.md"\n\n'
+    '[[component]]\npath = "bar"\nspec = "doc_bar.md"\n\n'
+    '[[component]]\npath = "scripts"\nspec = "doc_free.md"\n'
+)
 
 
 class SpecDeps(unittest.TestCase):
@@ -33,9 +41,12 @@ class SpecDeps(unittest.TestCase):
             "x/vendor/y/Cargo.toml",
             '[package]\nname = "vendored"\n\n[dependencies]\nzip = "8"\n',
         )
+        self.write(verify.COMPONENTS, COMPONENTS)
         self.write(DOC, "The `zxcvbn` crate (3.1.1) gives a hint.\n")
+        self.write(DOC_BAR, "Nothing.\n")
+        self.write(DOC_FREE, "Nothing.\n")
         self.write(
-            verify.SPEC_DEPS_ALLOW, "# header\ndoc_x.md zxcvbn planned: the hint\n"
+            verify.SPEC_DEPS_ALLOW, "# `DOCUMENT COMPONENT CRATE REASON`\ndoc_x.md bar zxcvbn planned: the hint\n"
         )
         self.commit()
 
@@ -141,7 +152,7 @@ class SpecDeps(unittest.TestCase):
     def test_an_entry_added_against_the_base_fails(self):
         self.write(DOC, "The `zxcvbn` crate gives a hint, through the crate `ring`.\n")
         self.write(
-            verify.SPEC_DEPS_ALLOW, "doc_x.md zxcvbn planned\ndoc_x.md ring planned\n"
+            verify.SPEC_DEPS_ALLOW, "doc_x.md bar zxcvbn planned\ndoc_x.md bar ring planned\n"
         )
         problems = self.problems("HEAD")
         self.assertEqual(len(problems), 1, problems)
@@ -150,14 +161,64 @@ class SpecDeps(unittest.TestCase):
     def test_a_base_without_the_list_adopts_it(self):
         self.git("rm", "-q", verify.SPEC_DEPS_ALLOW)
         self.commit()
-        self.write(verify.SPEC_DEPS_ALLOW, "doc_x.md zxcvbn planned\n")
+        self.write(verify.SPEC_DEPS_ALLOW, "doc_x.md bar zxcvbn planned\n")
         self.assertEqual(self.problems("HEAD"), [])
 
     def test_an_entry_without_a_reason_fails(self):
-        self.write(verify.SPEC_DEPS_ALLOW, "doc_x.md zxcvbn\n")
+        self.write(verify.SPEC_DEPS_ALLOW, "doc_x.md bar zxcvbn\n")
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("expected `DOCUMENT CRATE REASON`", problems[0])
+        self.assertIn("expected `DOCUMENT COMPONENT CRATE REASON`", problems[0])
+
+    def test_a_name_another_component_holds_fails(self):
+        # zbus is a manifest name of the root only; doc_bar.md owns bar alone
+        self.write(DOC_BAR, "It uses the `zbus` crate and the `futures-util` crate.\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_bar.md names the crate `zbus`", problems[0])
+        self.assertIn("its components (bar)", problems[0])
+
+    def test_a_document_without_a_component_matches_the_repository(self):
+        self.write(DOC_FREE, "It uses the `zbus` crate and the `ring` crate.\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_free.md names the crate `ring`", problems[0])
+        self.assertIn("no Cargo.toml of the repository", problems[0])
+        self.assertEqual(verify.spec_deps_fallback(self.root), ["doc_free.md"])
+
+    def test_one_crate_comma_and_the_rs_suffix(self):
+        self.write(DOC_BAR, "One crate, `futures-util-rs` and more.\n")
+        self.assertEqual(self.problems(), [])
+        self.write(DOC_BAR, "One crate, `ring-rs` and more.\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("`ring-rs`", problems[0])
+        self.write(DOC_BAR, "One crate, `zbus-rs` and more.\n")
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_the_component_of_an_entry_must_belong_to_the_document(self):
+        self.write(verify.SPEC_DEPS_ALLOW, "doc_x.md scripts zxcvbn planned\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("names the component scripts", problems[0])
+
+    def test_a_fallback_document_is_keyed_repo(self):
+        self.write(DOC_FREE, "It uses the `ring` crate.\n")
+        self.write(
+            verify.SPEC_DEPS_ALLOW,
+            "doc_x.md bar zxcvbn planned\ndoc_free.md repo ring planned\n",
+        )
+        self.assertEqual(self.problems(), [])
+
+    def test_a_base_without_the_component_column_is_not_held_to_its_list(self):
+        self.write(verify.SPEC_DEPS_ALLOW, "# `DOCUMENT CRATE REASON`\ndoc_x.md zxcvbn planned\n")
+        self.commit()
+        self.write(DOC_FREE, "It uses the `ring` crate.\n")
+        self.write(
+            verify.SPEC_DEPS_ALLOW,
+            "doc_x.md bar zxcvbn planned\ndoc_free.md repo ring planned\n",
+        )
+        self.assertEqual(self.problems("HEAD"), [])
 
 
 if __name__ == "__main__":
