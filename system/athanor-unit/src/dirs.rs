@@ -638,7 +638,9 @@ mod tests {
     #[test]
     fn a_link_in_a_directory_only_root_writes_is_followed() {
         // A link in / to a directory (/bin to usr/bin on a merged /usr, /home to var/home on
-        // Athanor) is followed whoever / reads as owned by.
+        // Athanor) is followed whoever / reads as owned by. Its target holds no further link:
+        // /sbin to usr/sbin, where /usr/sbin is itself a link in /usr, is refused where /usr
+        // reads as the overflow id, as the rule means it to be.
         let in_root = fs::read_dir("/")
             .expect("/")
             .filter_map(Result::ok)
@@ -646,6 +648,9 @@ mod tests {
             .find(|path| {
                 fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
                     && fs::metadata(path).is_ok_and(|m| m.is_dir())
+                    && fs::read_link(path).is_ok_and(|target| {
+                        fs::canonicalize(path).is_ok_and(|real| real == Path::new("/").join(target))
+                    })
             })
             .expect("a link in / to a directory, as every supported host has");
         let reached = walk(&in_root, &in_root)
