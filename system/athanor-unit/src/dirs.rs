@@ -187,8 +187,8 @@ const MAX_LINKS: usize = 40;
 
 /// The directory `path` names, reached one component at a time: each opened with O_PATH and
 /// O_NOFOLLOW relative to the descriptor of the one before, never by path. A link is followed
-/// only when the directory that holds it is owned by root and not writable by group or others
-/// (`/home`, a link to `var/home`), and its target is walked by the same rule; any other link
+/// only when root alone writes the directory that holds it (`root_alone_writes`: `/` holds
+/// `/home`, a link to `var/home`), and its target is walked by the same rule; any other link
 /// is refused, as another process of the user could put it there to move a grant to another
 /// directory the user writes. `shown` is the path the refusal names.
 fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
@@ -210,8 +210,7 @@ fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
             continue;
         }
         let target = PathBuf::from(nix::fcntl::readlinkat(&dir, name.as_os_str())?);
-        let holder = dir.metadata()?;
-        if holder.uid() != 0 || holder.mode() & 0o022 != 0 {
+        if !root_alone_writes(&dir.metadata()?)? {
             return Err(refused(
                 shown,
                 &format!(
@@ -233,6 +232,25 @@ fn walk(path: &Path, shown: &Path) -> io::Result<fs::File> {
         rest.extend(components(&target));
     }
     Ok(dir)
+}
+
+/// Whether root alone writes `holder`, as far as the link rule goes: not writable by group or
+/// others, and owned by root, or `/` itself, whoever owns it but the user. Every sandboxed
+/// unit of the user's manager runs in a user namespace that maps the user's uid alone
+/// (systemd.exec(5), `PrivateUsers=`), where root's directories read as the overflow id and
+/// cannot be told from another user's. `/` is known by its device and inode instead of its
+/// owner: whoever owns it already decides every path, so a link in it moves a grant nowhere
+/// its owner could not (#1490).
+fn root_alone_writes(holder: &fs::Metadata) -> io::Result<bool> {
+    if holder.mode() & 0o022 != 0 {
+        return Ok(false);
+    }
+    if holder.uid() == 0 {
+        return Ok(true);
+    }
+    let root = start(true)?.metadata()?;
+    Ok((holder.dev(), holder.ino()) == (root.dev(), root.ino())
+        && holder.uid() != nix::unistd::geteuid().as_raw())
 }
 
 /// `/`, or the working directory, where a walk starts.
@@ -403,12 +421,17 @@ mod tests {
 
     #[test]
     fn an_own_dir_refuses_a_directory_of_root() {
-        // "/" must be root's and not ours: not so when the suite runs as root, nor in a user
-        // namespace that does not map root, where "/" reads as the overflow id.
-        if nix::unistd::geteuid().is_root() || fs::metadata("/").map(|m| m.uid()).ok() != Some(0) {
+        // "/" must not be ours: not so when the suite runs as root. In a user namespace that
+        // does not map root, "/" reads as the overflow id, which owned_dir refuses as well.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipped: the suite runs as root, which owns /");
             return;
         }
-        owned_dir(Path::new("/")).expect("root's directory passes owned_dir");
+        if fs::metadata("/").expect("/").uid() == 0 {
+            owned_dir(Path::new("/")).expect("root's directory passes owned_dir");
+        } else {
+            owned_dir(Path::new("/")).expect_err("a directory of the overflow id");
+        }
         let error = own_dir(Path::new("/")).expect_err("root's directory");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert!(error.to_string().starts_with("/ is owned by another user"));
@@ -614,18 +637,34 @@ mod tests {
 
     #[test]
     fn a_link_in_a_directory_only_root_writes_is_followed() {
-        // Not checkable where "/" is not root's (a user namespace that does not map root, where
-        // it reads as the overflow id): every link is refused there.
-        if fs::metadata("/").map(|m| m.uid()).ok() != Some(0) {
-            eprintln!("skipped: / is not root's here");
-            return;
-        }
-        // /proc is root's, mode 0555, and /proc/self a link in it, on every Linux host; a
-        // container whose user namespace does not map root shows it as another user's.
-        if fs::metadata("/proc").map(|m| m.uid()).ok() == Some(0) {
-            owned_dir(Path::new("/proc/self/fd")).expect("through /proc/self");
+        // A link in / to a directory (/bin to usr/bin on a merged /usr, /home to var/home on
+        // Athanor) is followed whoever / reads as owned by.
+        let in_root = fs::read_dir("/")
+            .expect("/")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+                    && fs::metadata(path).is_ok_and(|m| m.is_dir())
+            })
+            .expect("a link in / to a directory, as every supported host has");
+        let reached = walk(&in_root, &in_root)
+            .expect("through a link in /")
+            .metadata()
+            .expect("fstat");
+        let target = fs::metadata(&in_root).expect("the link's target");
+        assert_eq!((reached.dev(), reached.ino()), (target.dev(), target.ino()));
+        // /proc is root's, mode 0555, and /proc/self a link in it, on every Linux host; where
+        // root is not mapped it reads as the overflow id, and is not /.
+        let through_proc = owned_dir(Path::new("/proc/self/fd"));
+        if fs::metadata("/proc").expect("/proc").uid() == 0 {
+            through_proc.expect("through /proc/self");
         } else {
-            eprintln!("skipped: /proc is not root's here");
+            let error = through_proc.expect_err("through /proc/self, root unmapped");
+            assert!(
+                error.to_string().contains("passes through /proc/self"),
+                "{error}"
+            );
         }
         // On Athanor /home is a link to var/home, and $HOME lies beneath it.
         let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -642,6 +681,58 @@ mod tests {
                 "skipped: /home is not a link here, or $HOME is not the user's beneath it"
             ),
         }
+    }
+
+    /// The rule where systemd runs every sandboxed unit of the user's manager: in a user
+    /// namespace that maps the user's uid alone, where root's directories read as the
+    /// overflow id. The test runs itself again in such a namespace, made by util-linux's
+    /// unshare; run as root (the shell rig), it first becomes uid 1000 through setpriv, since
+    /// a namespace that maps root shows root's directories as root's. It needs unprivileged
+    /// user namespaces and fails without them rather than skip, as it is the one test that
+    /// fails without the rule for `/`.
+    #[test]
+    fn the_rule_holds_where_root_is_not_mapped() {
+        const INSIDE: &str = "ATHANOR_UNIT_ROOT_UNMAPPED";
+        if std::env::var_os(INSIDE).is_none() {
+            let mut command = if nix::unistd::geteuid().is_root() {
+                let mut command = std::process::Command::new("setpriv");
+                command.args(["--reuid=1000", "--regid=1000", "--clear-groups", "unshare"]);
+                command
+            } else {
+                std::process::Command::new("unshare")
+            };
+            let output = command
+                .args(["--user", "--map-current-user"])
+                .arg(std::env::current_exe().expect("the test binary"))
+                .args([
+                    "--exact",
+                    "dirs::tests::the_rule_holds_where_root_is_not_mapped",
+                ])
+                .arg("--nocapture")
+                .env(INSIDE, "1")
+                .output()
+                .expect("util-linux's unshare, and setpriv as root");
+            let shown = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                output.status.success() && shown.contains("1 passed"),
+                "in a user namespace that maps the user's uid alone (this needs unprivileged \
+                 user namespaces):\n{shown}"
+            );
+            return;
+        }
+        assert_ne!(
+            fs::metadata("/").expect("/").uid(),
+            0,
+            "root is mapped here"
+        );
+        a_link_in_a_directory_only_root_writes_is_followed();
+        an_own_dir_refuses_a_directory_of_root();
+        a_link_in_an_intermediate_component_is_refused();
+        a_link_in_a_directory_another_user_owns_is_refused();
     }
 
     fn vars<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
