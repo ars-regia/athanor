@@ -122,7 +122,9 @@ impl State {
         let filtered =
             keyboard.input_intercept(source, self, code, key_state, |state, modifiers, handle| {
                 let found = match key_state {
-                    KeyState::Pressed => bindings::find(modifiers, &handle, state.lock.is_some()),
+                    // The tiling keys are bound on a tiled workspace only (OS13).
+                    KeyState::Pressed => bindings::find(modifiers, &handle, state.lock.is_some())
+                        .filter(|action| !action.tiling() || state.keyed_tiled()),
                     KeyState::Released => None,
                 };
                 // The keyboard aids of AX11 came before (`aids.rs`): Orca is sent the keys they

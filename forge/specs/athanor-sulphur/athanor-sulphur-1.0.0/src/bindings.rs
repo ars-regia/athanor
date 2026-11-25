@@ -13,6 +13,7 @@ use crate::session_calls::{
     POWER_OFF, PREVIOUS,
 };
 use crate::state::State;
+use crate::tiling::Direction;
 use crate::workspace::Step;
 use smithay::desktop::Window;
 use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
@@ -72,6 +73,19 @@ pub(crate) enum Action {
     Step(Step),
     /// Super+Shift+Ctrl with the same keys: the focused window is carried one workspace.
     Carry(Step),
+    /// Super with Left, Right, Up, Down or h, l, k, j: the focus goes to the neighbouring tile
+    /// that way, and stays at an edge (issue #1419).
+    FocusToward(Direction),
+    /// Super+Shift with the same keys: the focused window and that neighbour trade tiles.
+    SwapToward(Direction),
+    /// Super+O: the split of the focused tile turns to divide the other side.
+    TurnSplit,
+    /// Super+R: the focused tile one step larger.
+    GrowTile,
+    /// Super+Shift+R: the focused tile one step smaller.
+    ShrinkTile,
+    /// Super+G: the focused window leaves the tree and floats, or a floating one takes a tile.
+    ToggleFloating,
     /// Super+=: the magnifier one zoom step in, on at one step when off (doc_accessibility.md
     /// AX10).
     ZoomIn,
@@ -94,6 +108,8 @@ impl Action {
             | Self::TouchpadToggle => false,
             Self::Workspace(_) | Self::LastWorkspace | Self::MoveTo(_) | Self::MoveToLast => false,
             Self::Step(_) | Self::Carry(_) => false,
+            Self::FocusToward(_) | Self::SwapToward(_) => false,
+            Self::TurnSplit | Self::GrowTile | Self::ShrinkTile | Self::ToggleFloating => false,
             // Not in section 1's list: the lock surface gets the keys.
             Self::ZoomIn | Self::ZoomOut => false,
         }
@@ -118,6 +134,8 @@ impl Action {
             Self::CloseFocused | Self::NextGroup | Self::Run(_) | Self::TouchpadToggle => false,
             Self::Workspace(_) | Self::LastWorkspace | Self::MoveTo(_) | Self::MoveToLast => false,
             Self::Step(_) | Self::Carry(_) => false,
+            Self::FocusToward(_) | Self::SwapToward(_) => false,
+            Self::TurnSplit | Self::GrowTile | Self::ShrinkTile | Self::ToggleFloating => false,
         }
     }
 }
@@ -202,6 +220,26 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER | SHIFT | CTRL, Keysym::Down), Action::Carry(Step::Next)),
     (on(SUPER | SHIFT | CTRL, Keysym::j), Action::Carry(Step::Next)),
     (on(SUPER | SHIFT | CTRL, Keysym::l), Action::Carry(Step::Next)),
+    (on(SUPER, Keysym::Left), Action::FocusToward(Direction::Left)),
+    (on(SUPER, Keysym::h), Action::FocusToward(Direction::Left)),
+    (on(SUPER, Keysym::Right), Action::FocusToward(Direction::Right)),
+    (on(SUPER, Keysym::l), Action::FocusToward(Direction::Right)),
+    (on(SUPER, Keysym::Up), Action::FocusToward(Direction::Up)),
+    (on(SUPER, Keysym::k), Action::FocusToward(Direction::Up)),
+    (on(SUPER, Keysym::Down), Action::FocusToward(Direction::Down)),
+    (on(SUPER, Keysym::j), Action::FocusToward(Direction::Down)),
+    (on(SUPER | SHIFT, Keysym::Left), Action::SwapToward(Direction::Left)),
+    (on(SUPER | SHIFT, Keysym::h), Action::SwapToward(Direction::Left)),
+    (on(SUPER | SHIFT, Keysym::Right), Action::SwapToward(Direction::Right)),
+    (on(SUPER | SHIFT, Keysym::l), Action::SwapToward(Direction::Right)),
+    (on(SUPER | SHIFT, Keysym::Up), Action::SwapToward(Direction::Up)),
+    (on(SUPER | SHIFT, Keysym::k), Action::SwapToward(Direction::Up)),
+    (on(SUPER | SHIFT, Keysym::Down), Action::SwapToward(Direction::Down)),
+    (on(SUPER | SHIFT, Keysym::j), Action::SwapToward(Direction::Down)),
+    (on(SUPER, Keysym::o), Action::TurnSplit),
+    (on(SUPER, Keysym::r), Action::GrowTile),
+    (on(SUPER | SHIFT, Keysym::r), Action::ShrinkTile),
+    (on(SUPER, Keysym::g), Action::ToggleFloating),
     (on(SUPER, Keysym::equal), Action::ZoomIn),
     (on(SUPER, Keysym::minus), Action::ZoomOut),
 ];
@@ -330,6 +368,12 @@ impl State {
             Action::MoveToLast => self.send_focused_to(0),
             Action::Step(step) => self.step(step),
             Action::Carry(step) => self.carry(step),
+            Action::FocusToward(to) => self.focus_toward(to),
+            Action::SwapToward(to) => self.swap_toward(to),
+            Action::TurnSplit => self.turn_split(),
+            Action::GrowTile => self.grow_tile(crate::tiling::STEP),
+            Action::ShrinkTile => self.grow_tile(-crate::tiling::STEP),
+            Action::ToggleFloating => self.toggle_floating(),
             Action::ZoomIn => self.zoom_step(true),
             Action::ZoomOut => self.zoom_step(false),
         }
@@ -360,6 +404,22 @@ impl State {
         if let Some(toplevel) = window.as_ref().and_then(Window::toplevel) {
             toplevel.send_close();
         }
+    }
+}
+
+impl Action {
+    /// Whether the action is one of OS13's tiling keys, bound only on a tiled workspace: on any
+    /// other the key goes to the focused client as an unbound key does.
+    pub(crate) fn tiling(&self) -> bool {
+        matches!(
+            self,
+            Self::FocusToward(_)
+                | Self::SwapToward(_)
+                | Self::TurnSplit
+                | Self::GrowTile
+                | Self::ShrinkTile
+                | Self::ToggleFloating
+        )
     }
 }
 
@@ -400,6 +460,12 @@ mod tests {
             Action::Call(&cosmic::SCREEN_READER),
             Action::ZoomIn,
             Action::ZoomOut,
+            Action::FocusToward(Direction::Left),
+            Action::SwapToward(Direction::Down),
+            Action::TurnSplit,
+            Action::GrowTile,
+            Action::ShrinkTile,
+            Action::ToggleFloating,
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
         assert_eq!(
@@ -447,6 +513,16 @@ mod tests {
         assert!(!Action::Call(&CONTROL_CENTER).never_inhibited());
         assert!(!Action::Run(&LOG_OUT).never_inhibited());
         assert!(!Action::TouchpadToggle.never_inhibited());
+        for action in [
+            Action::FocusToward(Direction::Up),
+            Action::SwapToward(Direction::Right),
+            Action::TurnSplit,
+            Action::GrowTile,
+            Action::ShrinkTile,
+            Action::ToggleFloating,
+        ] {
+            assert!(!action.never_inhibited(), "{action:?}: rebindable, not decision 30's");
+        }
     }
 
     #[test]

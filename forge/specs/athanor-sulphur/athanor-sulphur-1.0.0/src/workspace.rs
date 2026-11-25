@@ -12,7 +12,7 @@
 use crate::handlers::shown;
 use crate::identity::Privilege;
 use crate::state::{centred, granted, kept_before, place_again, relocate, set_kept_before, State};
-use crate::tiling::Tree;
+use crate::tiling::{Direction, Tree};
 use smithay::backend::input::InputTime;
 use smithay::desktop::{find_popup_root_surface, PopupManager, Window};
 use smithay::output::Output;
@@ -53,6 +53,19 @@ pub(crate) const TILED: [xdg_toplevel::State; 4] = [
 /// for a window born tiled, which `placed` places then.
 #[derive(Default)]
 struct Floating(Cell<Option<Rectangle<i32, Logical>>>);
+
+/// Set on a window Super+G took out of its tree: it takes no tile as a window is placed until
+/// Super+G puts it back, or its workspace is tiled again (issue #1419).
+#[derive(Default)]
+struct Floated(Cell<bool>);
+
+fn floated(window: &Window) -> bool {
+    window.user_data().get::<Floated>().is_some_and(|kept| kept.0.get())
+}
+
+fn set_floated(window: &Window, floats: bool) {
+    window.user_data().get_or_insert(Floated::default).0.set(floats);
+}
 
 /// D8 in `window`'s pending state, out of its tree: no tiled states, and the size it had
 /// floating, unless it is maximised or full screen. That geometry, which it no longer keeps;
@@ -518,6 +531,14 @@ impl State {
         self.workspaces.iter().find(|strip| strip.output == output)
     }
 
+    /// Whether the active workspace of the output the keys act on is tiled: the tiling keys are
+    /// bound there only (OS13).
+    pub(crate) fn keyed_tiled(&self) -> bool {
+        self.keyed_strip()
+            .and_then(Strip::active_id)
+            .is_some_and(|id| self.is_tiled(id))
+    }
+
     /// The `n`-th workspace, from one, of the output the keys act on; its last when `n` is 0 or
     /// past it.
     fn nth_workspace(&self, n: u8) -> Option<WorkspaceId> {
@@ -832,6 +853,7 @@ impl State {
             let floating = kept_before(window).unwrap_or_else(|| self.settled_geometry(window));
             let kept = window.user_data().get_or_insert(Floating::default);
             kept.0.set(Some(floating));
+            set_floated(window, false);
             crate::handlers::moved(window);
             tree.insert(window.clone(), area);
         }
@@ -976,7 +998,11 @@ impl State {
     /// (`handlers::moved`). The workspace, to lay out.
     fn enter_tile(&mut self, window: &Window, behind: bool) -> Option<WorkspaceId> {
         let id = on(window).filter(|id| self.is_tiled(*id))?;
-        if !shown(window) || self.is_tile(window) || crate::handlers::floats(window) {
+        if !shown(window)
+            || self.is_tile(window)
+            || crate::handlers::floats(window)
+            || floated(window)
+        {
             return None;
         }
         let area = self
@@ -1024,6 +1050,81 @@ impl State {
         };
         self.untile(window, true);
         self.tile_layout(id);
+    }
+
+    /// The focused window when it holds a tile, its workspace and that workspace's area.
+    fn focused_tile(&self) -> Option<(Window, WorkspaceId, Rectangle<i32, Logical>)> {
+        let window = self.focused_window().filter(|window| self.is_tile(window))?;
+        let id = on(&window)?;
+        let area = self
+            .output_of_workspace(id)
+            .and_then(|output| self.window_area_on(&output))?;
+        Some((window, id, area))
+    }
+
+    /// The focused tile, the tile next to it toward `to` and their workspace; none at an edge.
+    fn neighbour_toward(&self, to: Direction) -> Option<(Window, Window, WorkspaceId)> {
+        let (window, id, area) = self.focused_tile()?;
+        let (_, tree) = self.tilings.iter().find(|(kept, _)| *kept == id)?;
+        let next = tree.neighbour(&window, to, area)?.clone();
+        Some((window, next, id))
+    }
+
+    /// Super with a direction key: the focus goes to the neighbouring tile that way.
+    pub(crate) fn focus_toward(&mut self, to: Direction) {
+        if let Some((_, next, _)) = self.neighbour_toward(to) {
+            self.focus(&next);
+        }
+    }
+
+    /// Super+Shift with a direction key: the focused tile and its neighbour that way trade
+    /// tiles; the tree keeps its shape.
+    pub(crate) fn swap_toward(&mut self, to: Direction) {
+        let Some((window, next, id)) = self.neighbour_toward(to) else {
+            return;
+        };
+        if let Some((_, tree)) = self.tilings.iter_mut().find(|(kept, _)| *kept == id) {
+            tree.swap(&window, &next);
+        }
+        self.tile_layout(id);
+    }
+
+    /// Super+O: the split of the focused tile turns.
+    pub(crate) fn turn_split(&mut self) {
+        let Some((window, id, _)) = self.focused_tile() else {
+            return;
+        };
+        if let Some((_, tree)) = self.tilings.iter_mut().find(|(kept, _)| *kept == id) {
+            tree.turn(&window);
+        }
+        self.tile_layout(id);
+    }
+
+    /// Super+R and Super+Shift+R: each side of the focused tile that borders another moves `by`
+    /// pixels, outward when positive.
+    pub(crate) fn grow_tile(&mut self, by: i32) {
+        let Some((window, id, area)) = self.focused_tile() else {
+            return;
+        };
+        if let Some((_, tree)) = self.tilings.iter_mut().find(|(kept, _)| *kept == id) {
+            tree.grow(&window, by, area);
+        }
+        self.tile_layout(id);
+    }
+
+    /// Super+G: the focused tile leaves its tree and floats, as `leave_tile` takes it out, and
+    /// stays out; a window that floats takes a tile, as one placed does, unless D5 floats it.
+    pub(crate) fn toggle_floating(&mut self) {
+        let Some(window) = self.focused_window() else {
+            return;
+        };
+        if self.is_tile(&window) {
+            set_floated(&window, true);
+            self.leave_tile(&window);
+        } else {
+            set_floated(&window, false);
+            self.tile_shown(&window);
+        }
     }
 
     /// A tile that a change of its parent or its size limits makes one D5 floats: it leaves its
