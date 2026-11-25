@@ -7216,8 +7216,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     (`"cosmic-settings"`, not `cosmic-settings-daemon`), and a citation that names none is a finding.
 
     A `path:N` that the change places itself (with `hunks`: a citation on a line the change wrote
-    or edited, unless the base line it replaces holds the k-th citation of that file with the same
-    lines) is a finding when its sentence names no such token, no row name and, for a cited
+    or edited, when the block of lines it is in, as difflib groups the edit, holds that file with
+    those lines more often than the base lines the block replaces, whatever the sizes of the two;
+    so a split, wrapped or reordered line, or a line inserted beside an edited one, keeps its old
+    citations) is a finding when its sentence names no such token, no row name and, for a cited
     document, no section id the document has (#1482): a range that its sentence names nothing of
     cannot be told from one that moved onto other code. The fix is a token in backticks in the
     sentence, or a citation by name (`path#name`), which symbol-citations checks. Only the
@@ -7226,7 +7228,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     and an edit of a sentence would otherwise fail on every tokenless citation it happens to sit
     beside. The tokenless citations that the documents held when the rule came are tracked in
     #1498 and are converted to `path#name` in batches. Limit: without `hunks`, and for
-    those, a sentence with no such token is not checked; a citation that names a wrong place
+    those, a sentence with no such token is not checked; the hunks are read without rename
+    detection, so a citation whose path the change rewrites for a renamed file is read as new; a citation that names a wrong place
     holding the token is not seen, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
     name and no section id in its sentence, that the change did not place, is checked only for a
@@ -7278,12 +7281,17 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             was.setdefault((number, path), []).append(spec)
         old_rows = [backtick_plain_paths(row) for row in base_text.split("\n")]
         new_rows = [backtick_plain_paths(row) for row in text.split("\n")]
-        pair = {}
+        pair, block_of, block_held = {}, {}, []
         for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_rows, new_rows, autojunk=False).get_opcodes():
             if tag == "replace" and i2 - i1 == j2 - j1:
                 pair.update({j + 1: i + 1 for i, j in zip(range(i1, i2), range(j1, j2))})
+            if tag != "equal":
+                # The (file, lines) of every citation in the base lines this block of new lines replaces.
+                block_of.update({j + 1: len(block_held) for j in range(j1, j2)})
+                block_held.append(collections.Counter((p, s) for n, p, s in base_cites if i1 < n <= i2))
     else:
-        was, pair = {}, {}
+        was, pair, block_of, block_held = {}, {}, {}, []
+    block_seen = collections.Counter()
     nth = {}
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
@@ -7509,10 +7517,13 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
             # Whether the change placed this `path:N` itself (#1482): its line is not a line of the
-            # base, and the base line it replaces holds no k-th citation of the file with these lines.
-            base_specs = was.get((pair.get(number), path), [])
-            authored = bool(hunks) and not symbol and line not in unchanged and not (
-                k < len(base_specs) and base_specs[k] == spec)
+            # base, and the block it is in holds more citations of the file with these lines than the
+            # base lines that the block replaces.
+            block = block_of.get(number)
+            if block is not None and not symbol:
+                block_seen[block, path, spec] += 1
+            authored = bool(hunks) and not symbol and line not in unchanged and (
+                block is None or block_seen[block, path, spec] > block_held[block][path, spec])
             if listed and not tokens:
                 out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
                             "that the file holds: put the entry's name in backticks, or hyphenated, "
@@ -7547,7 +7558,8 @@ def check_line_citations():
 
     hunks = None
     if BASE_REF is None:
-        r.note("no base revision (--known-red-base REF): the citations that the change moved were not checked")
+        r.note("no base revision (--known-red-base REF): the citations that the change moved, and the "
+               "tokenless citations that it placed, were not checked")
     else:
         try:
             hunks = diff_hunks(ROOT, BASE_REF)

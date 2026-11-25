@@ -397,6 +397,27 @@ class Tokenless(unittest.TestCase):
         self.assertEqual(self.found("Up and Down leave the list (`src/x.rs#other`).", self.NEW), [])
         self.assertEqual(self.found("Up and Down leave the list in `other` (`src/x.rs:2`).", self.NEW), [])
 
+    def test_a_split_or_wrapped_line_keeps_its_old_citation(self):
+        self.assertEqual(self.found("Up and Down\nleave the list (`src/x.rs:2`).", self.NEW), [])
+        wrapped = "Up and Down leave the list, as Tab does when it reaches\nthe end (`src/x.rs:2`)."
+        self.assertEqual(self.found(wrapped, self.NEW), [])
+
+    def test_a_citation_of_the_same_file_put_before_the_old_one_keeps_it(self):
+        text = "`grant` is at `src/x.rs:1`; Up and Down leave the list (`src/x.rs:2`)."
+        self.assertEqual(self.found(text, self.NEW), [])
+
+    def test_a_line_inserted_beside_an_edited_one_keeps_its_old_citation(self):
+        text = "A new line.\nUp and Down leave the list, as Tab does (`src/x.rs:2`)."
+        self.assertEqual(self.found(text, self.NEW), [])
+
+    def test_a_new_tokenless_citation_in_the_same_block_fails(self):
+        out = self.found("Up and Down\nleave the list (`src/x.rs:2`). It wraps (`src/x.rs:3`).", self.NEW)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`src/x.rs:3` names no token", out[0])
+        out = self.found("Up and Down leave the list (`src/x.rs:2`).\nTab does (`src/x.rs:2`).", self.NEW)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("doc.md:2: `src/x.rs:2` names no token", out[0])
+
     def test_a_new_citation_of_a_document_by_its_section_passes(self):
         self.assertEqual(self.found("AB1 is at `other.md:3-4`.", ""), [])
         self.assertEqual(len(self.found("It is at `other.md:3-4`.", "")), 1)
