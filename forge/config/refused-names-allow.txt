@@ -51,13 +51,13 @@ doc_languages.md cosmic-osk #1355 2027-01-31 2
 doc_languages.md cosmic-settings #1355 2027-01-31 9
 doc_languages.md gtk4 #1355 2027-01-31 1
 doc_languages.md libadwaita #1355 2027-01-31 3
-doc_launcher.md cosmic-app #1355 2027-01-31 10
+doc_launcher.md cosmic-app #1355 2027-01-31 12
 doc_launcher.md cosmic-comp #1355 2027-01-31 30
-doc_launcher.md cosmic-launcher #1355 2027-01-31 12
+doc_launcher.md cosmic-launcher #1355 2027-01-31 14
 doc_launcher.md cosmic-settings #1355 2027-01-31 6
 doc_launcher.md gtk4 #1355 2027-01-31 6
 doc_launcher.md gtk4-layer-shell #1355 2027-01-31 1
-doc_launcher.md pop-launcher #1355 2027-01-31 10
+doc_launcher.md pop-launcher #1355 2027-01-31 12
 doc_lock_and_prompts.md cosmic-comp #1355 2027-01-31 16
 doc_lock_and_prompts.md cosmic-greeter #1355 2027-01-31 8
 doc_lock_and_prompts.md cosmic-idle #1355 2027-01-31 10
@@ -75,8 +75,8 @@ doc_osd.md cosmic-settings #1355 2027-01-31 34
 doc_osd.md gtk4 #1355 2027-01-31 11
 doc_osd.md gtk4-layer-shell #1355 2027-01-31 4
 doc_overview.md cosmic-app #1355 2027-01-31 6
-doc_overview.md cosmic-comp #1355 2027-01-31 76
-doc_overview.md cosmic-launcher #1355 2027-01-31 14
+doc_overview.md cosmic-comp #1355 2027-01-31 77
+doc_overview.md cosmic-launcher #1355 2027-01-31 15
 doc_overview.md cosmic-protocols #1355 2027-01-31 1
 doc_overview.md cosmic-settings #1355 2027-01-31 7
 doc_overview.md cosmic-workspace #1355 2027-01-31 2
@@ -88,7 +88,7 @@ doc_overview.md libcosmic #1355 2027-01-31 3
 doc_overview.md pop-launcher #1355 2027-01-31 5
 doc_own_stack.md cosmic-app #1355 2027-01-31 1
 doc_own_stack.md cosmic-bg #1355 2027-01-31 1
-doc_own_stack.md cosmic-comp #1355 2027-01-31 96
+doc_own_stack.md cosmic-comp #1355 2027-01-31 97
 doc_own_stack.md cosmic-greeter #1355 2027-01-31 2
 doc_own_stack.md cosmic-idle #1355 2027-01-31 5
 doc_own_stack.md cosmic-launcher #1355 2027-01-31 2
@@ -107,7 +107,7 @@ doc_portal.md gtk4 #1355 2027-01-31 5
 doc_portal.md libadwaita #1355 2027-01-31 9
 doc_portal.md xdg-desktop-portal-cosmic #1355 2027-01-31 1
 doc_session.md cosmic-bg #1355 2027-01-31 4
-doc_session.md cosmic-comp #1355 2027-01-31 61
+doc_session.md cosmic-comp #1355 2027-01-31 62
 doc_session.md cosmic-greeter #1355 2027-01-31 19
 doc_session.md cosmic-idle #1355 2027-01-31 29
 doc_session.md cosmic-osd #1355 2027-01-31 11
@@ -176,7 +176,7 @@ doc_software.md cosmic-icon #1355 2027-01-31 9
 doc_software.md cosmic-launcher #1355 2027-01-31 1
 doc_software.md cosmic-osd #1355 2027-01-31 2
 doc_software.md cosmic-settings #1355 2027-01-31 1
-doc_software.md cosmic-store #1355 2027-01-31 13
+doc_software.md cosmic-store #1355 2027-01-31 15
 doc_software.md cosmic-term #1355 2027-01-31 2
 doc_software.md cosmic-workspaces #1355 2027-01-31 1
 doc_software.md gtk4 #1355 2027-01-31 19
