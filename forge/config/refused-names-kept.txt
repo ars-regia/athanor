@@ -10,7 +10,9 @@
 # that it stays or is kept until something happens, belongs to forge/config/refused-names-allow.txt
 # under #1355 with an expiry; a sentence kept here has none. An entry fails when its text no
 # longer appears in a normative section, so a changed sentence must be read again. The list only
-# shrinks: a pull request adds no entry.
+# shrinks: a pull request adds no entry. Only the sections Context, Sources, Spikes, Open doubts
+# (or questions) and Risks are history; every other section, and the text before the first
+# heading, is read.
 doc_accessibility.md	cosmic-osd	(CI; the prompts from the retirement of cosmic-osd.)	records the retirement or replacement of cosmic-osd (ADR-0141 decision 3 or 7), in the words `prompts from the retire ment of cosmic-osd.)`
 doc_compositor.md	cosmic-comp	cosmic-comp's session leaves the greeter in 1.0, and `forge/specs/cosmic-comp`, its patches and `scripts/cosmic-comp-rebase` leave tier 2 with it, in the change that `doc_own_stack.md` decision 28 ties to OS19, the overview and the window switcher (ADR-0141 decision 4).	records the retirement or replacement of cosmic-comp (ADR-0141 decision 3 or 7), in the words `cosmic-comp's session leaves the greeter in`
 doc_disks.md	gtk4,libadwaita	GNOME Disks's port to GTK4 and libadwaita exists upstream but is not yet released (below);	states a fact about a third-party application or an upstream package (`GNOME Disks 's port to`), where ADR-0141 decision 2 allows gtk4,libadwaita
