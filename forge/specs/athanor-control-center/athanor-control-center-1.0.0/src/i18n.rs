@@ -26,8 +26,11 @@ fn catalog_ref() -> &'static Catalog {
     CATALOG.get_or_init(Catalog::empty)
 }
 
+/// Whether the program is drawn right to left, as the compositor's slide decides
+/// (`athanor_i18n::is_rtl`), read once.
 pub fn is_rtl() -> bool {
-    catalog_ref().is_rtl()
+    static RTL: OnceLock<bool> = OnceLock::new();
+    *RTL.get_or_init(|| athanor_i18n::is_rtl(DOMAIN))
 }
 
 pub fn tr(msgid: &str) -> String {

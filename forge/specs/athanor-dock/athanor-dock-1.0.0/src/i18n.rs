@@ -30,6 +30,9 @@ pub fn tr(msgid: &str) -> String {
     catalog().tr(msgid).to_string()
 }
 
+/// Whether the program is drawn right to left, as the compositor's slide decides
+/// (`athanor_i18n::is_rtl`), read once.
 pub fn is_rtl() -> bool {
-    catalog().is_rtl()
+    static RTL: OnceLock<bool> = OnceLock::new();
+    *RTL.get_or_init(|| athanor_i18n::is_rtl(DOMAIN))
 }
