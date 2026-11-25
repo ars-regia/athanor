@@ -24,7 +24,7 @@ kernel profile, the Calmo palette, every `test_*.py` directory, the Rust workspa
 | Check | Command |
 | --- | --- |
 | Project checks | `python3 scripts/verify.py <check>...`; `--list` names them |
-| A crate | `cargo test -p <crate>`; one that links GTK: `forge/test/shell/rig.sh cargo test -p <crate>`, after `rig.sh build-image` |
+| A crate | `cargo test -p <crate>`, which on the host needs mold and an x86-64-v3 CPU (`.cargo/config.toml`; the rig brings mold, not the CPU); one that links GTK: `forge/test/shell/rig.sh cargo test -p <crate>`, after `rig.sh build-image` |
 | Python tests | `python3 -B -m unittest discover -s <dir>/tests`, e.g. `scripts/tests`, `system/tests` |
 | Linters | `just lint`; `just format` rewrites, the `Justfile` through `just --unstable --fmt` |
 | A kernel panic read from a QR code | `python3 scripts/decode-drm-panic.py '<url or payload>'` |
