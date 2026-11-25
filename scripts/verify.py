@@ -8140,7 +8140,8 @@ DECISION_AMENDMENT_KEPT = "forge/config/decision-amendment-kept.txt"
 # ADR-0077"); an id that is not `ADR-NNNN` (A2-1, W1-OLD) or that continues (ADR-00011,
 # ADR-0001-x); and these forms, which a person must keep to the others: "amends the text, the
 # revision or the decision of ADR-Y", "which ADR-X amends", "amended by" more than 60 characters
-# after the target, `"ADR-Y"` in quotes and `_ADR-Y_`.
+# after the target, `amends "ADR-Y"` in quotes and `_ADR-Y_`. A relative clause with more than
+# three words between "which" or "that" and the verb fails, and the sentence is reworded.
 DECISION_ADR = r"(?<![\w-])ADR[- ](\d{4})(?![\w])(?!-\w)"
 DECISION_MARK = r"[\[`*(]*"
 DECISION_LINK = r"(?:\]\([^)]*\))?"
@@ -8153,12 +8154,16 @@ DECISION_AMENDED_BY = re.compile(
 DECISION_REF = re.compile(DECISION_ADR, re.I)
 DECISION_MODAL = r"\b(?:may|might|can|could|should|would|will)"
 DECISION_NEGATED = re.compile(
-    rf"(?:\bnever|\bnot|\bcannot|n't|\bnor|\bneither|\bno longer|{DECISION_MODAL})\s+(?:\w+\s+)?$", re.I)
-DECISION_NEGATION = re.compile(rf"\b(?:never|not|cannot|nor|neither|no longer)\b|n't|{DECISION_MODAL}\b", re.I)
-DECISION_HYPOTHESIS = re.compile(r"\b(?:if|unless|whether|suppose|supposing)\b", re.I)
+    rf"(?:\bnever|\bnot|\bcannot|n['’]t|\bnor|\bneither|\bno longer|{DECISION_MODAL})\s+(?:\w+\s+)?$", re.I)
+DECISION_NEGATION = re.compile(rf"\b(?:never|not|cannot|nor|neither|no longer)\b|n['’]t|{DECISION_MODAL}\b", re.I)
+# The hypothesis opens the clause of the amender ("If ADR-X amends"), not a clause before it
+# ("ADR-X decides whether the greeter moves and amends ADR-Y" is a claim).
+DECISION_HYPOTHESIS = re.compile(
+    r"\b(?:if|unless|whether|suppose|supposing)\s+[\[`*(]*ADR[- ]\d{4}(?:(?!\b(?:and|but)\b)[^,;])*$", re.I)
 DECISION_NEW_SUBJECT = re.compile(rf";|\s(?:but|while|whereas)\s|,\s+and\s+(?={DECISION_MARK}ADR[- ]\d{{4}})", re.I)
 DECISION_GOVERNED = re.compile(r"\b(?:of|by|per|under|with|in|from|to|as|than)\s+[\[`*(]*$", re.I)
-DECISION_RELATIVE = re.compile(r"\b(?:which|that)\s+(?:\w+ly\s+)?$", re.I)
+# "which amends", "which now amends", "which, in turn, amends": up to three words, no ADR.
+DECISION_RELATIVE = re.compile(r"\b(?:which|that)(?:,?\s+(?!ADR[- ]\d)[\w]+,?){0,3}\s+$", re.I)
 DECISION_JOINED = re.compile(r"[\]\)`*]*\s*(?:and|or|&)\s+[\[`*(]*$", re.I)
 DECISION_FRONTED = re.compile(r"[\]\)`*]*\s*,\s+[\[`*(]*$")
 # A list item or a table row is a sentence of its own, with or without a final period.

@@ -309,6 +309,9 @@ class DecisionProblemsTest(unittest.TestCase):
             "ADR-0003 and ADR-0002 amend ADR-0001.": [("ADR-0001", None)],
             "ADR-0003, ADR-0002 amend ADR-0001.": [("ADR-0001", None)],
             "It is moved, which amends ADR-0001.": [("ADR-0001", None)],
+            "ADR-0100 is superseded by ADR-0141, which now amends ADR-0135.": [("ADR-0135", "ADR-0141")],
+            "ADR-0100 is superseded by ADR-0141, which, in turn, amends ADR-0135.": [("ADR-0135", "ADR-0141")],
+            "ADR-0141 decides whether the greeter moves and amends ADR-0135 decision 3.": [("ADR-0135", "ADR-0141")],
         }.items():
             with self.subTest(text=text):
                 self.assertEqual(verify.decision_claims(text), claims)
@@ -325,6 +328,8 @@ class DecisionProblemsTest(unittest.TestCase):
             "ADR-0001 was never amended by ADR-0002.",
             "ADR-0001 may be amended by ADR-0002.",
             "ADR-0002 does not change ADR-0003 or amend ADR-0001.",
+            "ADR-0002 doesn’t amend ADR-0001.",
+            "Whether ADR-0002 amends ADR-0001 is open.",
         ):
             with self.subTest(text=text):
                 self.assertEqual(verify.decision_claims(text), [])
