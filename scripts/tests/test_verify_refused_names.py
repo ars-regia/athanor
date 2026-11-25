@@ -42,6 +42,10 @@ SAMPLES = [
     ("COSMIC Store", {"cosmic-store"}),
     ("the gtk-4 toolkit", {"gtk4"}),
     ("`adw::Dialog` and adw::prelude", {"adw"}),
+    ("iced and the iced_core crate", {"iced"}),
+    ("COSMIC Settings and COSMIC Epoch", {"cosmic-settings", "cosmic-epoch"}),
+    ("the COSMIC Terminal and COSMIC Edit", {"cosmic-terminal", "cosmic-edit"}),
+    ("under `~/.config/gtk-4.0`", {"gtk4"}),
 ]
 NOT_NAMES = [
     "cosmic-ray, cosmic-scale and cosmic-specific",
@@ -50,6 +54,7 @@ NOT_NAMES = [
     "adware, Adwaita and an Adw prefix",
     "`/usr/share/athanor/cosmic-defaults` and `cosmic-allowed`",
     "the cosmic filesystem, a cosmic storefront and the word adw:: alone",
+    "a fixture of COSMIC files and a COSMIC store, sliced and spiced",
 ]
 
 
@@ -61,6 +66,9 @@ class RefusedNames(unittest.TestCase):
         self.write(verify.REFUSED_NAMES, (ROOT / verify.REFUSED_NAMES).read_text())
         self.write(verify.REFUSED_NAMES_ALLOW, "# header\n")
         self.write(verify.REFUSED_NAMES_KEPT, "# header\n")
+        self.write(
+            verify.REFUSED_NAMES_SCOPE, (ROOT / verify.REFUSED_NAMES_SCOPE).read_text()
+        )
         self.write(DOC, APPROVED + "## 2. Decisions\n\nThe bar draws with Sal.\n")
         self.commit()
 
@@ -108,7 +116,6 @@ class RefusedNames(unittest.TestCase):
             "1.2 Context",
             "Context",
             "4. Open doubts",
-            "4. Open questions",
             "14. Risks",
             "3. Spikes",
             "16. Sources",
@@ -136,6 +143,7 @@ class RefusedNames(unittest.TestCase):
             "6. Order",
             "5. The first two milestones",
             "5. Risks and declared limits",
+            "4. Open questions",
             "4. Spikes and their results",
         ):
             with self.subTest(heading=heading):
@@ -183,7 +191,7 @@ class RefusedNames(unittest.TestCase):
     def test_the_status_forms_are_read(self):
         for head in (
             "# X\n\n- **Status:** revision 3, approved by the maintainer on 2026-11-21\n\n",
-            "# X\n\n| Field | Value |\n| --- | --- |\n| Status | revision 3, approved on 2026-10-09. |\n\n",
+            "# X\n\nStatus: Rev. 3, approved by the maintainer on 2026-11-21\n\n",
             "# X\n\nStato: **approvata il 2026-09-03**\n\n",
         ):
             with self.subTest(head=head):
@@ -198,7 +206,8 @@ class RefusedNames(unittest.TestCase):
             "# X\n\nStatus: **draft.**\n\n",
             "# X\n\nStatus: draft, to be approved by the maintainer\n\n",
             "# X\n\nStatus: not yet approved\n\n",
-            "# X\n\nStatus: **to be approved by the maintainer.** Revision 2 is approved.\n\n",
+            "# X\n\nStatus: pending approval\n\n",
+            "# X\n\nStatus: Rev. 3, not approved\n\n",
         ):
             with self.subTest(head=head):
                 problems, notes = self.write_head(head)
@@ -217,6 +226,18 @@ class RefusedNames(unittest.TestCase):
                 self.assertEqual(len(problems), 1, problems)
                 self.assertEqual(notes, [])
 
+    def test_a_revision_approved_beside_a_proposed_one_is_read(self):
+        head = "# X\n\nStatus: **to be approved by the maintainer.** Revision 2 is approved.\n\n"
+        problems, notes = self.write_head(head)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertEqual(notes, [])
+
+    def test_a_table_row_is_no_status_line(self):
+        head = "# X\n\n| Field | Value |\n| --- | --- |\n| Status | draft |\n\n"
+        problems, notes = self.write_head(head)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_x.md has no Status line", notes[0])
+
     def test_a_document_without_a_status_is_read_in_full_and_noted(self):
         problems, notes = self.write_head("# X\n\n")
         self.assertEqual(len(problems), 1, problems)
@@ -225,13 +246,20 @@ class RefusedNames(unittest.TestCase):
         self.assertIn("doc_x.md has no Status line", notes[0])
 
     def test_the_reference_register_alone_is_not_read(self):
-        self.assertEqual(verify.REFUSED_NOT_SPECS, ("shell-features.md",))
+        self.assertEqual(
+            verify.parse_refused_scope((ROOT / verify.REFUSED_NAMES_SCOPE).read_text())[
+                1
+            ],
+            ["shell-features.md"],
+        )
         self.write(
-            "docs/architecture/shell-features.md", "# Register\n\n## 2. Rows\n\nlibadwaita\n"
+            "docs/architecture/shell-features.md",
+            "# Register\n\n## 2. Rows\n\nlibadwaita\n",
         )
         self.assertEqual(self.problems(), [])
         self.write(
-            "docs/architecture/doc_build_system.md", "# Build\n\n## 2. Rows\n\nlibadwaita\n"
+            "docs/architecture/doc_build_system.md",
+            "# Build\n\n## 2. Rows\n\nlibadwaita\n",
         )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
@@ -322,7 +350,9 @@ class RefusedNames(unittest.TestCase):
         self.write(verify.REFUSED_NAMES_ALLOW, ALLOW)
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("names `libadwaita` in 2 sentences, its entry covers 1", problems[0])
+        self.assertIn(
+            "names `libadwaita` in 2 sentences, its entry covers 1", problems[0]
+        )
         self.write(
             verify.REFUSED_NAMES_ALLOW, "doc_x.md libadwaita #1355 2027-01-31 3\n"
         )
@@ -414,14 +444,85 @@ class RefusedNames(unittest.TestCase):
         self.assertIn("is not listed at HEAD; the list only shrinks", problems[0])
 
     def test_a_base_without_the_lists_is_noted(self):
-        self.git("rm", "-q", "--", verify.REFUSED_NAMES_ALLOW, verify.REFUSED_NAMES_KEPT)
+        self.git(
+            "rm",
+            "-q",
+            "--",
+            verify.REFUSED_NAMES_ALLOW,
+            verify.REFUSED_NAMES_KEPT,
+            verify.REFUSED_NAMES_SCOPE,
+        )
         self.commit()
         self.write(verify.REFUSED_NAMES_ALLOW, "# header\n")
         self.write(verify.REFUSED_NAMES_KEPT, "# header\n")
+        self.write(verify.REFUSED_NAMES_SCOPE, "history context\n")
         problems, notes = verify.refused_names_report(self.root, "HEAD")
         self.assertEqual(problems, [])
-        self.assertEqual(len(notes), 2, notes)
+        self.assertEqual(len(notes), 3, notes)
         self.assertIn("the ratchets against it did not run", notes[0])
+
+    def test_the_scope_only_shrinks_against_the_base(self):
+        for text, message in (
+            ("history context\nhistory notes\n", "history notes is not listed at HEAD"),
+            (
+                "history context\nregister doc_x.md\n",
+                "register doc_x.md is not listed at HEAD",
+            ),
+        ):
+            with self.subTest(text=text):
+                self.write(verify.REFUSED_NAMES_SCOPE, text)
+                self.assertTrue(any(message in p for p in self.problems("HEAD")))
+        self.write(verify.REFUSED_NAMES_SCOPE, "history context\n")
+        self.commit()
+        self.write(verify.REFUSED_NAMES_SCOPE, "history context\nhistory context\n")
+        self.assertIn("listed twice", self.problems()[0])
+        self.write(verify.REFUSED_NAMES_SCOPE, "history\n")
+        self.assertIn("expected `history HEADING`", self.problems()[0])
+
+    def test_a_history_heading_added_against_the_base_fails(self):
+        self.write(verify.REFUSED_NAMES_SCOPE, "history context\n")
+        self.commit()
+        self.write(verify.REFUSED_NAMES_SCOPE, "history context\nhistory risks\n")
+        self.assertTrue(
+            any("history risks is not listed" in p for p in self.problems("HEAD"))
+        )
+
+    def test_an_issue_number_does_not_cut_a_sentence(self):
+        self.write(
+            DOC,
+            APPROVED
+            + "## 2. Decisions\n\nThe unit went with the change\n#83) that dropped cosmic-comp.\n",
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.write(
+            DOC,
+            APPROVED
+            + "## 2. Decisions\n\nThe unit went away\n# Heading\ncosmic-comp.\n",
+        )
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_a_fence_closes_on_the_same_character_and_length(self):
+        for body in (
+            "````\n```\n## 6. Decisions taken\nIt uses libadwaita.\n````\n",
+            "~~~\n```\nIt uses libadwaita.\n~~~\n",
+        ):
+            with self.subTest(body=body):
+                problems = self.under("2. Decisions", body)
+                self.assertEqual(len(problems), 1, problems)
+        head = APPROVED + "## 2. Decisions\n\nNone.\n\n"
+        for body in (
+            "```\n~~~\nIt uses libadwaita.\n```\n",
+            "````\n```\nIt uses libadwaita.\n````\n",
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(len(self.under("1. Context", body, head)), 0)
+        text = (
+            APPROVED
+            + "## 2. Decisions\n\n```\nIt uses libadwaita.\n```\nIt uses libadwaita.\n"
+        )
+        self.write(DOC, text)
+        self.assertEqual(len(self.problems()), 1)
 
     def test_a_base_that_is_not_a_commit_is_an_error(self):
         problems, _ = verify.refused_names_report(self.root, "no-such-revision")
@@ -442,7 +543,8 @@ class RefusedNames(unittest.TestCase):
         self.assertIn("cannot be read at HEAD", str(caught.exception))
         self.assertIsNone(verify.refused_base_text(self.root, "HEAD", "no/such/file"))
         self.assertEqual(
-            verify.refused_base_text(self.root, "HEAD", verify.REFUSED_NAMES_ALLOW), "# header\n"
+            verify.refused_base_text(self.root, "HEAD", verify.REFUSED_NAMES_ALLOW),
+            "# header\n",
         )
 
     def test_a_kept_text_is_keyed_by_its_document(self):
