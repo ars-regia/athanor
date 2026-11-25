@@ -1,10 +1,14 @@
 //! The workspace switch's slide (doc_visual_language.md VL9): the workspace left and the one
 //! activated move together across the output for `DURATION`, eased by `EaseInOutCubic`, a later
-//! workspace coming in from the right and an earlier one from the left. Only the drawing moves:
-//! the switch itself is made at once, so the windows left are already out of the space and the
-//! input goes to the windows activated, at their places, from the first frame. A switch during a
-//! slide starts from where the slide stands, so nothing jumps; the workspace left before that one
-//! is no longer drawn. Under reduced motion (doc_accessibility.md AX9) there is no slide.
+//! workspace coming in from the right and an earlier one from the left, mirrored when the bar
+//! is drawn right to left, as its strip is (doc_overview.md): the direction is the bar's own,
+//! from the catalog it loads (`athanor_i18n::is_rtl`), so the two never disagree. Only the
+//! drawing moves: the switch itself is made at once, so the windows left are already out of the
+//! space and the input goes to the windows activated, at their places, from the first frame. A
+//! switch during a slide starts from where the slide stands, so nothing jumps; the workspace
+//! left before that one is no longer drawn. Under reduced motion (doc_accessibility.md AX9)
+//! there is no slide. The slide is horizontal: Sulphur has no vertical workspace layout,
+//! cosmic-comp's `workspace_layout`.
 
 use crate::dnd::moved;
 use crate::state::State;
@@ -64,6 +68,14 @@ fn clock() -> Instant {
     Instant::now()
 }
 
+/// Whether the bar, whose strip the slide follows, is drawn right to left, read once for the
+/// process; the tests set it (`right_to_left`).
+#[cfg(not(test))]
+fn rtl() -> bool {
+    static RTL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *RTL.get_or_init(|| athanor_i18n::is_rtl("athanor-bar"))
+}
+
 fn sliding(output: &Output) -> &Cell<Option<Slide>> {
     &output.user_data().get_or_insert(Sliding::default).0
 }
@@ -112,7 +124,7 @@ impl State {
         if self.bell.reduced_motion {
             return;
         }
-        let direction = if into > from { 1.0 } else { -1.0 };
+        let direction = if (into > from) != rtl() { 1.0 } else { -1.0 };
         // The workspace left starts where it stands, the one activated beside it.
         let stands = before.map_or(0.0, |slide| slide.at(now));
         slot.set(Some(Slide {
@@ -195,6 +207,8 @@ impl State {
 thread_local! {
     /// The time of the tests, once `advance` has set it.
     static NOW: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// Whether the tests' language is written right to left (`right_to_left`).
+    static RTL: Cell<bool> = const { Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -202,9 +216,20 @@ fn clock() -> Instant {
     NOW.with(Cell::get).unwrap_or_else(Instant::now)
 }
 
+#[cfg(test)]
+fn rtl() -> bool {
+    RTL.with(Cell::get)
+}
+
 /// Stops the clock the slides read and takes it `by` further on.
 #[cfg(test)]
 pub(crate) fn advance(by: Duration) {
     let at = clock() + by;
     NOW.with(|time| time.set(Some(at)));
+}
+
+/// Makes the bar's language one written right to left, or not.
+#[cfg(test)]
+pub(crate) fn right_to_left(on: bool) {
+    RTL.with(|rtl| rtl.set(on));
 }

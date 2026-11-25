@@ -3,7 +3,7 @@
 
 use super::marks::{at, frame, paint};
 use super::*;
-use crate::workspace::slide::{DURATION, advance};
+use crate::workspace::slide::{DURATION, advance, right_to_left};
 use crate::workspace::WorkspaceId;
 
 /// Where the window of the first workspace stands, and the one of the second.
@@ -141,3 +141,21 @@ fn reduced_motion_switches_at_once() {
     assert!(background(&second), "the second is not drawn");
     run.stop();
 }
+
+/// Under a right-to-left language the slide mirrors: the earlier workspace comes in from the
+/// right. Three quarters through, the ease leaves a sixteenth to go, 80 pixels.
+#[test]
+fn a_right_to_left_language_mirrors_the_slide() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    right_to_left(true);
+    assert!(run.state.activate_workspace(two.list[0]));
+    advance(DURATION * 3 / 4);
+    let shown = frame(&mut run);
+    let (x, y) = (FIRST.0, FIRST.1 + SIZE / 2);
+    assert_eq!(at(&shown, x + SIZE + 40, y), two.red, "80 pixels right");
+    assert!(background(&at(&shown, x + 40, y)), "nothing left of it");
+    right_to_left(false);
+    run.stop();
+}
+
