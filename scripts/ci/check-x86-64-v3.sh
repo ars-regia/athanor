@@ -6,6 +6,11 @@
 # omits "(supported" when it has not. A loader that prints no x86-64-v3 line at all (glibc
 # older than 2.33) fails too: the level is unknown, not met.
 #
+# Callers: forge/test/shell/rig.sh for the subcommands that build or run workspace code (the guard
+# is one line after the cargo cache setup, so that the line citations of the specifications below
+# it stay put; forge/test/shell/tests/test_rig_v3_guard.py classifies every subcommand),
+# forge/scripts/run_spec_build.sh, scripts/ci/security-audit.sh, fuzz.sh and mutants.sh.
+#
 # usage: scripts/ci/check-x86-64-v3.sh
 # environment:
 #   ATHANOR_LD_SO     the loader to ask (default /lib64/ld-linux-x86-64.so.2)
