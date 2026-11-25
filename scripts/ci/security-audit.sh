@@ -12,6 +12,9 @@ out="${AUDIT_OUT:-$root/audit-out}"
 mkdir -p "$out"
 cd "$root"
 
+# clippy runs the build scripts and proc macros, built for x86-64-v3 (ADR-0143, #1508).
+bash scripts/ci/check-x86-64-v3.sh
+
 # Warnings fail the job: the clippy unsafe lints of Cargo.toml's [workspace.lints] are set to warn there.
 # cargo unifies features across the packages of one invocation: glycin drives zbus with
 # async-io, the rest of the workspace with tokio, so the preview decoder is linted alone.
