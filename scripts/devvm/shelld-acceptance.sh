@@ -174,7 +174,7 @@ stage_watchdog() {
     # next run overwrites Result within RestartSec= (100 ms), so a drop-in stretches the
     # restart delay to 3 s: Result then reads "watchdog" while the unit is in auto-restart.
     # The path is relative to the guest user's home, where SSH starts.
-    local pid round stamps dropin='.config/systemd/user/athanor-shelld.service.d/watchdog.conf'
+    local pid inv n since pid2 inv2 n2 line round stamps dropin='.config/systemd/user/athanor-shelld.service.d/watchdog.conf'
     if loaded athanor-shelld; then
         unit stop || fail "stop athanor-shelld before watchdog"
     fi
@@ -184,17 +184,27 @@ stage_watchdog() {
         fail "cannot clear the crash-loop record before watchdog"
     printf '%s\n' '[Service]' 'RestartSec=3s' |
         in_session "mkdir -p .config/systemd/user/athanor-shelld.service.d && cat > $dropin &&
-        systemctl --user daemon-reload"
+        systemctl --user daemon-reload" || fail "write the watchdog drop-in"
     unit start || fail "systemctl --user start athanor-shelld failed"
     [[ $(unit show -p WatchdogUSec --value) == 30s ]] ||
         fail "WatchdogUSec is '$(unit show -p WatchdogUSec --value)', not 30s"
-    pid=$(unit show -p MainPID --value)
+    pid=$(unit show -p MainPID --value) inv=$(unit show -p InvocationID --value)
+    n=$(unit show -p NRestarts --value) since=$(in_session date +%s)
     unit kill --kill-whom=main -s SIGSTOP || fail "SIGSTOP to athanor-shelld $pid"
     # 30 s of silence, plus the time systemd takes to end the stopped process.
     wait_until 90 result_is watchdog ||
         fail "Result is '$(unit show -p Result --value)' 90 s after SIGSTOP, not watchdog"
     in_session "rm -f $dropin && systemctl --user daemon-reload" || fail "remove the watchdog drop-in"
     wait_until 30 new_main_pid "$pid" || fail "no new active MainPID after the watchdog ended $pid"
+    # The manager's restart counter and a new invocation say that Restart= brought it back.
+    pid2=$(unit show -p MainPID --value) inv2=$(unit show -p InvocationID --value)
+    n2=$(unit show -p NRestarts --value)
+    [[ $n2 == $((n + 1)) ]] || fail "NRestarts went from $n to $n2 after the watchdog, not to $((n + 1))"
+    [[ $inv2 != "$inv" ]] || fail "InvocationID is still $inv after the watchdog"
+    line=$(in_session "journalctl --user -q -o cat -u athanor-shelld --since @$since |
+        grep -m1 'Watchdog timeout'") || fail "no watchdog timeout in the manager's journal"
+    echo "  $line; MainPID $pid -> $pid2, NRestarts $n -> $n2," \
+        "InvocationID $inv -> $inv2"
     # SH8: the watchdog end is a failed run (SERVICE_RESULT=watchdog), so the record holds one
     # failure stamp beside the "running" line of the new run.
     # shellcheck disable=SC2016 # $XDG_RUNTIME_DIR is expanded by the guest's shell

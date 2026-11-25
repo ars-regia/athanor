@@ -5,7 +5,8 @@
 # which needs that script's private bus), in the dev VM's real session under the units the
 # image ships: deploy.sh the binaries and units first if the change under test is not in the
 # image. Each stage sends SIGSTOP to the daemon, waits past WatchdogSec=30s and asserts that
-# Result reads `watchdog` and that the unit is active again with a new main pid. The next
+# Result reads `watchdog`, that the manager's journal has its watchdog timeout, and that the
+# unit is active again with a new main pid, a new InvocationID and NRestarts one up. The next
 # run overwrites Result within RestartSec= (100 ms), so a drop-in stretches the restart
 # delay to 3 s for the stage. With no argument it runs every stage; prints PASS <stage> or
 # FAIL <stage>: <what was read>, and exits non-zero on the first failure. Cleanup always
@@ -56,7 +57,7 @@ new_main_pid() { # new_main_pid OLD-PID: active, with a different, real MainPID
 }
 
 run_stage() {
-    local pid
+    local pid inv n since pid2 inv2 n2 line
     if [[ $(prop ActiveState) != active ]]; then
         unit reset-failed || fail "reset-failed ${UNITS[$STAGE]}"
         unit start || fail "systemctl --user start ${UNITS[$STAGE]} failed"
@@ -69,13 +70,22 @@ run_stage() {
     # The drop-in is read by the next run: restart, then take the pid to stop.
     unit restart || fail "restart ${UNITS[$STAGE]}"
     wait_until 20 new_main_pid 0 || fail "${UNITS[$STAGE]} is not active after the restart"
-    pid=$(prop MainPID)
+    pid=$(prop MainPID) inv=$(prop InvocationID) n=$(prop NRestarts) since=$(in_session date +%s)
     unit kill --kill-whom=main -s SIGSTOP || fail "SIGSTOP to ${UNITS[$STAGE]} $pid"
     # 30 s of silence, plus the time systemd takes to end the stopped process.
     wait_until 90 result_is watchdog ||
         fail "Result is '$(prop Result)' 90 s after SIGSTOP, not watchdog"
     wait_until 30 new_main_pid "$pid" ||
         fail "no new active MainPID after the watchdog ended $pid: $(prop ActiveState)"
+    # A new pid alone could be a D-Bus activation of a unit that was not restarted: the
+    # manager's restart counter and a new invocation say that Restart= brought it back.
+    pid2=$(prop MainPID) inv2=$(prop InvocationID) n2=$(prop NRestarts)
+    [[ $n2 == $((n + 1)) ]] || fail "NRestarts went from $n to $n2 after the watchdog, not to $((n + 1))"
+    [[ $inv2 != "$inv" ]] || fail "InvocationID is still $inv after the watchdog"
+    line=$(in_session "journalctl --user -q -o cat -u ${UNITS[$STAGE]} --since @$since |
+        grep -m1 'Watchdog timeout'") || fail "no watchdog timeout in the manager's journal"
+    echo "  $line; MainPID $pid -> $pid2, NRestarts $n -> $n2," \
+        "InvocationID $inv -> $inv2"
 }
 
 stage_sessiond() { run_stage; }
