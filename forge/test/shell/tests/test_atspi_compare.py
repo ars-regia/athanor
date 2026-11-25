@@ -44,6 +44,40 @@ class CompareTest(unittest.TestCase):
             len(lines), 4, "the application and the unnamed panel are not spoken"
         )
 
+    def test_same_named_nodes_are_paired_by_fit_not_only_by_order(self):
+        # A dialog: GTK puts its Close button first and the title bar's Close last; Sal puts the
+        # title bar first.
+        shown = ["focusable", "showing"]
+        title = ("Close the window", shown)
+        content = ("", [*shown, "focused"])
+        reference = [node("button", "Close", c[1], description=c[0]) for c in (content, title)]
+        transcript = [node("button", "Close", c[1], description=c[0]) for c in (title, content)]
+        self.assertEqual(compare.compare(reference, transcript)[1], [])
+
+    def test_a_description_the_transcript_lacks_still_fails(self):
+        shown = ["focusable", "showing"]
+        reference = [
+            node("button", "Close", shown, description=""),
+            node("button", "Close", shown, description="Close the window"),
+        ]
+        transcript = [node("button", "Close", shown), node("button", "Close", shown)]
+        self.assertEqual(
+            compare.compare(reference, transcript)[1],
+            ["button 'Close': description '', expected 'Close the window'"],
+        )
+
+    def test_identical_candidates_are_paired_in_order(self):
+        shown = ["showing"]
+        reference = [node("label", "Same", shown, "one"), node("label", "Same", shown, "two")]
+        transcript = [node("label", "Same", shown, "two"), node("label", "Same", shown, "one")]
+        self.assertEqual(
+            compare.compare(reference, transcript)[1],
+            [
+                "label 'Same': value 'two', expected 'one'",
+                "label 'Same': value 'one', expected 'two'",
+            ],
+        )
+
     def test_a_lost_or_changed_description_fails(self):
         # SL4: a preference row's second line is its switch's description.
         row = ["checkable", "showing"]
