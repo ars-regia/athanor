@@ -8,7 +8,7 @@
 # build.sh then only checks with `dnf builddep` with every repository disabled. The same
 # RPMs at every build, so the same pins give the same kernel. lock.sh generate rewrites
 # the lock when this base or the pinned SRPM change. Build context: forge/specs/azoth.
-FROM registry.fedoraproject.org/fedora:45@sha256:7b6d9048825950573e58b7185631f6bd38f7c24f5c0e68ae902870aedebb86e0
+FROM registry.fedoraproject.org/fedora:45@sha256:62d5eaec1e8a34f6cb94934f806420754611834c7eef8a4f50b9cdbcd1c90c10
 
 # No weak dependencies and no cache: the image stays minimal.
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
