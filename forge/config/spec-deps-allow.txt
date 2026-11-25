@@ -4,7 +4,12 @@
 # that the document owns and that holds a manifest, or `repo` for a document that owns none, whose
 # crates are matched against every manifest of the repository. The forms the check reads are those of
 # SPEC_DEPS_FORMS; a sentence that says the crate is planned, or absent, names no dependency.
-# The list only shrinks: an entry that no longer applies leaves it, and a pull request adds none.
+# The list only shrinks: an entry that no longer applies leaves it, and against --known-red-base a pull
+# request adds none, except an entry whose finding the base already had under this matcher: the document,
+# components.toml and every manifest of the document's scope (its components' manifests, or all when it
+# owns none, the root's, and those its sentences cite) are byte-identical at the base. A stricter matcher
+# can list what it finds that way; an edit of a text, a manifest or components.toml cannot. The check prints
+# each entry it accepts as new.
 doc_disks.md repo libadwaita the GTK4 application that section 7 withdraws (amendment of 2026-10-06, GNOME Disks instead)
 doc_disks.md repo zxcvbn the strength hint of DK11, withdrawn with the GTK4 application by section 7 (amendment of 2026-10-06)
 doc_files.md repo bzip2 planned: an archive crate of FM8, whose helper is not yet built

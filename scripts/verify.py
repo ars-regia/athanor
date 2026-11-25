@@ -7939,17 +7939,19 @@ def spec_world(root):
         table = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
         workspace = {(dep.get("package", key) if isinstance(dep, dict) else key).replace("_", "-")
                      for key, dep in table.items()}
-    components, owned = set(), {}
+    components, owned, specs = set(), {}, []
     for comp in tomllib.loads(read(root / COMPONENTS)).get("component", []):
         path, spec = comp.get("path", ""), comp.get("spec", "")
         components.add(path)
+        specs.append((path, spec))
         mine = [m for m in manifests if m == path or m.startswith(path + "/")]
         if mine:
             owned.setdefault(spec, {})[path] = set().union(*(manifests[m] for m in mine))
     scopes = {doc.name: (tuple(sorted(owned.get(doc.name, {}))),
                          set().union(*owned[doc.name].values()) if doc.name in owned else everything)
               for doc in sorted((root / "docs/architecture").glob("*.md"))}
-    return {"manifests": manifests, "components": components, "workspace": workspace, "scopes": scopes}
+    return {"manifests": manifests, "components": components, "specs": specs,
+            "workspace": workspace, "scopes": scopes}
 
 
 def spec_name_used(name, names):
@@ -8011,26 +8013,59 @@ def spec_cited_names(cites, manifests):
                                 if path == cite or ("/" in cite and path.endswith("/" + cite))))
 
 
+def spec_input_paths(manifests, specs, doc, cites):
+    """The manifests among MANIFESTS (paths) that decide what the document DOC may name: those of
+    the components SPECS (path, spec) give it, or all when it owns none, the root's (the
+    workspace rule) and those its CITES point at."""
+    mine = {m for path, spec in specs if spec == doc for m in manifests if m == path or m.startswith(path + "/")}
+    return (mine or set(manifests)) | {m for m in manifests if m == "Cargo.toml" or any(
+        m == cite or ("/" in cite and m.endswith("/" + cite)) for cite in cites)}
+
+
+def spec_inputs_unchanged(root, base, doc, manifests, specs, cites):
+    """Whether everything that decides what DOC may name is byte-identical at BASE and in ROOT: the
+    document, COMPONENTS and the manifests of spec_input_paths, read from BASE as own_base_entries
+    reads, the set of those manifests included. A finding then comes from the matcher alone."""
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+
+    commit = git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").stdout.decode().strip()
+    at_base = {path for path in git("ls-tree", "-r", "-z", "--name-only", commit).stdout.decode().split("\0")
+               if path.endswith("Cargo.toml") and not third_party_cargo(path)}
+    scope = spec_input_paths(manifests, specs, doc, cites)
+    if not commit or spec_input_paths(at_base, specs, doc, cites) != scope:
+        return False
+    for path in (f"docs/architecture/{doc}", COMPONENTS, *sorted(scope)):
+        blob = f"{commit}:{path}"
+        if git("cat-file", "-e", blob).returncode != 0 or git("show", blob).stdout != (root / path).read_bytes():
+            return False
+    return True
+
+
 def spec_deps_report(root=None, base=None):
-    """(problems, fallback) of #1289 and #1510: every crate a specification under
+    """(problems, fallback, accepted) of #1289 and #1510: every crate a specification under
     docs/architecture presents as a dependency is used by a Cargo.toml of the components it
     owns in components.toml (of the repository, when it owns none; those documents are the
     fallback), by the manifest its sentence cites or by the workspace it names, or is listed in
     SPEC_DEPS_ALLOW for that document and one of its components; every entry still applies; and
-    against BASE the list adds no (document, crate) pair."""
+    against BASE the list adds no (document, crate) pair, but one whose finding BASE already had
+    under this matcher: spec_inputs_unchanged, so that a stricter matcher can list what it finds
+    and no edit of a text, a manifest or components.toml can. ACCEPTED says which entries."""
     root = Path(root or ROOT)
     try:
         entries = parse_spec_deps_allow(read(root / SPEC_DEPS_ALLOW))
     except (OSError, ValueError) as err:
-        return [f"{SPEC_DEPS_ALLOW}: {err}"], []
+        return [f"{SPEC_DEPS_ALLOW}: {err}"], [], []
     try:
         world = spec_world(root)
     except (OSError, ValueError, tomllib.TOMLDecodeError, subprocess.CalledProcessError) as err:
-        return [f"{COMPONENTS} or a Cargo.toml: cannot read ({err})"], []
-    scopes, named, where = world["scopes"], set(), {}
+        return [f"{COMPONENTS} or a Cargo.toml: cannot read ({err})"], [], []
+    scopes, named, where, cited, accepted = world["scopes"], set(), {}, {}, []
     for doc, (components, names) in scopes.items():
         where[doc] = components or (SPEC_DEPS_REPO,)
+        cited[doc] = set()
         for name, cites, workspace in spec_dependencies(read(root / "docs/architecture" / doc)):
+            cited[doc].update(cites)
             if not (spec_name_used(name, names)
                     or spec_name_used(name, spec_cited_names(cites, world["manifests"]))
                     or (workspace and spec_name_used(name, world["workspace"]))):
@@ -8051,11 +8086,14 @@ def spec_deps_report(root=None, base=None):
             before = own_base_entries(root, base, lambda text: parse_spec_deps_allow_base(text, known),
                                       SPEC_DEPS_ALLOW)
         except ValueError as err:
-            return problems + [f"{SPEC_DEPS_ALLOW} at {base}: {err}"], []
-        if before is not None:
-            problems += [f"{SPEC_DEPS_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks"
-                         for doc, _, name, _ in entries if (doc, name) not in before]
-    return problems, sorted(doc for doc, (components, _) in scopes.items() if not components)
+            return problems + [f"{SPEC_DEPS_ALLOW} at {base}: {err}"], [], []
+        for doc, _, name, _ in [e for e in entries if before is not None and (e[0], e[2]) not in before]:
+            if (doc, name) in named and spec_inputs_unchanged(root, base, doc, world["manifests"],
+                                                              world["specs"], cited[doc]):
+                accepted.append(f"accepted as new: {doc} {name} (inputs unchanged since {base}; the matcher found it)")
+            else:
+                problems.append(f"{SPEC_DEPS_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks")
+    return problems, sorted(doc for doc, (components, _) in scopes.items() if not components), accepted
 
 
 def spec_deps_problems(root=None, base=None):
@@ -8065,9 +8103,11 @@ def spec_deps_problems(root=None, base=None):
 @check("spec-deps", "Every crate a specification names as a dependency is used by a Cargo.toml of its components, unless spec-deps-allow.txt lists it, and the list only shrinks (#1289, #1510)")
 def check_spec_deps():
     r = Result()
-    problems, fallback = spec_deps_report(base=BASE_REF)
+    problems, fallback, accepted = spec_deps_report(base=BASE_REF)
     for problem in problems:
         r.fail(problem)
+    for line in accepted:
+        r.note(line)
     if fallback:
         r.note("no component with a manifest in components.toml, so matched against every manifest of the "
                f"repository: {', '.join(fallback)}")

@@ -221,10 +221,12 @@ class SpecDeps(unittest.TestCase):
         )
         self.assertEqual(self.problems(), [])
 
-    def rekey(self, old, new):
+    def rekey(self, old, new, after=None):
         """Commit OLD as the allow list, then write NEW and read it against that commit."""
         self.write(verify.SPEC_DEPS_ALLOW, old)
         self.commit()
+        if after:
+            after()
         self.write(verify.SPEC_DEPS_ALLOW, new)
         return self.problems("HEAD")
 
@@ -236,22 +238,69 @@ class SpecDeps(unittest.TestCase):
         self.assertEqual(problems, [])
 
     def test_an_entry_added_to_an_old_format_base_fails(self):
-        self.write(DOC_FREE, "It uses the `ring` crate.\n")
         problems = self.rekey(
             "# `DOCUMENT CRATE REASON`\ndoc_x.md zxcvbn planned: the hint\n",
             "doc_x.md bar zxcvbn planned\ndoc_free.md repo ring planned\n",
+            after=lambda: self.write(DOC_FREE, "It uses the `ring` crate.\n"),
         )
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("doc_free.md ring is not listed at HEAD", problems[0])
 
     def test_rewording_the_header_does_not_turn_the_shrink_check_off(self):
-        self.write(DOC_FREE, "It uses the `ring` crate.\n")
         problems = self.rekey(
             "# reworded\ndoc_x.md bar zxcvbn planned\n",
             "# reworded again\ndoc_x.md bar zxcvbn planned\ndoc_free.md repo ring planned\n",
+            after=lambda: self.write(DOC_FREE, "It uses the `ring` crate.\n"),
         )
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("doc_free.md ring is not listed at HEAD", problems[0])
+
+    def grown(self, change=None):
+        """Commit a base where doc_x.md names `ring` and the list lacks it, apply CHANGE, then list it."""
+        self.write(DOC, "The `zxcvbn` crate gives a hint, through the crate `ring`.\n")
+        self.write(verify.SPEC_DEPS_ALLOW, "doc_x.md bar zxcvbn planned\n")
+        self.commit()
+        if change:
+            change()
+        self.write(
+            verify.SPEC_DEPS_ALLOW,
+            "doc_x.md bar zxcvbn planned\ndoc_x.md bar ring planned\n",
+        )
+        return verify.spec_deps_report(self.root, "HEAD")
+
+    def test_an_entry_whose_inputs_are_unchanged_is_accepted_and_printed(self):
+        problems, _, accepted = self.grown()
+        self.assertEqual(problems, [])
+        self.assertEqual(len(accepted), 1, accepted)
+        self.assertIn("accepted as new: doc_x.md ring", accepted[0])
+
+    def test_an_added_entry_with_an_edited_sentence_fails(self):
+        problems, _, accepted = self.grown(
+            lambda: self.write(
+                DOC,
+                "The `zxcvbn` crate gives a hint, through `ring`, as the crate `ring`.\n",
+            )
+        )
+        self.assertEqual(accepted, [])
+        self.assertIn("doc_x.md ring is not listed at HEAD", "".join(problems))
+
+    def test_an_added_entry_with_a_manifest_that_drops_the_crate_fails(self):
+        self.write(
+            "bar/Cargo.toml",
+            '[package]\nname = "athanor-bar"\n\n[dependencies]\nfutures_util = "0.3"\nring = "1"\n',
+        )
+        problems, _, accepted = self.grown(
+            lambda: self.write("bar/Cargo.toml", '[package]\nname = "athanor-bar"\n')
+        )
+        self.assertEqual(accepted, [])
+        self.assertIn("doc_x.md ring is not listed at HEAD", "".join(problems))
+
+    def test_an_added_entry_with_a_changed_components_toml_fails(self):
+        problems, _, accepted = self.grown(
+            lambda: self.write(verify.COMPONENTS, COMPONENTS + "\n# changed\n")
+        )
+        self.assertEqual(accepted, [])
+        self.assertIn("doc_x.md ring is not listed at HEAD", "".join(problems))
 
     def test_a_component_without_a_slash_is_read_as_the_new_format(self):
         # `bar` and `Cargo.toml` have no slash, `repo` is no path
@@ -308,7 +357,7 @@ class SpecDeps(unittest.TestCase):
 
     def test_a_malformed_manifest_fails_the_check_without_a_traceback(self):
         self.write("bad/Cargo.toml", "[package\n")
-        problems, fallback = verify.spec_deps_report(self.root)
+        problems, fallback, _ = verify.spec_deps_report(self.root)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("cannot read", problems[0])
         self.assertEqual(fallback, [])
