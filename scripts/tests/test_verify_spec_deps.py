@@ -356,13 +356,18 @@ class SpecDeps(unittest.TestCase):
                 self.assertEqual(self.problems(), [])
 
     def test_new_and_without_hide_a_crate_only_in_front_of_its_name(self):
-        for sentence in (
-            "It depends on `zip` without its default features.",
-            "A new `tokio` 1.4 crate bump.",
+        for sentence, name in (
+            ("It depends on `zip` without its default features.", "zip"),
+            ("A new `tokio` 1.4 crate bump.", "tokio"),
+            (
+                "The shell depends on `a` without default features and on the `zip` crate.",
+                "zip",
+            ),
+            ("A new crate `foo` and the `bar` crate.", "bar"),
         ):
             with self.subTest(sentence=sentence):
                 found = {n for n, _, _ in verify.spec_dependencies(sentence + "\n")}
-                self.assertEqual(len(found), 1, found)
+                self.assertIn(name, found)
         for sentence in (
             "New: the pure-Rust archive crates of FM8: `zip` 8.6.0 (MIT).",
             "It talks through a new crate, `athanor-ibus`, with no GTK type.",

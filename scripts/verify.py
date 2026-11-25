@@ -7870,9 +7870,12 @@ SPEC_DEPS_CUE = re.compile(r"\bcrates?\b|crates\.io|docs\.rs|Cargo\.toml")
 # two code spans ("no `gtk4`, `gdk4` or `gtk4-layer-shell` crate") is a list's, not a bound. The
 # detector still reads words, not meaning.
 SPEC_DEPS_SKIP = re.compile(r"\b(?:no|not|rejected|deleted|removed|dropped|refused|planned)\b", re.I)
-# "new" and "without" skip only in front of the name: "a new crate" or "New:", and "without".
-# "depends on `zip` without its default features" and "a new `tokio` version" stay claims.
-SPEC_DEPS_SKIP_BEFORE = re.compile(r"\ba new crates?\b|\bNew:|\bwithout\b", re.I)
+# "new" and "without" skip only in front of the name: "a new crate" or "New:" after the last code
+# span before it, and "without" right before it ("without the `x` crate"), so the cue of an
+# earlier name hides no later one. "depends on `zip` without its default features" and "a new
+# `tokio` version" stay claims.
+SPEC_DEPS_SKIP_BEFORE = re.compile(r"\ba new crates?\b|\bNew:", re.I)
+SPEC_DEPS_WITHOUT = re.compile(r"\bwithout (?:(?:the|a|an) )?(?:crates? )?$", re.I)
 
 
 def parse_spec_deps_allow(text):
@@ -8003,8 +8006,12 @@ def spec_dependencies(text):
             for form in forms:
                 for m in form.finditer(sentence):
                     left, right = spec_clause(sentence, m.start(), m.end())
+                    # the window starts after the last code span before the match, so the cue of an
+                    # earlier name does not hide this one
+                    window = left + sentence[left:m.start()].rfind("`") + 1
                     if not (SPEC_DEPS_SKIP.search(sentence[left:right])
-                            or SPEC_DEPS_SKIP_BEFORE.search(sentence[left:m.end()])):
+                            or SPEC_DEPS_SKIP_BEFORE.search(sentence[window:m.end()])
+                            or SPEC_DEPS_WITHOUT.search(sentence[left:m.start()])):
                         found.add((m.group(1), cites, m.group(1) in workspace))
     return found
 
