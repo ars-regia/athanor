@@ -1,17 +1,23 @@
 #!/usr/bin/python3
 """toolkit_window_check.py - athanor-sal's windows opened and closed at run time, and a run that
-outlives its last window (doc_settings.md section 7, SL1, for the resident process of SE5),
-against sway on its headless backend.
+outlives its last window (doc_settings.md section 7, SL1, for the resident process of SE5), and
+an open window raised with an xdg-activation token (SL2, for `Show` on a window already open,
+SE4), against sway on its headless backend.
 
 Runs inside the rig. Starts sway, then `athanor-sal-resident`, which opens no window at start
 and one for each `show` line on its standard input. A `show` must map a window; sway's `kill`,
 the compositor's request to close it, must close it, destroying its xdg_toplevel and its
 wl_surface, and leave the client running with no window; a second `show` must map a new one,
 and `quit` must end the run with status 0. Then `athanor-sal-resident --default`, which keeps
-the driver's default, must end with status 0 when sway closes its window. Last, Settings' own
-window (`athanor-settings-resident`, the probe of its `examples/resident_probe.rs`): sway's
-`kill` must close it and leave the process running, and a `Show` queued on its standard input
-must map the next window in that same process, twice.
+the driver's default, must end with status 0 when sway closes its window. Then two windows of
+`athanor-sal-resident`, the second focused as sway maps it: `raise <token>` with a token sway
+did not grant must leave the first as it was, and `raise`, which asks sway for a token on the
+second and raises the first with it, must make the first urgent. Sway 1.12 focuses a window
+activated only with a token asked with a seat and the serial of an input event, which a
+headless sway without input devices never sends; without them it marks the window urgent, which
+shows that it took the request and the token. Last, Settings' own window (`athanor-settings-resident`, the probe of its
+`examples/resident_probe.rs`): sway's `kill` must close it and leave the process running, and a
+`Show` queued on its standard input must map the next window in that same process, twice.
 """
 
 import json
@@ -27,6 +33,7 @@ APP_ID = "os.athanor.SalResident"
 TRACE = Path("/out/toolkit-window.trace")
 STDOUT = Path("/out/toolkit-window.stdout")
 DEFAULT_STDOUT = Path("/out/toolkit-window-default.stdout")
+RAISE_STDOUT = Path("/out/toolkit-window-raise.stdout")
 SETTINGS = "/out/bin/athanor-settings-resident"
 SETTINGS_ID = "os.athanor.Settings"
 SETTINGS_LOG = Path("/out/toolkit-window-settings.log")
@@ -56,6 +63,21 @@ def pids(app_id):
 def windows():
     """The number of windows of the client that sway maps."""
     return len(pids(APP_ID))
+
+
+def focus():
+    """The id of each window of the client that sway maps, in the order sway made them, the id
+    of the one focused, or None, and the ids of those urgent."""
+
+    def mapped(node):
+        own = [node] if node.get("app_id") == APP_ID else []
+        children = node.get("nodes", []) + node.get("floating_nodes", [])
+        return own + [window for child in children for window in mapped(child)]
+
+    nodes = mapped(json.loads(sway("-r", "-t", "get_tree")))
+    focused = [node["id"] for node in nodes if node.get("focused")]
+    urgent = {node["id"] for node in nodes if node.get("urgent")}
+    return sorted(node["id"] for node in nodes), (focused or [None])[0], urgent
 
 
 def until(what, done):
@@ -161,6 +183,67 @@ def default(wayland):
             client.terminate()
 
 
+def raised(wayland):
+    with open(RAISE_STDOUT, "w") as stdout:
+        client = subprocess.Popen(
+            [CLIENT],
+            env=wayland,
+            stdin=subprocess.PIPE,
+            stdout=stdout,
+            stderr=sys.stderr,
+            text=True,
+        )
+
+    def send(line):
+        client.stdin.write(line + "\n")
+        client.stdin.flush()
+
+    try:
+        for n in (1, 2):
+            send("show")
+            until(
+                f"raise: show {n} mapped no window",
+                lambda n=n: said(RAISE_STDOUT, "drawn") == n and windows() == n,
+            )
+        until(
+            "sway did not focus the window it mapped last",
+            lambda: focus()[1] is not None and focus()[1] == focus()[0][-1],
+        )
+        first = focus()[0][0]
+        send("raise not-a-token-sway-granted")
+        until(
+            "the client asked nothing with the token it was given",
+            lambda: said(RAISE_STDOUT, "raised") == 1,
+        )
+        time.sleep(1)
+        if first in focus()[2] or focus()[1] == first:
+            raise SystemExit(
+                "toolkit_window_check: a token sway did not grant raised the first window"
+            )
+        send("raise")
+        until(
+            "the client raised no window with the token it asked for",
+            lambda: said(RAISE_STDOUT, "raised") == 2,
+        )
+        until(
+            "the first window, raised with the token sway granted, was not made urgent",
+            lambda: first in focus()[2],
+        )
+        print(
+            "an open window raised with a token sway granted was made urgent, "
+            "and one sway did not grant changed nothing"
+        )
+        send("quit")
+        status = ended(client, "quit did not end the run with two windows open")
+        if status != 0:
+            raise SystemExit(
+                f"toolkit_window_check: quit ended the raise run with status {status}"
+            )
+    finally:
+        if client.poll() is None:
+            client.terminate()
+
+
 def settings(wayland):
     with open(SETTINGS_LOG, "w") as log:
         client = subprocess.Popen(
@@ -221,6 +304,7 @@ def main():
         wayland = dict(os.environ, WAYLAND_DISPLAY=display)
         resident(wayland)
         default(wayland)
+        raised(wayland)
         settings(wayland)
     finally:
         compositor.terminate()
