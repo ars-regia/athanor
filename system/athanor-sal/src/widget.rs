@@ -653,15 +653,6 @@ impl WindowButton {
             Self::Close => "Close",
         }
     }
-
-    /// The description assistive technologies read after the name: GTK 4.24's for the same
-    /// buttons, in English whatever the language, as the name.
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Minimize => "Minimize the window",
-            Self::Close => "Close the window",
-        }
-    }
 }
 
 /// One node of the tree: what it is, where it sits and where it was laid out.
@@ -1465,9 +1456,8 @@ impl Ui {
     }
 
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
-    /// the tree and its buttons first in the Tab order, where GTK's title bar is last in the
-    /// window and its Tab never reaches the buttons. The order is Sal's own: it lets the
-    /// keyboard reach Minimize and Close at once.
+    /// the tree and in the Tab order, where GTK's title bar is last and its Tab never reaches
+    /// the buttons: the keyboard reaches Minimize and Close at once.
     pub fn add_title_bar(&mut self) {
         if self.title_bar.is_some() {
             return;
@@ -1486,11 +1476,6 @@ impl Ui {
         }
         self.add_window_button(bar, WindowButton::Close);
         self.title_bar = Some(bar);
-    }
-
-    fn add_window_button(&mut self, bar: WidgetId, button: WindowButton) {
-        let id = self.add(bar, Kind::WindowButton(button));
-        self.set_description(id, Some(button.description()));
     }
 
     /// Whether `id` names a widget of this `Ui` as it is now: not one [`Ui::remove_children`]
@@ -3826,6 +3811,24 @@ fn slider_fraction(r: Rect, rtl: bool, font: f32, x: f32) -> f32 {
 /// change how text reads without being seen.
 fn is_invisible_format(c: char) -> bool {
     matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+impl WindowButton {
+    /// The description assistive technologies read after the name: GTK 4.24's for the same
+    /// buttons, in English whatever the language, as the name.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Minimize => "Minimize the window",
+            Self::Close => "Close the window",
+        }
+    }
+}
+
+impl Ui {
+    fn add_window_button(&mut self, bar: WidgetId, button: WindowButton) {
+        let id = self.add(bar, Kind::WindowButton(button));
+        self.set_description(id, Some(button.description()));
+    }
 }
 
 #[cfg(test)]
