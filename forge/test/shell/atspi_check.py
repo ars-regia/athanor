@@ -54,6 +54,13 @@ def problems(nodes, expected, required=(), window=None):
             found.append(f"a showing '{role}' has no accessible name")
     for index, (role, name, showing) in enumerate(nodes):
         own = windows.get(index, window)
+        if role == "menu" and showing and index in extents and own is not None:
+            # A popover menu hangs out of its window, so it is not held inside it, but it opens
+            # from it: its extent touches the window, and a bogus extent far away does not.
+            wx, wy, ww, wh = own
+            x, y, w, h = extents[index]
+            if w > 0 and h > 0 and (x >= wx + ww or x + w <= wx or y > wy + wh or y + h < wy):
+                found.append(f"the showing 'menu' {name!r} at {(x, y, w, h)} is away from its window {own}")
         if not (showing and role in INTERACTIVE and index in extents and own is not None):
             continue
         wx, wy, ww, wh = own
@@ -179,12 +186,12 @@ def with_extents(accessible, Atspi, out=None, window=None, depth=0):
     extents = extents_of(accessible, Atspi) or (0, 0, 0, 0)
     if depth == 1:
         window = (0, 0, extents[2], extents[3])
-    elif accessible.get_role_name() == "menu" and extents[2] > 0 and extents[3] > 0:
+    node = (accessible.get_role_name(), accessible.get_name() or "", showing, extents)
+    out.append(node if window is None else node + (window,))
+    if depth > 1 and node[0] == "menu" and extents[2] > 0 and extents[3] > 0:
         # GTK 4.24's popover menu is a node of the window's own tree, drawn in a surface that
         # hangs out of the window: its entries lie inside the menu, not inside the window.
         window = extents
-    node = (accessible.get_role_name(), accessible.get_name() or "", showing, extents)
-    out.append(node if window is None else node + (window,))
     for child in children(accessible):
         with_extents(child, Atspi, out, window, depth + 1)
     return out

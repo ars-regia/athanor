@@ -54,6 +54,42 @@ class CompareTest(unittest.TestCase):
         transcript = [node("button", "Close", c[1], description=c[0]) for c in (title, content)]
         self.assertEqual(compare.compare(reference, transcript)[1], [])
 
+    def test_same_named_nodes_are_paired_by_the_states_each_carries(self):
+        reference = [node("check box", "Pick", ["checked"]), node("check box", "Pick", [])]
+        transcript = [node("check box", "Pick", []), node("check box", "Pick", ["checked"])]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("transcript 'check box' ['checked']", lines[0])
+        self.assertIn("transcript 'check box' []", lines[1])
+
+    def test_the_description_outweighs_the_states_in_a_pairing(self):
+        reference = [node("button", "Go", ["checked"], description="Does it")]
+        transcript = [
+            node("button", "Go", ["checked"], description="Other"),
+            node("button", "Go", [], description="Does it"),
+        ]
+        _, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, ["button 'Go': state 'checked' missing"])
+
+    def test_a_role_of_its_own_beats_one_said_alike_and_either_beats_another(self):
+        for ref_role, name, order, expected in [
+            ("button", "Go", ["push button", "button"], "button"),
+            ("check box", "A switch", ["toggle button", "check box"], "check box"),
+            ("button", "Go", ["label", "push button"], "push button"),
+            ("check box", "A switch", ["label", "toggle button"], "toggle button"),
+        ]:
+            transcript = [node(role, name) for role in order]
+            lines, failures = compare.compare([node(ref_role, name)], transcript)
+            self.assertEqual(failures, [], order)
+            self.assertIn(f"transcript {expected!r}", lines[0], order)
+
+    def test_a_state_that_moved_between_identical_siblings_is_not_reported(self):
+        # The limit of the pairing: nodes of one name, role and description are told apart only
+        # by their states, so the box that is checked is not the one the reference checks.
+        reference = [node("check box", "Pick", ["checked"]), node("check box", "Pick", [])]
+        transcript = [node("check box", "Pick", []), node("check box", "Pick", ["checked"])]
+        self.assertEqual(compare.compare(reference, transcript)[1], [])
+
     def test_a_description_the_transcript_lacks_still_fails(self):
         shown = ["focusable", "showing"]
         reference = [

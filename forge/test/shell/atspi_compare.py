@@ -307,7 +307,10 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
         # toggle button (SWITCH), so that a popover's frame named as its switch does not take its
         # place, then any, maintainer decision, 2026-11-14), then the same description,
         # then the fewest states missing, then the first in the tree: nodes of one name may come
-        # in another order (a dialog's title bar, GTK's last, is Sal's first).
+        # in another order (a dialog's title bar, GTK's last, is Sal's first). Nodes of one name,
+        # role and description are told apart only by their states, each reference node taking
+        # its best in turn and extra states costing nothing: a state that moved between two such
+        # siblings is not reported (test_a_state_that_moved_between_identical_siblings...).
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = min(named, key=lambda node: fit(ref, node), default=None)
         match = counterparts.get(id(ref), match)

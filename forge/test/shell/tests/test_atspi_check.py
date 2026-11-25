@@ -83,6 +83,15 @@ class ExtentsTest(unittest.TestCase):
         found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
         self.assertEqual(found, ["the showing 'menu item' 'Far' at (405, 500, 168, 30) is outside its window (400, 220, 180, 220)"])
 
+    def test_a_menu_away_from_its_window_is_a_problem_however_its_entries_fit(self):
+        entry = Fake("menu item", (5005, 5008, 168, 30), name="New window")
+        menu = Fake("menu", (5000, 5000, 180, 220), [entry])
+        frame = Fake("frame", (0, 0, 985, 225), [Fake("button", (10, 10, 80, 30), [menu], "Open a menu")])
+        found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
+        self.assertEqual(
+            found, ["the showing 'menu' '' at (5000, 5000, 180, 220) is away from its window (0, 0, 985, 225)"]
+        )
+
 
 class Fake:
     """An accessible of the AT-SPI calls with_extents() makes."""
