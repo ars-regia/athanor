@@ -367,6 +367,41 @@ class Limits(unittest.TestCase):
         self.assertIn("fewer than 200 lines", out[0])
 
 
+class Tokenless(unittest.TestCase):
+    """A `path:N` that the change places, whose sentence names nothing the cited lines hold (#1482)."""
+
+    # line 2 of src/x.rs holds `other`, which the sentence does not name
+    NEW = "Up and Down leave the list (`src/x.rs:2`)."
+    HUNKS = {"doc.md": [(1, 0, 1)]}
+
+    def found(self, text, base):
+        found = verify.citation_findings("doc.md", text, set(FILES), FILES.__getitem__, self.HUNKS, base)
+        return [f[-1] for f in found]
+
+    def test_a_new_tokenless_citation_fails(self):
+        out = self.found(f"Intro.\n{self.NEW}", "Intro.")
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("doc.md:2: `src/x.rs:2` names no token that the cited lines hold", out[0])
+
+    def test_the_same_citation_unchanged_on_the_base_passes(self):
+        self.assertEqual(self.found(self.NEW, self.NEW), [])
+        self.assertEqual(messages(self.NEW), [])
+
+    def test_a_citation_kept_on_an_edited_line_passes_and_one_changed_there_fails(self):
+        self.assertEqual(self.found("Up and Down leave the list, as Tab does (`src/x.rs:2`).", self.NEW), [])
+        out = self.found("Up and Down leave the list, as Tab does (`src/x.rs:3`).", self.NEW)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`src/x.rs:3` names no token", out[0])
+
+    def test_a_citation_converted_to_a_symbol_or_given_a_token_passes(self):
+        self.assertEqual(self.found("Up and Down leave the list (`src/x.rs#other`).", self.NEW), [])
+        self.assertEqual(self.found("Up and Down leave the list in `other` (`src/x.rs:2`).", self.NEW), [])
+
+    def test_a_new_citation_of_a_document_by_its_section_passes(self):
+        self.assertEqual(self.found("AB1 is at `other.md:3-4`.", ""), [])
+        self.assertEqual(len(self.found("It is at `other.md:3-4`.", "")), 1)
+
+
 class Moved(unittest.TestCase):
     """A change to a cited file moves the lines its unchanged citations name."""
 

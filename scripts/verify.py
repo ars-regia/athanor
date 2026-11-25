@@ -7215,11 +7215,23 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     the file no longer holds stays in the run and is a finding, a JSON name matches a whole string
     (`"cosmic-settings"`, not `cosmic-settings-daemon`), and a citation that names none is a finding.
 
-    Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
-    place holding the token, and a word that the cited lines hold in a comment or a string
+    A `path:N` that the change places itself (with `hunks`: a citation on a line the change wrote
+    or edited, unless the base line it replaces holds the k-th citation of that file with the same
+    lines) is a finding when its sentence names no such token, no row name and, for a cited
+    document, no section id the document has (#1482): a range that its sentence names nothing of
+    cannot be told from one that moved onto other code. The fix is a token in backticks in the
+    sentence, or a citation by name (`path#name`), which symbol-citations checks. Only the
+    citations whose text the change writes are read so, not the whole of an edited line: an
+    amendment of an approved text is appended to a line whose old citations it must not rewrite,
+    and an edit of a sentence would otherwise fail on every tokenless citation it happens to sit
+    beside. The tokenless citations that the documents held when the rule came are tracked in an
+    issue and are converted to `path#name` in batches. Limit: without `hunks`, and for
+    those, a sentence with no such token is not checked; a citation that names a wrong place
+    holding the token is not seen, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
-    name and no section id in its sentence is checked only for a first line that holds words, so
-    a stale one that still lands on text goes unseen (#1089). In a list file, a run reaches the key
+    name and no section id in its sentence, that the change did not place, is checked only for a
+    first line that holds words, so a stale one that still lands on text goes unseen (#1089). In
+    a list file, a run reaches the key
     only across the exact `are` or `is`, then an optional `listed`, then `in` or `under`: with other words between
     them ("are both in"), only the key is demanded, and a removed single-word entry is not seen.
 
@@ -7496,10 +7508,19 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             else:
                 tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
+            # Whether the change placed this `path:N` itself (#1482): its line is not a line of the
+            # base, and the base line it replaces holds no k-th citation of the file with these lines.
+            base_specs = was.get((pair.get(number), path), [])
+            authored = bool(hunks) and not symbol and line not in unchanged and not (
+                k < len(base_specs) and base_specs[k] == spec)
             if listed and not tokens:
                 out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
                             "that the file holds: put the entry's name in backticks, or hyphenated, "
                             "in its sentence"))
+            elif not tokens and authored and not (path.endswith(".md") and spans):
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
+                            "that the cited lines hold: name what it cites in backticks in its sentence, or cite "
+                            "it by symbol (`path#name`)"))
             elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
                 out.append((number, path, spec, missing, f"{doc}:{number}: `{path}{sep}{spec}` does not hold "
                             f"`{missing}`, which its sentence names: the lines moved"))
@@ -7508,6 +7529,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
 
 @check("line-citations", "A path:line citation of an architecture document holds the code its sentence names")
 def check_line_citations():
+    """The findings of citation_findings in the architecture documents (`docs/architecture/doc_*.md`
+    and `shell-features.md`), less LINE_CITATIONS_KEPT. The plans under `docs/superpowers/plans/`
+    are not read: they are working notes with no code owner (ADR-0107), not approved texts."""
     r = Result()
     listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
     if listed.returncode:
