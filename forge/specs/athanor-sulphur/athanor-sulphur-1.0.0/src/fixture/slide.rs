@@ -177,23 +177,15 @@ fn a_right_to_left_language_mirrors_the_slide() {
     run.stop();
 }
 
-/// A popup slides with its window. The popups of the windows left are dismissed (`park`), so
-/// only a window of the workspace coming in can have one during a slide: opened half way in,
-/// it is drawn half the output's width from its place, with its window, and nothing of it is
-/// drawn at its place until the slide is over.
-#[test]
-fn a_popup_slides_with_its_window() {
-    let mut run = Running::start(None);
-    let two = two_workspaces(&mut run);
-    let mut local = Local::connect(&mut run, None);
-    let parent = local.another(&mut run, "parent");
-    let window = local.server_window(&run, &parent.surface);
-    run.state.space.relocate_element(&window, (100, 560));
-    run.state.settle(&window);
-    assert!(run.state.activate_workspace(two.list[0]));
-    advance(DURATION);
-    // Back to the second workspace, which comes in from the right.
-    assert!(run.state.activate_workspace(two.list[1]));
+/// The middle of a green `WIDTH`x`HEIGHT` popup opened over the whole of `parent`, the black
+/// window of `local` that the compositor holds as `window`, placed at `placed`.
+fn open_popup(
+    run: &mut Running,
+    local: &mut Local,
+    parent: &Other,
+    window: &smithay::desktop::Window,
+    placed: Point<i32, Logical>,
+) -> Point<i32, Logical> {
     let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -207,20 +199,40 @@ fn a_popup_slides_with_its_window() {
     xdg.get_popup(Some(&parent.xdg), &positioner, &qh, ());
     local.client.configure = None;
     surface.commit();
-    local.pump(&mut run, "the popup is configured", |client, _| {
+    local.pump(run, "the popup is configured", |client, _| {
         client.configure.is_some()
     });
     xdg.ack_configure(local.client.configure.take().expect("a configure"));
     let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 255, 0, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
-    local.roundtrip(&mut run);
+    local.roundtrip(run);
     let root = window.toplevel().expect("a toplevel").wl_surface().clone();
     let (_, offset) = smithay::desktop::PopupManager::popups_for_surface(&root)
         .next()
         .expect("the popup");
+    placed + offset + Point::from((WIDTH / 2, HEIGHT / 2))
+}
+
+/// A popup slides with its window. Opened on a window of the workspace coming in, half way in,
+/// it is drawn half the output's width from its place, with its window, and nothing of it is
+/// drawn at its place until the slide is over. `park` dismisses the popups a window left had,
+/// but its client can open one after (`a_popup_opened_on_a_window_left_slides_out_with_it`).
+#[test]
+fn a_popup_slides_with_its_window() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    let parent = local.another(&mut run, "parent");
+    let window = local.server_window(&run, &parent.surface);
+    run.state.space.relocate_element(&window, (100, 560));
+    run.state.settle(&window);
+    assert!(run.state.activate_workspace(two.list[0]));
+    advance(DURATION);
+    // Back to the second workspace, which comes in from the right.
+    assert!(run.state.activate_workspace(two.list[1]));
     let placed = run.state.space.element_geometry(&window).expect("shown");
-    let middle = placed.loc + offset + Point::from((WIDTH / 2, HEIGHT / 2));
+    let middle = open_popup(&mut run, &mut local, &parent, &window, placed.loc);
     advance(DURATION / 2);
     let half = frame(&mut run);
     advance(DURATION);
@@ -234,6 +246,40 @@ fn a_popup_slides_with_its_window() {
     assert!(
         background(&at(&half, middle.x, middle.y)),
         "nothing of it at its place half way in"
+    );
+    run.stop();
+}
+
+/// A popup its client opens on a window of the workspace left, once `park` has dismissed the
+/// ones it had (a parked window grabs nothing, README.md), goes out with its window: half way
+/// out it is drawn half the output's width from its place, and once the slide is over nothing
+/// of it is drawn.
+#[test]
+fn a_popup_opened_on_a_window_left_slides_out_with_it() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    let parent = local.another(&mut run, "parent");
+    let window = local.server_window(&run, &parent.surface);
+    run.state.space.relocate_element(&window, (100, 560));
+    run.state.settle(&window);
+    let placed = run.state.space.element_geometry(&window).expect("shown");
+    // To the first workspace: the second, with the parent, goes out to the right.
+    assert!(run.state.activate_workspace(two.list[0]));
+    let middle = open_popup(&mut run, &mut local, &parent, &window, placed.loc);
+    advance(DURATION / 2);
+    let half = frame(&mut run);
+    advance(DURATION);
+    let over = frame(&mut run);
+    let green = at(&half, middle.x + 640, middle.y);
+    assert_eq!(green[..3], [0, 255, 0], "half way out with its window");
+    assert!(
+        background(&at(&half, middle.x, middle.y)),
+        "nothing of it at its place half way out"
+    );
+    assert!(
+        background(&at(&over, middle.x + 640, middle.y)),
+        "nothing of it once the slide is over"
     );
     run.stop();
 }
