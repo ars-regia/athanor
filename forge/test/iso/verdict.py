@@ -78,6 +78,13 @@ SESSION_SIGNALS = ("session-alive",)
 # And one more: SETTINGS_ALIVE is the guest's report of the settings application, started
 # inside that session, still running after it has had time to open or to die.
 SETTINGS_SIGNALS = ("settings-alive",)
+# And GRANTS_KEPT, the guest's report that the session's user journal holds no line of a
+# service that lost a Landlock grant or could not confine itself. GRANTS_LOST fails the run
+# by leaving this unset, and the report names it. Not asked in the upgrade case, whose first
+# boot is the published :stable.
+GRANTS_SIGNALS = ("grants-kept",)
+# Not anchored to a line start: a console with bracketed paste puts an escape before it.
+GRANTS_LOST = re.compile(rb"GRANTS_LOST (\d+)")
 # And the kernel profile: PROFILE_OK is the guest's report that athanor-profile-check found
 # every setting of its role combination's profile in force (doc_kernel_profile.md,
 # section 12 item 3). PROFILE_DRIFT fails the run by leaving this unset.
@@ -197,6 +204,7 @@ def main() -> int:
     greeter = next((s for s in GREETER_SIGNALS if s in phases), None)
     session = next((s for s in SESSION_SIGNALS if s in phases), None)
     settings = next((s for s in SETTINGS_SIGNALS if s in phases), None)
+    grants = next((s for s in GRANTS_SIGNALS if s in phases), None)
     failures = [s for s in FAILURE_SIGNALS if s in phases]
     mok = next((s for s in MOK_SIGNALS if s in phases), None)
     secure_boot = next((s for s in SECUREBOOT_SIGNALS if s in phases), None)
@@ -234,6 +242,21 @@ def main() -> int:
     lines.append(f"- greeter reached: {greeter if greeter else 'NO'}")
     lines.append(f"- session started: {session if session else 'NO'}")
     lines.append(f"- settings opened: {settings if settings else 'NO'}")
+    if not upgrade:
+        if grants:
+            lines.append(f"- session services keep their Landlock grants: {grants}")
+        elif "grants-lost" in phases:
+            found = GRANTS_LOST.search(log.read_bytes() if log.exists() else b"")
+            lines.append(
+                "- session services keep their Landlock grants: NO, "
+                f"{found.group(1).decode() if found else 'some'} journal line(s) of a service that lost a grant "
+                "or could not confine itself (grants-lost; the lines follow GRANTS_LOST in serial.log)"
+            )
+        else:
+            lines.append(
+                "- session services keep their Landlock grants: NO ANSWER"
+                f"{' (grants-unreadable)' if 'grants-unreadable' in phases else ''}"
+            )
     if mok:
         lines.append(f"- Secure Boot certificate enrolled: {mok}")
     elif "mok-cert-absent" in phases:
@@ -277,6 +300,8 @@ def main() -> int:
         "mok": mok is not None,
         "no-guest-failure": not failures,
     }
+    if not upgrade:
+        checks["session-grants"] = grants is not None
     if booted_ok is not None:
         checks["booted-layers"] = booted_ok
     if secure_boot_required:
