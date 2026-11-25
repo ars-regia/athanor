@@ -541,6 +541,21 @@ class HttpGet(unittest.TestCase):
         self.assertIn("https://repo/x: HTTP 502, attempt 1 of 5: retrying in 15 s", err.getvalue())
 
 
+class MirrorBlob(unittest.TestCase):
+    """A blob read of the mirror is retried as http_get is: a timeout must not end `mirrored`."""
+
+    def test_a_timeout_is_retried_and_a_final_answer_is_not(self):
+        mirror = lock.Mirror("registry.example/owner/athanor-nvidia-rpms")
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=[urllib.error.URLError("timed out"), io.BytesIO(b"x")]) as opened, \
+                unittest.mock.patch("time.sleep") as slept, redirect_stderr(io.StringIO()):
+            self.assertTrue(mirror.has("a" * 64))
+        self.assertEqual(([c.args[0] for c in slept.call_args_list], opened.call_count), ([15], 2))
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=[http_error(404)]) as opened, \
+                unittest.mock.patch("time.sleep") as slept:
+            self.assertFalse(mirror.has("a" * 64))
+        self.assertEqual((slept.call_count, opened.call_count), (0, 1))
+
+
 def run(argv, download):
     err = io.StringIO()
     out = io.StringIO()

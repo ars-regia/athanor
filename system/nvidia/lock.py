@@ -138,13 +138,20 @@ class Moved(LockError):
 
 
 def http_get(url):
-    """The body at `url`. A transient failure (a network error, a timeout, HTTP 5xx or 429) is
-    retried as forge/scripts/retry.sh retries; the last one, or any other, is raised."""
+    """The body at `url`, fetched by `retrying`."""
+    def read():
+        with urllib.request.urlopen(url, timeout=120) as response:
+            return response.read()
+    return retrying(url, read)
+
+
+def retrying(url, call):
+    """The result of `call()`. A transient failure (a network error, a timeout, HTTP 5xx or 429)
+    is retried as forge/scripts/retry.sh retries; the last one, or any other, is raised."""
     delay = DELAY
     for attempt in range(1, ATTEMPTS + 1):
         try:
-            with urllib.request.urlopen(url, timeout=120) as response:
-                return response.read()
+            return call()
         except urllib.error.HTTPError as error:
             if error.code not in TRANSIENT or attempt == ATTEMPTS:
                 raise
@@ -197,7 +204,7 @@ class Mirror:
                 # Unredirected: the blob redirects to a CDN URL that must not see the token.
                 request.add_unredirected_header("Authorization", f"Bearer {self.token}")
             try:
-                return urllib.request.urlopen(request, timeout=120)
+                return retrying(url, lambda: urllib.request.urlopen(request, timeout=120))
             except urllib.error.HTTPError as error:
                 if error.code != 401 or attempt == 2:
                     raise
