@@ -13,8 +13,7 @@ branches, and NVIDIA's container toolkit (the container-toolkit set) both varian
                                     package in the repository metadata
   lock.py verify SET --version V     compare locks/<SET>.lock, which must be at V, with the
                                     repository metadata; RPMs are downloaded only from a
-                                    repository whose metadata gives another checksum than SHA-256;
-                                    fails when the set's successor repository publishes it
+                                    repository whose metadata gives another checksum than SHA-256
   lock.py mirrored SET               print the mirror reference of locks/<SET>.lock and exit 0
                                     if the mirror holds every locked RPM
 
@@ -28,7 +27,7 @@ keep only the newest builds, so a lock outlives their files.
 
 Exit codes: 0 success, 3 the requested version is not published, 4 (verify) the repository
 publishes V with other files or checksums than the lock, 5 (mirrored) the mirror lacks a locked
-RPM, 6 (verify) the set's successor repository publishes it, so the set must move there, 1 any
+RPM, 1 any
 other error (network, metadata, lock file), 2 usage.
 
 Locks always record SHA-256, the mirror's blob digest; a repository whose metadata gives
@@ -62,7 +61,6 @@ ARCHES = ("x86_64", "noarch")
 NOT_PUBLISHED = 3
 STALE = 4
 NOT_MIRRORED = 5
-MOVED = 6
 MIRROR = "athanor-nvidia-rpms"
 # The repository metadata checksums a lock can be generated from, with their names in messages.
 CHECKSUMS = {"sha256": "SHA-256", "sha512": "SHA-512"}
@@ -84,15 +82,17 @@ BRANCHES = {
         # nvidia-kmod-common requires (nvidia-driver-selinux if selinux-policy-targeted).
         "companions": ["nvidia-driver-selinux"],
         "floor": False,
-        "successor": None,
     },
     # RPM Fusion's Fedora 45 tree names the 580 branch -580xx; the unsuffixed names are the 615
     # branch. It ships nvidia-modprobe and nvidia-persistenced only at 615, which the 580xx
-    # packages accept (>= their version), so those two are companions. The releases tree, not
-    # updates/45: on 2026-11-04 updates/45 publishes no NVIDIA package (#669).
+    # packages accept (>= their version), so those two are companions. The set reads two trees,
+    # as a dnf client with both repositories enabled does: updates/45, which wins at an equal
+    # version, and releases/45, the only tree that holds a package updates/45 has not rebuilt
+    # (nvidia-settings-580xx, on 2026-11-25). Each locked URL is under one of them.
     "legacy": {
         "primary": "xorg-x11-drv-nvidia-580xx",
-        "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/",
+        "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/",
+        "fallback": ["https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/"],
         "packages": [
             "nvidia-settings-580xx", "xorg-x11-drv-nvidia-580xx", "xorg-x11-drv-nvidia-580xx-cuda",
             "xorg-x11-drv-nvidia-580xx-cuda-libs", "xorg-x11-drv-nvidia-580xx-libs",
@@ -104,9 +104,6 @@ BRANCHES = {
         # nvidia-modprobe through xorg-x11-drv-nvidia-580xx as well. The floor is one rule for
         # every companion, so a companion a future 580xx build stops requiring keeps it too.
         "floor": True,
-        # Where the set's updates will appear: verify fails once it publishes the primary
-        # package, so the set moves there instead of staying on the frozen releases tree.
-        "successor": "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/",
     },
     # CDI specs and the OCI hook for GPU containers (S4). NVIDIA's repository, not Fedora's
     # golang-github-nvidia-container-toolkit, which lags the security fixes. Not a kernel input:
@@ -120,7 +117,6 @@ BRANCHES = {
         ],
         "companions": [],
         "floor": False,
-        "successor": None,
     },
 }
 
@@ -133,18 +129,21 @@ class NotPublished(LockError):
     """The repository does not publish the branch at the requested version."""
 
 
-class Moved(LockError):
-    """The branch's successor repository publishes it: the lock reads a tree that has gone stale."""
-
-
 def http_get(url):
-    """The body at `url`. A transient failure (a network error, a timeout, HTTP 5xx or 429) is
-    retried as forge/scripts/retry.sh retries; the last one, or any other, is raised."""
+    """The body at `url`, fetched by `retrying`."""
+    def read():
+        with urllib.request.urlopen(url, timeout=120) as response:
+            return response.read()
+    return retrying(url, read)
+
+
+def retrying(url, call):
+    """The result of `call()`. A transient failure (a network error, a timeout, HTTP 5xx or 429)
+    is retried as forge/scripts/retry.sh retries; the last one, or any other, is raised."""
     delay = DELAY
     for attempt in range(1, ATTEMPTS + 1):
         try:
-            with urllib.request.urlopen(url, timeout=120) as response:
-                return response.read()
+            return call()
         except urllib.error.HTTPError as error:
             if error.code not in TRANSIENT or attempt == ATTEMPTS:
                 raise
@@ -189,7 +188,9 @@ class Mirror:
         self.host, _, self.name = repository.partition("/")
         self.token = None
 
-    def _open(self, sha, method):
+    def _open(self, sha, method, retry=True):
+        """The blob's response. `retry` repeats a transient failure as http_get does: it is for a
+        read with no fallback (`has`); `get` has one, the lock's URL, and makes a single attempt."""
         url = f"https://{self.host}/v2/{self.name}/blobs/sha256:{sha}"
         for attempt in (1, 2):
             request = urllib.request.Request(url, method=method)
@@ -197,7 +198,8 @@ class Mirror:
                 # Unredirected: the blob redirects to a CDN URL that must not see the token.
                 request.add_unredirected_header("Authorization", f"Bearer {self.token}")
             try:
-                return urllib.request.urlopen(request, timeout=120)
+                opened = functools.partial(urllib.request.urlopen, request, timeout=120)
+                return retrying(url, opened) if retry else opened()
             except urllib.error.HTTPError as error:
                 if error.code != 401 or attempt == 2:
                     raise
@@ -219,7 +221,7 @@ class Mirror:
             raise
 
     def get(self, sha):
-        with self._open(sha, "GET") as response:
+        with self._open(sha, "GET", retry=False) as response:
             return response.read()
 
 
@@ -227,7 +229,7 @@ def from_mirror(mirror, sha, name):
     """The RPM's bytes from the mirror, or None when the mirror cannot give the locked ones."""
     try:
         data = mirror.get(sha)
-    except (LockError, OSError) as error:
+    except (LockError, OSError, http.client.HTTPException) as error:
         print(f"lock.py: {name}: not in the mirror ({error}), using the lock's URL", file=sys.stderr)
         return None
     if hashlib.sha256(data).hexdigest() != sha:
@@ -349,18 +351,25 @@ def evr_compare(one, two):
 
 
 def select(primary_xml, names, version, companions=(), floor=None):
-    """One entry per name at exactly `version`, and one per companion (a package whose version
+    """`primary_xml` is one repository's metadata, or a list of (base URL, metadata) in order of
+    preference: a name the earlier repository carries, at any version, is read from it alone, so
+    a set never mixes rebuilds of two trees nor falls back to an older tree when the first moved
+    past `version`. Each entry records its `base` ("" for a single repository). One entry per name at exactly `version`, and one per companion (a package whose version
     does not follow the driver's) at any version, for x86_64 or noarch. Each takes its newest
     published release: a repository may keep several rebuilds of one version, and the lock
     records the chosen file by SHA-256 either way. With `floor`, one of `names`, a companion
     older than that package's epoch:version is refused: the set requires it at least there."""
     releases = {name: [] for name in (*names, *companions)}
-    for pkg in parse_xml(primary_xml).iter(f"{COMMON}package"):
+    carrier = {}
+    sources = [("", primary_xml)] if isinstance(primary_xml, bytes) else primary_xml
+    for base, pkg in [(b, p) for b, x in sources for p in parse_xml(x).iter(f"{COMMON}package")]:
         name = pkg.findtext(f"{COMMON}name")
         if name not in releases:
             continue
         ver = attribute(pkg, f"{COMMON}version", "ver", name)
-        if pkg.findtext(f"{COMMON}arch") not in ARCHES or (name in names and ver != version):
+        if pkg.findtext(f"{COMMON}arch") not in ARCHES or carrier.setdefault(name, base) != base:
+            continue
+        if name in names and ver != version:
             continue
         checksum = attribute(pkg, f"{COMMON}checksum", "type", name)
         if checksum not in CHECKSUMS:
@@ -368,7 +377,7 @@ def select(primary_xml, names, version, companions=(), floor=None):
         digest = pkg.findtext(f"{COMMON}checksum")
         if not digest:
             raise LockError(f"{name}: empty checksum in the repository metadata")
-        entry = {"name": name, "href": attribute(pkg, f"{COMMON}location", "href", name),
+        entry = {"name": name, "base": base, "href": attribute(pkg, f"{COMMON}location", "href", name),
                  "checksum": checksum, "digest": digest}
         epoch = pkg.find(f"{COMMON}version").get("epoch") or "0"
         if not epoch.isascii() or not epoch.isdigit():
@@ -385,7 +394,7 @@ def select(primary_xml, names, version, companions=(), floor=None):
     for name, published in releases.items():
         newest = max((evr for evr, _ in published), key=functools.cmp_to_key(evr_compare))
         top = [entry for evr, entry in published if evr_compare(evr, newest) == 0]
-        if len(top) > 1:
+        if len({entry["base"] for entry in top}) < len(top):
             raise LockError(f"ambiguous at its newest release: {name}")
         chosen[name] = (newest, top[0])
     if floor:
@@ -402,10 +411,12 @@ def vtuple(version):
 
 
 def newest(primary_xml, name, major):
-    """The highest version `major`.* of package `name`, for x86_64 or noarch."""
+    """The highest version `major`.* of package `name`, for x86_64 or noarch, in one repository's
+    metadata or in a list of them."""
     versions = {
         attribute(pkg, f"{COMMON}version", "ver", name)
-        for pkg in parse_xml(primary_xml).iter(f"{COMMON}package")
+        for xml in ([primary_xml] if isinstance(primary_xml, bytes) else primary_xml)
+        for pkg in parse_xml(xml).iter(f"{COMMON}package")
         if pkg.findtext(f"{COMMON}name") == name and pkg.findtext(f"{COMMON}arch") in ARCHES
     }
     try:
@@ -450,19 +461,16 @@ def primary_xml(base, download):
     return gzip.decompress(download(base + href))
 
 
+def trees(branch):
+    """The repositories a lock of the branch may read, in order of preference."""
+    spec = BRANCHES[branch]
+    return [spec["baseurl"], *spec.get("fallback", ())]
+
+
 def resolve(branch, version, download):
     spec = BRANCHES[branch]
-    return select(primary_xml(spec["baseurl"], download), spec["packages"], version, spec["companions"],
+    return select([(base, primary_xml(base, download)) for base in trees(branch)], spec["packages"], version, spec["companions"],
                   spec["primary"] if spec["floor"] else None)
-
-
-def moved_to(branch, download):
-    """Moved when the branch's successor repository publishes its primary package; a successor
-    that cannot be read is an error like any other (exit 1), never a move."""
-    successor, name = BRANCHES[branch]["successor"], BRANCHES[branch]["primary"]
-    if successor and any(pkg.findtext(f"{COMMON}name") == name
-                         for pkg in parse_xml(primary_xml(successor, download)).iter(f"{COMMON}package")):
-        raise Moved(f"{successor} publishes {name}: the {branch} set must move there from {BRANCHES[branch]['baseurl']}")
 
 
 def downloaded_sha256(entry, url, download):
@@ -482,9 +490,9 @@ def load_lock(locks, branch):
         raise LockError(f"{path}: lock of branch {locked_branch}, {branch} requested")
     if baseurl != BRANCHES[branch]["baseurl"]:
         raise LockError(f"{path}: repository {baseurl}, the {branch} branch uses {BRANCHES[branch]['baseurl']}")
-    outside = [url for _, url in entries if not url.startswith(baseurl)]
+    outside = [url for _, url in entries if not url.startswith(tuple(trees(branch)))]
     if outside:
-        raise LockError(f"{path}: URL outside the repository {baseurl}: {', '.join(outside)}")
+        raise LockError(f"{path}: URL outside the repository {' or '.join(trees(branch))}: {', '.join(outside)}")
     return path, version, entries
 
 
@@ -506,16 +514,14 @@ def main(argv=None, download=http_get, mirror=None):
         if args.command == "latest":
             if not args.major:
                 raise LockError("latest needs --major")
-            print(newest(primary_xml(BRANCHES[args.branch]["baseurl"], download), BRANCHES[args.branch]["primary"], args.major))
+            print(newest([primary_xml(base, download) for base in trees(args.branch)], BRANCHES[args.branch]["primary"], args.major))
             return 0
         if args.command == "verify":
             path, version, entries = load_lock(args.locks, args.branch)
             if version != args.version:
                 raise LockError(f"{path}: lock at {version}, {args.version} expected")
-            moved_to(args.branch, download)
-            base = BRANCHES[args.branch]["baseurl"]
             published = {
-                (e["digest"] if e["checksum"] == "sha256" else downloaded_sha256(e, base + e["href"], download), base + e["href"])
+                (e["digest"] if e["checksum"] == "sha256" else downloaded_sha256(e, e["base"] + e["href"], download), e["base"] + e["href"])
                 for e in resolve(args.branch, version, download)
             }
             if published != set(entries):
@@ -527,7 +533,7 @@ def main(argv=None, download=http_get, mirror=None):
             base = BRANCHES[args.branch]["baseurl"]
             entries = []
             for entry in resolve(args.branch, args.version, download):
-                url = base + entry["href"]
+                url = entry["base"] + entry["href"]
                 entries.append((downloaded_sha256(entry, url, download), url))
             write_lock(args.locks / f"{args.branch}.lock", args.branch, args.version, base, entries)
             return 0
@@ -560,9 +566,6 @@ def main(argv=None, download=http_get, mirror=None):
     except NotPublished as error:
         print(f"lock.py: {error}", file=sys.stderr)
         return NOT_PUBLISHED
-    except Moved as error:
-        print(f"lock.py: {error}", file=sys.stderr)
-        return MOVED
     except (LockError, OSError) as error:
         print(f"lock.py: {error}", file=sys.stderr)
         return 1
