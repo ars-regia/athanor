@@ -20,5 +20,5 @@ doc_lock_and_prompts.md forge/specs/athanor-lock oo7 planned: the secret exchang
 doc_portal.md forge/specs/athanor-xdg-desktop-portal-athanor pipewire planned: the PipeWire producer of step 5 of S2
 doc_session_daemons.md system/athanor-wallpaper jxl-oxide not a dependency: a dependency of upstream cosmic-bg, which the section reads
 doc_visual_language.md repo material-colors planned: the accent colour taken from the wallpaper
-doc_lock_and_prompts.md forge/specs/athanor-lock toml the greeter's parser of greeter.toml (L21), a dependency of athanor-greeter-ui, which doc_shell.md owns; approved text (ADR-0074)
-doc_osd.md forge/specs/athanor-osd gtk4 history in section 1: the GTK4 crate athanor-controls had when revision 3 was written; approved text (ADR-0074)
+doc_accessibility.md repo athanor-keyboard planned: the library crate of the on-screen keyboard (AX12), not yet built; approved text (ADR-0074)
+doc_lock_and_prompts.md forge/specs/athanor-lock pam not a dependency: an upstream crate read for the plan of LP18 step 1, the helper calls libpam by FFI; approved text (ADR-0074)

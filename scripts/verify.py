@@ -7842,7 +7842,6 @@ def check_own():
 
 SPEC_DEPS_ALLOW = "forge/config/spec-deps-allow.txt"
 SPEC_DEPS_REPO = "repo"
-SPEC_DEPS_OLD_BASE = ("", "", "")
 SPEC_DEPS_NAME = r"`([a-z][a-z0-9]*(?:[-_][a-z0-9]+)*)"
 SPEC_DEPS_VERSION = r"\d+\.\d+(?:\.\d+)?"
 # The forms in which a specification presents a crate as a dependency (#1289): "the `zip`
@@ -7851,6 +7850,9 @@ SPEC_DEPS_VERSION = r"\d+\.\d+(?:\.\d+)?"
 # crate, crates.io, docs.rs or Cargo.toml, as a bare version names RPMs as often as crates;
 # and "One crate, `gtk4-rs` and libadwaita" (a comma after crate), where the name may carry the
 # `-rs` of the upstream project (spec_name_used reads `gtk4-rs` as gtk4 or gtk4-rs).
+# A name the sentence ties to a manifest ("depends on `gtk4` (`athanor-controls/Cargo.toml:12`)") is
+# read in the manifests that end in the cited path, and one it ties to the workspace ("the
+# workspace's `toml` crate") in [workspace.dependencies] of the root Cargo.toml.
 # A sentence ends at `. ` or `; ` outside parentheses, so a versioned list whose licences
 # hold a `;` keeps its cue for every name (doc_files.md: the archive crates of FM8).
 SPEC_DEPS_FORMS = (
@@ -7858,13 +7860,16 @@ SPEC_DEPS_FORMS = (
     re.compile(rf"\b(?:crates?,?|depends? on) {SPEC_DEPS_NAME}`"),
 )
 SPEC_DEPS_VERSIONED = re.compile(rf"{SPEC_DEPS_NAME}(?: {SPEC_DEPS_VERSION}`|` \(?{SPEC_DEPS_VERSION}\b)")
+SPEC_DEPS_WORKSPACE = re.compile(rf"\bworkspace(?:'s|\u2019s) {SPEC_DEPS_NAME}` crates?\b")
+SPEC_DEPS_CITE = re.compile(r"[\w./-]*Cargo\.toml\b")
 SPEC_DEPS_CUE = re.compile(r"\bcrates?\b|crates\.io|docs\.rs|Cargo\.toml")
-# A sentence that says a crate is absent ("is not used", "Rejected:", "was deleted", "no `x`
-# crate") or marks it planned names no dependency. The detector reads words, not meaning: a
-# negation or "planned" anywhere in the sentence skips every crate it names, so a stale
-# dependency named beside an unrelated "not" passes. It favours a missed name over a false
-# failure, which costs a maintainer's review of a list that only shrinks.
-SPEC_DEPS_SKIP = re.compile(r"\b(?:no|not|rejected|deleted|removed|dropped|refused|planned)\b", re.I)
+# A clause that says a crate is absent ("is not used", "Rejected:", "was deleted", "no `x`
+# crate", "without") or marks it planned ("a new crate") names no dependency. The clause is the text around the
+# crate's phrase between the `,` or `;` outside parentheses that bound it (spec_clause), so a
+# "no" in a later clause of the sentence ("no GTK type") does not hide the crate. A `,` between
+# two code spans ("no `gtk4`, `gdk4` or `gtk4-layer-shell` crate") is a list's, not a bound. The
+# detector still reads words, not meaning.
+SPEC_DEPS_SKIP = re.compile(r"\b(?:no|not|rejected|deleted|removed|dropped|refused|planned|new|without)\b", re.I)
 
 
 def parse_spec_deps_allow(text):
@@ -7886,17 +7891,17 @@ def parse_spec_deps_allow(text):
     return entries
 
 
-def parse_spec_deps_allow_base(text):
-    """[(document, crate, reason)] of a SPEC_DEPS_ALLOW as own_base_entries reads it. The file at
-    the base before #1510 has no component column, which its header says: it is read as
-    SPEC_DEPS_OLD_BASE, because the pull request that adds the column adds the names the
-    per-component matching finds, so it is the one that cannot be held to the old list."""
-    new = "DOCUMENT COMPONENT CRATE" in text
-    out = [] if new else [SPEC_DEPS_OLD_BASE]
+def parse_spec_deps_allow_base(text, components):
+    """[(document, crate, reason)] of a SPEC_DEPS_ALLOW as own_base_entries reads it, line by line:
+    a line whose second column is SPEC_DEPS_REPO or one of COMPONENTS (the paths of
+    components.toml) has the component column, any other is the `DOCUMENT CRATE REASON` of the
+    list before #1510. The two formats give the same (document, crate) pairs."""
+    out = []
     for line in text.splitlines():
         parts = line.split(None, 3)
         if line.strip().startswith("#") or len(parts) < 3:
             continue
+        new = len(parts) == 4 and (parts[1] == SPEC_DEPS_REPO or parts[1] in components)
         out.append((parts[0], parts[2] if new else parts[1], ""))
     return out
 
@@ -7916,24 +7921,35 @@ def manifest_names(root, path):
     return {name.replace("_", "-") for name in names if name}
 
 
-def spec_scopes(root):
-    """{document: (components, names)} for the specifications under docs/architecture: the
-    paths of the components of components.toml that the document owns and that hold a manifest,
-    and the names those manifests use (docs/architecture/components.toml, #1510). A document
-    that owns no such component maps to ((), the names of every manifest of the repository)."""
+def spec_world(root):
+    """What the specifications are matched against (docs/architecture/components.toml, #1510):
+    "manifests" {path: names} of every tracked manifest but the vendored ones; "components" the
+    paths of components.toml; "workspace" the names of [workspace.dependencies] of the root
+    Cargo.toml; "scopes" {document: (components, names)} for the specifications under
+    docs/architecture: the components the document owns that hold a manifest (a manifest is
+    the component's when its path is the component's or under it), and the names those
+    manifests use. A document that owns no such component maps to ((), the names of every
+    manifest of the repository)."""
     listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml"],
                             capture_output=True, text=True, check=True).stdout.split("\0")
     manifests = {p: manifest_names(root, p) for p in listed if p and not third_party_cargo(p)}
     everything = set().union(*manifests.values())
-    owned = {}
+    workspace = set()
+    if "Cargo.toml" in manifests:
+        table = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
+        workspace = {(dep.get("package", key) if isinstance(dep, dict) else key).replace("_", "-")
+                     for key, dep in table.items()}
+    components, owned = set(), {}
     for comp in tomllib.loads(read(root / COMPONENTS)).get("component", []):
         path, spec = comp.get("path", ""), comp.get("spec", "")
+        components.add(path)
         mine = [m for m in manifests if m == path or m.startswith(path + "/")]
         if mine:
             owned.setdefault(spec, {})[path] = set().union(*(manifests[m] for m in mine))
-    return {doc.name: (tuple(sorted(owned.get(doc.name, {}))),
-                       set().union(*owned[doc.name].values()) if doc.name in owned else everything)
-            for doc in sorted((root / "docs/architecture").glob("*.md"))}
+    scopes = {doc.name: (tuple(sorted(owned.get(doc.name, {}))),
+                         set().union(*owned[doc.name].values()) if doc.name in owned else everything)
+              for doc in sorted((root / "docs/architecture").glob("*.md"))}
+    return {"manifests": manifests, "components": components, "workspace": workspace, "scopes": scopes}
 
 
 def spec_name_used(name, names):
@@ -7954,35 +7970,71 @@ def spec_sentences(line):
     return sentences + [line[start:]]
 
 
+def spec_clause(sentence, start, end):
+    """The part of SENTENCE that holds [START, END), between the `,` or `;` outside parentheses
+    that precede and follow it, a `,` that joins two code spans excepted."""
+    depth, left, right = 0, 0, len(sentence)
+    for i, ch in enumerate(sentence):
+        depth = max(0, depth + (ch == "(") - (ch == ")"))
+        if ch == "," and sentence[i - 1:i] == "`" and sentence[i + 1:i + 3] == " `":
+            continue
+        if ch in ",;" and not depth:
+            if i < start:
+                left = i + 1
+            elif i >= end:
+                right = i
+                break
+    return sentence[left:right]
+
+
 def spec_dependencies(text):
-    """The crates the Markdown TEXT presents as dependencies (SPEC_DEPS_FORMS), outside fenced
-    blocks and in the sentences SPEC_DEPS_SKIP leaves."""
+    """{(crate, cited manifests, tied to the workspace)} the Markdown TEXT presents as
+    dependencies (SPEC_DEPS_FORMS), outside fenced blocks and in the clauses SPEC_DEPS_SKIP
+    leaves."""
     found = set()
     for line in prose_lines(text):
         for sentence in spec_sentences(line):
-            if SPEC_DEPS_SKIP.search(sentence):
-                continue
             forms = SPEC_DEPS_FORMS + ((SPEC_DEPS_VERSIONED,) if SPEC_DEPS_CUE.search(sentence) else ())
-            found.update(m.group(1) for form in forms for m in form.finditer(sentence))
+            cites = tuple(sorted(set(SPEC_DEPS_CITE.findall(sentence))))
+            workspace = {m.group(1) for m in SPEC_DEPS_WORKSPACE.finditer(sentence)}
+            for form in forms:
+                for m in form.finditer(sentence):
+                    if not SPEC_DEPS_SKIP.search(spec_clause(sentence, m.start(), m.end())):
+                        found.add((m.group(1), cites, m.group(1) in workspace))
     return found
 
 
-def spec_deps_problems(root=None, base=None):
-    """#1289, #1510: every crate a specification under docs/architecture presents as a dependency
-    is used by a Cargo.toml of the components it owns in components.toml (of the repository,
-    when it owns none) or listed in SPEC_DEPS_ALLOW for that document and one of its components,
-    every entry still applies, and against BASE the list adds no entry."""
+def spec_cited_names(cites, manifests):
+    """The names of the manifests that CITES (`system/x/Cargo.toml`, `x/Cargo.toml`) point at: a
+    bare `Cargo.toml` is the root's, a path with a directory is the end of a manifest's path."""
+    return set().union(set(), *(names for path, names in manifests.items() for cite in cites
+                                if path == cite or ("/" in cite and path.endswith("/" + cite))))
+
+
+def spec_deps_report(root=None, base=None):
+    """(problems, fallback) of #1289 and #1510: every crate a specification under
+    docs/architecture presents as a dependency is used by a Cargo.toml of the components it
+    owns in components.toml (of the repository, when it owns none; those documents are the
+    fallback), by the manifest its sentence cites or by the workspace it names, or is listed in
+    SPEC_DEPS_ALLOW for that document and one of its components; every entry still applies; and
+    against BASE the list adds no (document, crate) pair."""
     root = Path(root or ROOT)
     try:
         entries = parse_spec_deps_allow(read(root / SPEC_DEPS_ALLOW))
-        scopes = spec_scopes(root)
-    except (OSError, ValueError, tomllib.TOMLDecodeError) as err:
-        return [f"{SPEC_DEPS_ALLOW}: {err}"]
-    named, where = set(), {}
+    except (OSError, ValueError) as err:
+        return [f"{SPEC_DEPS_ALLOW}: {err}"], []
+    try:
+        world = spec_world(root)
+    except (OSError, ValueError, tomllib.TOMLDecodeError, subprocess.CalledProcessError) as err:
+        return [f"{COMPONENTS} or a Cargo.toml: cannot read ({err})"], []
+    scopes, named, where = world["scopes"], set(), {}
     for doc, (components, names) in scopes.items():
         where[doc] = components or (SPEC_DEPS_REPO,)
-        named |= {(doc, name) for name in spec_dependencies(read(root / "docs/architecture" / doc))
-                  if not spec_name_used(name, names)}
+        for name, cites, workspace in spec_dependencies(read(root / "docs/architecture" / doc)):
+            if not (spec_name_used(name, names)
+                    or spec_name_used(name, spec_cited_names(cites, world["manifests"]))
+                    or (workspace and spec_name_used(name, world["workspace"]))):
+                named.add((doc, name))
     listed = {(doc, name) for doc, _, name, _ in entries}
     problems = [f"docs/architecture/{doc} names the crate `{name}` as a dependency, and no Cargo.toml of "
                 f"{'its components (' + ', '.join(where[doc]) + ')' if scopes[doc][0] else 'the repository'} "
@@ -7994,29 +8046,28 @@ def spec_deps_problems(root=None, base=None):
                  f"the components of {doc} ({', '.join(where[doc])})"
                  for doc, comp, name, _ in entries if doc in where and comp not in where[doc]]
     if base is not None:
+        known = world["components"] | {SPEC_DEPS_REPO}
         try:
-            before = own_base_entries(root, base, parse_spec_deps_allow_base, SPEC_DEPS_ALLOW)
+            before = own_base_entries(root, base, lambda text: parse_spec_deps_allow_base(text, known),
+                                      SPEC_DEPS_ALLOW)
         except ValueError as err:
-            return problems + [f"{SPEC_DEPS_ALLOW} at {base}: {err}"]
-        if before is not None and ("", "") not in before:
+            return problems + [f"{SPEC_DEPS_ALLOW} at {base}: {err}"], []
+        if before is not None:
             problems += [f"{SPEC_DEPS_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks"
                          for doc, _, name, _ in entries if (doc, name) not in before]
-    return problems
+    return problems, sorted(doc for doc, (components, _) in scopes.items() if not components)
 
 
-def spec_deps_fallback(root=None):
-    """The specifications that own no component with a manifest, so that spec_deps_problems
-    matches their crates against every manifest of the repository."""
-    root = Path(root or ROOT)
-    return sorted(doc for doc, (components, _) in spec_scopes(root).items() if not components)
+def spec_deps_problems(root=None, base=None):
+    return spec_deps_report(root, base)[0]
 
 
 @check("spec-deps", "Every crate a specification names as a dependency is used by a Cargo.toml of its components, unless spec-deps-allow.txt lists it, and the list only shrinks (#1289, #1510)")
 def check_spec_deps():
     r = Result()
-    for problem in spec_deps_problems(base=BASE_REF):
+    problems, fallback = spec_deps_report(base=BASE_REF)
+    for problem in problems:
         r.fail(problem)
-    fallback = spec_deps_fallback()
     if fallback:
         r.note("no component with a manifest in components.toml, so matched against every manifest of the "
                f"repository: {', '.join(fallback)}")

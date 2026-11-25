@@ -35,7 +35,16 @@ class SpecDeps(unittest.TestCase):
         )
         self.write(
             "bar/Cargo.toml",
-            '[package]\nname = "athanor-bar"\n\n[dependencies]\nfutures_util = "0.3"\n',
+            '[package]\nname = "athanor-bar"\n\n[dependencies]\nfutures_util = "0.3"\n'
+            'gettext-rs = "0.7"\n',
+        )
+        self.write(
+            "baz/Cargo.toml",
+            '[package]\nname = "baz"\n\n[dependencies]\nbazdep = "1"\n',
+        )
+        self.write(
+            "barn/Cargo.toml",
+            '[package]\nname = "barn"\n\n[dependencies]\nonlybarn = "1"\n',
         )
         self.write(
             "x/vendor/y/Cargo.toml",
@@ -46,7 +55,8 @@ class SpecDeps(unittest.TestCase):
         self.write(DOC_BAR, "Nothing.\n")
         self.write(DOC_FREE, "Nothing.\n")
         self.write(
-            verify.SPEC_DEPS_ALLOW, "# `DOCUMENT COMPONENT CRATE REASON`\ndoc_x.md bar zxcvbn planned: the hint\n"
+            verify.SPEC_DEPS_ALLOW,
+            "# `DOCUMENT COMPONENT CRATE REASON`\ndoc_x.md bar zxcvbn planned: the hint\n",
         )
         self.commit()
 
@@ -152,7 +162,8 @@ class SpecDeps(unittest.TestCase):
     def test_an_entry_added_against_the_base_fails(self):
         self.write(DOC, "The `zxcvbn` crate gives a hint, through the crate `ring`.\n")
         self.write(
-            verify.SPEC_DEPS_ALLOW, "doc_x.md bar zxcvbn planned\ndoc_x.md bar ring planned\n"
+            verify.SPEC_DEPS_ALLOW,
+            "doc_x.md bar zxcvbn planned\ndoc_x.md bar ring planned\n",
         )
         problems = self.problems("HEAD")
         self.assertEqual(len(problems), 1, problems)
@@ -184,7 +195,7 @@ class SpecDeps(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("doc_free.md names the crate `ring`", problems[0])
         self.assertIn("no Cargo.toml of the repository", problems[0])
-        self.assertEqual(verify.spec_deps_fallback(self.root), ["doc_free.md"])
+        self.assertEqual(verify.spec_deps_report(self.root)[1], ["doc_free.md"])
 
     def test_one_crate_comma_and_the_rs_suffix(self):
         self.write(DOC_BAR, "One crate, `futures-util-rs` and more.\n")
@@ -210,15 +221,112 @@ class SpecDeps(unittest.TestCase):
         )
         self.assertEqual(self.problems(), [])
 
-    def test_a_base_without_the_component_column_is_not_held_to_its_list(self):
-        self.write(verify.SPEC_DEPS_ALLOW, "# `DOCUMENT CRATE REASON`\ndoc_x.md zxcvbn planned\n")
+    def rekey(self, old, new):
+        """Commit OLD as the allow list, then write NEW and read it against that commit."""
+        self.write(verify.SPEC_DEPS_ALLOW, old)
         self.commit()
+        self.write(verify.SPEC_DEPS_ALLOW, new)
+        return self.problems("HEAD")
+
+    def test_a_pure_rekey_passes(self):
+        problems = self.rekey(
+            "# `DOCUMENT CRATE REASON`\ndoc_x.md zxcvbn planned: the hint\n",
+            "doc_x.md bar zxcvbn planned\n",
+        )
+        self.assertEqual(problems, [])
+
+    def test_an_entry_added_to_an_old_format_base_fails(self):
         self.write(DOC_FREE, "It uses the `ring` crate.\n")
-        self.write(
-            verify.SPEC_DEPS_ALLOW,
+        problems = self.rekey(
+            "# `DOCUMENT CRATE REASON`\ndoc_x.md zxcvbn planned: the hint\n",
             "doc_x.md bar zxcvbn planned\ndoc_free.md repo ring planned\n",
         )
-        self.assertEqual(self.problems("HEAD"), [])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_free.md ring is not listed at HEAD", problems[0])
+
+    def test_rewording_the_header_does_not_turn_the_shrink_check_off(self):
+        self.write(DOC_FREE, "It uses the `ring` crate.\n")
+        problems = self.rekey(
+            "# reworded\ndoc_x.md bar zxcvbn planned\n",
+            "# reworded again\ndoc_x.md bar zxcvbn planned\ndoc_free.md repo ring planned\n",
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_free.md ring is not listed at HEAD", problems[0])
+
+    def test_a_component_without_a_slash_is_read_as_the_new_format(self):
+        # `bar` and `Cargo.toml` have no slash, `repo` is no path
+        parts = verify.parse_spec_deps_allow_base(
+            "doc_x.md bar a r\ndoc_x.md Cargo.toml b r\ndoc_x.md repo c r\ndoc_x.md d r\n",
+            {"bar", "Cargo.toml", "repo"},
+        )
+        self.assertEqual([c for _, c, _ in parts], ["a", "b", "c", "d"])
+
+    def test_a_cited_manifest_holds_the_name(self):
+        for cite, fails in (
+            ("baz/Cargo.toml:4", False),
+            ("system/baz/Cargo.toml", True),
+            ("bar/Cargo.toml:4", True),
+            ("Cargo.toml:4", True),
+            ("ba/Cargo.toml", True),
+        ):
+            with self.subTest(cite=cite):
+                self.write(DOC_BAR, f"It depends on `bazdep` (`{cite}`).\n")
+                self.assertEqual(len(self.problems()), 1 if fails else 0, cite)
+
+    def test_a_workspace_name_is_read_in_the_workspace_dependencies(self):
+        self.write(DOC_BAR, "It uses the workspace's `zbus` crate (5).\n")
+        self.assertEqual(self.problems(), [])
+        self.write(DOC_BAR, "It uses the workspace's `bazdep` crate (1).\n")
+        self.assertEqual(len(self.problems()), 1)
+        self.write(DOC_BAR, "It uses the `zbus` crate (5).\n")
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_a_negation_in_a_later_clause_does_not_hide_the_crate(self):
+        sentence = (
+            "One crate, `gtk4-rs` and libadwaita, the logic in modules with no GTK type (SH4),"
+            " shipped as an RPM."
+        )
+        self.assertEqual(
+            {n for n, _, _ in verify.spec_dependencies(sentence + "\n")}, {"gtk4-rs"}
+        )
+        self.write(DOC_FREE, sentence + "\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_free.md names the crate `gtk4-rs`", problems[0])
+        self.assertIn("no Cargo.toml of the repository", problems[0])
+
+    def test_a_negation_in_the_clause_or_over_a_list_still_hides_the_crate(self):
+        for sentence in (
+            "There is no `ring` crate, and the rest is fine.",
+            "Without the `ring` crate, it signs.",
+            "No `gtk4`, `gdk4` or `ring` crate is in its tree, held by a check.",
+            "It signs through a new crate, `ring`, with a key.",
+        ):
+            with self.subTest(sentence=sentence):
+                self.write(DOC_FREE, sentence + "\n")
+                self.assertEqual(self.problems(), [])
+
+    def test_a_malformed_manifest_fails_the_check_without_a_traceback(self):
+        self.write("bad/Cargo.toml", "[package\n")
+        problems, fallback = verify.spec_deps_report(self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("cannot read", problems[0])
+        self.assertEqual(fallback, [])
+
+    def test_a_component_path_is_not_a_prefix_of_a_longer_name(self):
+        # bar must not own barn/, whose onlybarn is no dependency of doc_bar.md
+        self.write(DOC_BAR, "It uses the `onlybarn` crate.\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("`onlybarn`", problems[0])
+
+    def test_a_real_crate_that_ends_in_rs_is_kept(self):
+        self.write(DOC_BAR, "It uses the `gettext-rs` crate.\n")
+        self.assertEqual(self.problems(), [])
+        self.write(
+            DOC_BAR, "It uses the `gettext-rs` crate, and the `ring-rs` crate.\n"
+        )
+        self.assertEqual(len(self.problems()), 1)
 
 
 if __name__ == "__main__":
