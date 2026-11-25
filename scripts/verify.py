@@ -7215,11 +7215,26 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     the file no longer holds stays in the run and is a finding, a JSON name matches a whole string
     (`"cosmic-settings"`, not `cosmic-settings-daemon`), and a citation that names none is a finding.
 
-    Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
-    place holding the token, and a word that the cited lines hold in a comment or a string
+    A `path:N` that the change places itself (with `hunks`: a citation on a line the change wrote
+    or edited, when the block of lines it is in, as difflib groups the edit, holds that file with
+    those lines more often than the base lines the block replaces, whatever the sizes of the two;
+    so a split, wrapped or reordered line, or a line inserted beside an edited one, keeps its old
+    citations) is a finding when its sentence names no such token, no row name and, for a cited
+    document, no section id the document has (#1482): a range that its sentence names nothing of
+    cannot be told from one that moved onto other code. The fix is a token in backticks in the
+    sentence, or a citation by name (`path#name`), which symbol-citations checks. Only the
+    citations whose text the change writes are read so, not the whole of an edited line: an
+    amendment of an approved text is appended to a line whose old citations it must not rewrite,
+    and an edit of a sentence would otherwise fail on every tokenless citation it happens to sit
+    beside. The tokenless citations that the documents held when the rule came are tracked in
+    #1498 and are converted to `path#name` in batches. Limit: without `hunks`, and for
+    those, a sentence with no such token is not checked; the hunks are read without rename
+    detection, so a citation whose path the change rewrites for a renamed file is read as new; a citation that names a wrong place
+    holding the token is not seen, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
-    name and no section id in its sentence is checked only for a first line that holds words, so
-    a stale one that still lands on text goes unseen (#1089). In a list file, a run reaches the key
+    name and no section id in its sentence, that the change did not place, is checked only for a
+    first line that holds words, so a stale one that still lands on text goes unseen (#1089). In
+    a list file, a run reaches the key
     only across the exact `are` or `is`, then an optional `listed`, then `in` or `under`: with other words between
     them ("are both in"), only the key is demanded, and a removed single-word entry is not seen.
 
@@ -7266,12 +7281,17 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             was.setdefault((number, path), []).append(spec)
         old_rows = [backtick_plain_paths(row) for row in base_text.split("\n")]
         new_rows = [backtick_plain_paths(row) for row in text.split("\n")]
-        pair = {}
+        pair, block_of, block_held = {}, {}, []
         for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_rows, new_rows, autojunk=False).get_opcodes():
             if tag == "replace" and i2 - i1 == j2 - j1:
                 pair.update({j + 1: i + 1 for i, j in zip(range(i1, i2), range(j1, j2))})
+            if tag != "equal":
+                # The (file, lines) of every citation in the base lines this block of new lines replaces.
+                block_of.update({j + 1: len(block_held) for j in range(j1, j2)})
+                block_held.append(collections.Counter((p, s) for n, p, s in base_cites if i1 < n <= i2))
     else:
-        was, pair = {}, {}
+        was, pair, block_of, block_held = {}, {}, {}, []
+    block_seen = collections.Counter()
     nth = {}
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
@@ -7496,10 +7516,22 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             else:
                 tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
+            # Whether the change placed this `path:N` itself (#1482): its line is not a line of the
+            # base, and the block it is in holds more citations of the file with these lines than the
+            # base lines that the block replaces.
+            block = block_of.get(number)
+            if block is not None and not symbol:
+                block_seen[block, path, spec] += 1
+            authored = bool(hunks) and not symbol and line not in unchanged and (
+                block is None or block_seen[block, path, spec] > block_held[block][path, spec])
             if listed and not tokens:
                 out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
                             "that the file holds: put the entry's name in backticks, or hyphenated, "
                             "in its sentence"))
+            elif not tokens and authored and not (path.endswith(".md") and spans):
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}{sep}{spec}` names no token "
+                            "that the cited lines hold: name what it cites in backticks in its sentence, or cite "
+                            "it by symbol (`path#name`)"))
             elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
                 out.append((number, path, spec, missing, f"{doc}:{number}: `{path}{sep}{spec}` does not hold "
                             f"`{missing}`, which its sentence names: the lines moved"))
@@ -7508,6 +7540,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
 
 @check("line-citations", "A path:line citation of an architecture document holds the code its sentence names")
 def check_line_citations():
+    """The findings of citation_findings in the architecture documents (`docs/architecture/doc_*.md`
+    and `shell-features.md`), less LINE_CITATIONS_KEPT. The plans under `docs/superpowers/plans/`
+    are not read: they are working notes with no code owner (ADR-0107), not approved texts."""
     r = Result()
     listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
     if listed.returncode:
@@ -7523,7 +7558,8 @@ def check_line_citations():
 
     hunks = None
     if BASE_REF is None:
-        r.note("no base revision (--known-red-base REF): the citations that the change moved were not checked")
+        r.note("no base revision (--known-red-base REF): the citations that the change moved, and the "
+               "tokenless citations that it placed, were not checked")
     else:
         try:
             hunks = diff_hunks(ROOT, BASE_REF)
