@@ -469,19 +469,19 @@ SESSION_DIAGNOSTICS = (
 # The session's user journal of this boot, asked once the session is up and before anything
 # else is started in it: a service that loses a Landlock grant keeps running with a warning
 # (`not granted: it fails the check`, system/athanor-unit/src/dirs.rs), and one that cannot
-# confine itself says `cannot confine` and refuses to run. Neither made a run fail until
-# #1490, where athanor-shelld died of the first and the bar, the dock and the launcher ran
-# on without grants for the same reason. The answer is the marker, and after GRANTS_LOST its
+# confine itself says `cannot confine` or `refusing to run unconfined` and refuses to run.
+# Neither made a run fail until #1490, where athanor-shelld died of the first and the bar,
+# the dock and the launcher ran on without grants for the same reason. The answer is the marker, and after GRANTS_LOST its
 # count and the lines, up to twenty, so that the log names the unit. A journal that cannot
 # be read, or reads empty with the session up, is not an answer of no lines: `-q` keeps
 # journalctl's notices, a permission warning among them, out of what is read.
 GRANTS_PROBE = (
     b"if j=$(journalctl --user -b -q --no-pager) && [ -n \"$j\" ]; then"
-    b" l=$(printf '%s\n' \"$j\" | grep -aE 'cannot confine|is not granted|not granted:'); r=$?;"
-    b" if [ $r -eq 0 ]; then printf 'GRANTS_%s %s\n' LOST \"$(printf '%s\n' \"$l\" | wc -l)\";"
-    b" printf '%s\n' \"$l\" | head -20; elif [ $r -eq 1 ]; then printf 'GRANTS_%s\n' KEPT;"
-    b" else printf 'GRANTS_%s\n' UNREADABLE; fi;"
-    b" else printf 'GRANTS_%s\n' UNREADABLE; fi"
+    b" l=$(printf '%s\\n' \"$j\" | grep -aE 'cannot confine|refusing to run unconfined|is not granted|not granted:'); r=$?;"
+    b" if [ $r -eq 0 ]; then printf 'GRANTS_%s %s\\n' LOST \"$(printf '%s\\n' \"$l\" | wc -l)\";"
+    b" printf '%s\\n' \"$l\" | head -20; elif [ $r -eq 1 ]; then printf 'GRANTS_%s\\n' KEPT;"
+    b" else printf 'GRANTS_%s\\n' UNREADABLE; fi;"
+    b" else printf 'GRANTS_%s\\n' UNREADABLE; fi"
 )
 GRANTS_PROBE_WAIT = 5.0
 # With the desktop up, start the settings application inside it. The serial login shares

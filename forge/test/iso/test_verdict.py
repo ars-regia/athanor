@@ -1014,6 +1014,9 @@ def test_grants_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     assert many[0] == "GRANTS_LOST 25" and len(many) == 21, many
     # Sulphur's refusal of a top layer is not a lost grant.
     assert answer(quiet + "\nathanor_sulphur: a client not granted them was closed") == ["GRANTS_KEPT"]
+    # A daemon that cannot apply Landlock and refuses to run is a lost grant.
+    unconfined = "athanor_sessiond: Landlock cannot be applied; refusing to run unconfined"
+    assert answer(quiet + "\n" + unconfined) == ["GRANTS_LOST 1", unconfined]
     # A directory refused by name is a lost grant.
     assert answer("athanor_idle: dconf's runtime directory is not granted")[0] == "GRANTS_LOST 1"
     proc = subprocess.run(
