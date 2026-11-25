@@ -6,6 +6,7 @@ Summary:        Athanor OS athanor-system-tweaks
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
+Requires:       udisks2
 
 %description
 Provides athanor-system-tweaks for Athanor OS.
@@ -21,6 +22,7 @@ mkdir -p %{buildroot}/usr/share/athanor-system-tweaks
 mkdir -p %{buildroot}/usr/lib/environment.d
 mkdir -p %{buildroot}/usr/share/pipewire/pipewire.conf.d
 mkdir -p %{buildroot}/etc/NetworkManager/conf.d
+mkdir -p %{buildroot}/etc/udisks2
 mkdir -p %{buildroot}/usr/lib/NetworkManager/conf.d
 mkdir -p %{buildroot}/usr/lib/systemd/resolved.conf.d
 mkdir -p %{buildroot}/usr/share/polkit-1/rules.d
@@ -32,6 +34,7 @@ cp -a %{_sourcedir}/etc/polkit-1/rules.d/10-athanor-wheel-admin.rules %{buildroo
 cp -a %{_sourcedir}/usr/lib/sysctl.d/99-network-security.conf %{buildroot}/usr/lib/sysctl.d/
 cp -a %{_sourcedir}/usr/lib/tmpfiles.d/99-azoth-sysfs.conf %{buildroot}/usr/lib/tmpfiles.d/
 cp -a %{_sourcedir}/etc/NetworkManager/conf.d/99-mac-randomization.conf %{buildroot}/etc/NetworkManager/conf.d/
+cp -a %{_sourcedir}/etc/udisks2/mount_options.conf %{buildroot}/etc/udisks2/
 cp -a %{_sourcedir}/usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf %{buildroot}/usr/lib/systemd/resolved.conf.d/
 cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{buildroot}/usr/lib/NetworkManager/conf.d/
 
@@ -40,6 +43,7 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 %files
 %dir /usr/share/athanor-system-tweaks
 %config(noreplace) /etc/NetworkManager/conf.d/99-mac-randomization.conf
+%config(noreplace) /etc/udisks2/mount_options.conf
 /usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf
 /usr/lib/environment.d/10-athanor-wayland.conf
 /usr/share/pipewire/pipewire.conf.d/10-low-latency.conf

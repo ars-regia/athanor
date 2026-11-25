@@ -26,7 +26,7 @@ if [[ -n $ACC_CI ]]; then
   start=${1:-seed}
 else
   guard_no_ci
-  STAGES=(install migrate metered download sessions apply security postpone optout class securitygreenboot featurehold refuse older goback rotate recover console greenboot podman probes report)
+  STAGES=(install migrate metered download sessions apply security postpone optout class securitygreenboot featurehold refuse older goback rotate recover console greenboot podman probes removable report)
   start=${1:-install}
 fi
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
@@ -1016,6 +1016,60 @@ stage_probes() { # the runtime audit probes (issue #312), against expectations.t
   signed=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:stable")
   # The verdict names each check; a failure stops the run, and the facts stay in $ACC_STATE.
   python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" "$ACC_PORT" "$REPO:stable" "$signed" || die "FAIL  runtime probes (facts: $facts)"
+}
+
+# ADR-0025, doc_disks.md DK20 B (issue #1458): a filesystem mounted through udisks is nodev, nosuid
+# and noexec, and a program on it does not run. A vfat image on a loop device stands for a stick.
+# vfat's own defaults must survive the global `defaults` key: the options must still show
+# shortname=mixed, showexec, utf8 and flush (the kernel omits uid= and gid= for root, the caller
+# through sudo), and showexec gives run.bat an x bit, so a refusal is noexec's and nothing else's. The positive control mounts the same image
+# with `-o exec`: if that does not run, the refusal under the default mount would prove nothing.
+# Every cleanup step runs on its own; a failed one is reported on stderr and fails the stage.
+stage_removable() {
+  local out opt
+  # shellcheck disable=SC2016 # the script expands on the guest
+  out=$(guest_ssh 'set -u
+img=$(mktemp /var/tmp/acc-removable.XXXXXX) || exit 1
+loop=
+fail=0
+step() { "$@" || { echo "cleanup step failed: $*" >&2; fail=1; }; }
+cleanup() {
+  rc=$?
+  if [ -z "$loop" ]; then
+    loop=$(sudo losetup -j "$img" -O NAME -n) || { echo "cleanup: no loop device lookup for $img" >&2; fail=1; }
+  fi
+  if [ -n "$loop" ]; then
+    if findmnt -n -S "$loop" > /dev/null; then step sudo udisksctl unmount -b "$loop" > /dev/null; fi
+    step sudo udisksctl loop-delete -b "$loop" > /dev/null
+  fi
+  step rm -f "$img"
+  echo "CLEANUP_FAILED $fail"
+  if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then exit 1; fi
+}
+trap cleanup EXIT
+probe() { # probe LABEL: the options of the mount, and whether a script on it runs
+  mnt=$(findmnt -n -o TARGET -S "$loop") || exit 1
+  printf "#!/bin/sh\nexit 0\n" | sudo tee "$mnt/run.bat" > /dev/null || exit 1
+  echo "OPTIONS $1 $(findmnt -n -o OPTIONS -S "$loop")"
+  if sudo "$mnt/run.bat"; then echo "EXEC_RAN $1"; else echo "EXEC_REFUSED $1"; fi
+}
+truncate -s 16M "$img" || exit 1
+mkfs.vfat -n ACCNOEXEC "$img" > /dev/null || exit 1
+made=$(sudo udisksctl loop-setup -f "$img") || exit 1
+loop=$(printf "%s\n" "$made" | sed -n "s/^Mapped file .* as \(\/dev\/loop[0-9]*\)\.$/\1/p")
+if [ -z "$loop" ]; then echo "loop-setup answered: $made" >&2; exit 1; fi
+sudo udisksctl mount -b "$loop" > /dev/null || exit 1
+probe default
+sudo udisksctl unmount -b "$loop" > /dev/null || exit 1
+sudo udisksctl mount -b "$loop" -o exec > /dev/null || exit 1
+probe exec') || die "FAIL  removable: the mount, a probe or the cleanup failed: $out"
+  for opt in noexec nodev nosuid shortname=mixed showexec utf8 flush; do
+    grep -Eq "^OPTIONS default (.*,)?$opt(,|$)" <<< "$out" || die "FAIL  removable: the default udisks mount lacks $opt: $out"
+  done
+  grep -q '^EXEC_REFUSED default$' <<< "$out" || die "FAIL  removable: a file ran from the default udisks mount: $out"
+  grep -q '^EXEC_RAN exec$' <<< "$out" || die "FAIL  removable: the control mounted with exec did not run the file, so the refusal proves nothing: $out"
+  grep -q '^CLEANUP_FAILED 0$' <<< "$out" || die "FAIL  removable: the cleanup failed: $out"
+  pass "DK20 B: a udisks mount carries noexec, nodev and nosuid, keeps vfat's own defaults, and runs nothing; with exec the same file runs"
 }
 
 stage_report() {
