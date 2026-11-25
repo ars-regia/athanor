@@ -83,7 +83,8 @@ SETTINGS_SIGNALS = ("settings-alive",)
 # by leaving this unset, and the report names it. Not asked in the upgrade case, whose first
 # boot is the published :stable.
 GRANTS_SIGNALS = ("grants-kept",)
-GRANTS_LOST = re.compile(rb"^GRANTS_LOST (\d+)", re.MULTILINE)
+# Not anchored to a line start: a console with bracketed paste puts an escape before it.
+GRANTS_LOST = re.compile(rb"GRANTS_LOST (\d+)")
 # And the kernel profile: PROFILE_OK is the guest's report that athanor-profile-check found
 # every setting of its role combination's profile in force (doc_kernel_profile.md,
 # section 12 item 3). PROFILE_DRIFT fails the run by leaving this unset.

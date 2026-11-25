@@ -477,9 +477,10 @@ SESSION_DIAGNOSTICS = (
 # journalctl's notices, a permission warning among them, out of what is read.
 GRANTS_PROBE = (
     b"if j=$(journalctl --user -b -q --no-pager) && [ -n \"$j\" ]; then"
-    b" l=$(printf '%s\n' \"$j\" | grep -aE 'cannot confine|not granted' | head -20);"
-    b" if [ -n \"$l\" ]; then printf 'GRANTS_%s %s\n' LOST \"$(printf '%s\n' \"$l\" | wc -l)\";"
-    b" printf '%s\n' \"$l\"; else printf 'GRANTS_%s\n' KEPT; fi;"
+    b" l=$(printf '%s\n' \"$j\" | grep -aE 'cannot confine|is not granted|not granted:'); r=$?;"
+    b" if [ $r -eq 0 ]; then printf 'GRANTS_%s %s\n' LOST \"$(printf '%s\n' \"$l\" | wc -l)\";"
+    b" printf '%s\n' \"$l\" | head -20; elif [ $r -eq 1 ]; then printf 'GRANTS_%s\n' KEPT;"
+    b" else printf 'GRANTS_%s\n' UNREADABLE; fi;"
     b" else printf 'GRANTS_%s\n' UNREADABLE; fi"
 )
 GRANTS_PROBE_WAIT = 5.0
@@ -751,11 +752,14 @@ def main() -> int:
         if chunk:
             log.write(chunk)
             log.flush()
-            # A bounded tail is enough to match markers and keeps memory flat over a run
-            # that can produce megabytes of console output.
-            tail = (tail + chunk)[-8000:]
+            # Markers are read over the whole chunk before the tail is cut: the answers to
+            # questions asked back to back arrive in one chunk, and a long memory answer
+            # pushed the grants answer before it out of the tail. A bounded tail still
+            # keeps a marker split across two chunks and memory flat over megabytes.
+            window = tail + chunk
+            tail = window[-8000:]
             last_data = time.time()
-            for name in phases_in(tail):
+            for name in phases_in(window):
                 note(name)
 
         # The menu is answered once, on the way in. After the install the machine restarts
