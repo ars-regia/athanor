@@ -1,0 +1,20 @@
+# Crates a specification under docs/architecture names as a dependency although no Cargo.toml
+# of the repository uses them (scripts/verify.py spec-deps, #1289), one entry per line:
+# `DOCUMENT CRATE REASON`. The forms the check reads are those of SPEC_DEPS_FORMS; a sentence
+# that says the crate is planned, or absent, names no dependency.
+# The list only shrinks: an entry that no longer applies leaves it, and a pull request adds none.
+doc_disks.md libadwaita the GTK4 application that section 7 withdraws (amendment of 2026-10-06, GNOME Disks instead)
+doc_disks.md zxcvbn the strength hint of DK11, withdrawn with the GTK4 application by section 7 (amendment of 2026-10-06)
+doc_files.md bzip2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md flate2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md lzma-rust2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md ruzstd planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md sevenz-rust2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md tar planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md zip planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md zstd not a dependency: the C crate that the default features of `zip` would pull
+doc_languages.md gettext-rs the binding of the libadwaita applications that ADR-0141 retires
+doc_lock_and_prompts.md oo7 planned: the secret exchange of the prompter, pinned by L12b (LP12)
+doc_portal.md pipewire planned: the PipeWire producer of step 5 of S2
+doc_session_daemons.md jxl-oxide not a dependency: a dependency of upstream cosmic-bg, which the section reads
+doc_visual_language.md material-colors planned: the accent colour taken from the wallpaper
