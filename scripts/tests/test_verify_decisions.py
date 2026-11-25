@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -122,17 +123,58 @@ class DecisionProblemsTest(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("0001-a.md: has an '## Amendment' heading", problems[0])
 
+    def kept(self, root, *names):
+        path = root / verify.DECISION_AMENDMENT_KEPT
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# header\n" + "".join(f"{n}\n" for n in names))
+
     def test_a_kept_heading_passes_and_a_kept_name_without_one_fails(self):
         root = self.repo({"0001-a.md": ("A2-1", "accepted")})
         f = root / "docs/decisions/0001-a.md"
-        kept = verify.DECISION_AMENDMENT_HEADING_KEPT
-        kept.add("0001-a.md")
-        self.addCleanup(kept.discard, "0001-a.md")
+        self.kept(root, "0001-a.md")
         problems = verify.decision_amendment_problems(root)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("no longer has an '## Amendment' heading", problems[0])
         f.write_text(f.read_text() + "\n## Amendment\n\nx\n")
         self.assertEqual(verify.decision_amendment_problems(root), [])
+
+    def test_a_kept_name_with_no_record_fails(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        self.kept(root, "0009-gone.md")
+        problems = verify.decision_amendment_problems(root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("0009-gone.md is not a decision record", problems[0])
+
+    def test_the_kept_list_only_shrinks_against_the_base(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        f = root / "docs/decisions/0001-a.md"
+        f.write_text(f.read_text() + "\n## Amendment\n\nx\n")
+        self.kept(root)
+        def git(*a):
+            subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True)
+
+        git("init", "-q")
+        git("add", "-A")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+        problems = verify.decision_amendment_problems(root, "HEAD")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("has an '## Amendment' heading", problems[0])
+        self.kept(root, "0001-a.md")
+        problems = verify.decision_amendment_problems(root, "HEAD")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("0001-a.md is not listed at HEAD; the list only shrinks", problems[0])
+        self.assertEqual(verify.decision_amendment_problems(root), [])
+
+    def test_the_repository_keeps_exactly_three_headings(self):
+        kept = verify.parse_decision_kept(verify.read(verify.ROOT / verify.DECISION_AMENDMENT_KEPT))
+        self.assertEqual(
+            sorted(kept),
+            [
+                "0121-own-compositor-and-toolkit.md",
+                "0122-own-compositor-optional-session-and-desktop-first.md",
+                "0126-toolkit-ready-to-leave-the-repository.md",
+            ],
+        )
 
     def test_amendments_to_specifications_is_not_an_amendment(self):
         root = self.repo({"0001-a.md": ("A2-1", "accepted")})
@@ -203,6 +245,41 @@ class DecisionProblemsTest(unittest.TestCase):
         f = root / "docs/decisions/0001-a.md"
         f.write_text(f.read_text() + "\n```\n## Amendment\n```\n")
         self.assertEqual(verify.decision_amendment_problems(root), [])
+
+    def test_the_amender_is_the_subject_of_the_clause(self):
+        text = (
+            "ADR-0147, which confirms ADR-0141 decision 2 and amends ADR-0138 decision 1 and ADR-0115 decision 5."
+        )
+        self.assertEqual(verify.decision_claims(text), [("ADR-0138", "ADR-0147")])
+        self.assertEqual(
+            verify.decision_claims("Per ADR-0141 decision 3, ADR-0147 amends ADR-0138."), [("ADR-0138", "ADR-0147")]
+        )
+        self.assertEqual(verify.decision_claims("ADR-0002 is clear; ADR-0003 amends ADR-0001."), [("ADR-0001", "ADR-0003")])
+
+    def test_a_negation_is_no_claim(self):
+        for text in ("ADR-0002 never amends ADR-0001.", "It does not amend ADR-0001.", "ADR-0002 does not itself amend ADR-0001."):
+            with self.subTest(text=text):
+                self.assertEqual(verify.decision_claims(text), [])
+
+    def test_the_forms_of_real_text_are_read(self):
+        for text, claims in {
+            "ADR-0002, which amends items 2 and 4 of ADR-0001.": [("ADR-0001", "ADR-0002")],
+            "ADR-0002 amends item 6 of [ADR-0001](x).": [("ADR-0001", "ADR-0002")],
+            "ADR-0002 amends D12 of ADR-0001.": [("ADR-0001", "ADR-0002")],
+            "ADR-0001 as amended by ADR-0002.": [("ADR-0001", "ADR-0002")],
+            "ADR-0001 item 6, amended by ADR-0002 item 8.": [("ADR-0001", "ADR-0002")],
+            "ADR-0002 amends ADR 0001.": [("ADR-0001", "ADR-0002")],
+            "ADR-0002 amends **ADR-0001**.": [("ADR-0001", "ADR-0002")],
+            "VL8 as amended by ADR-0077 point 4.": [],
+            "ADR-0046 amended 2026-10-08 by ADR-0057.": [],
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(verify.decision_claims(text), claims)
+
+    def test_a_claim_about_a_missing_record_fails(self):
+        problems = self.claim("ADR-0002 amends ADR-1035.\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no decision record has that number", problems[0])
 
     def test_the_repository_amendments_pass(self):
         self.assertEqual(verify.decision_amendment_problems(), [])

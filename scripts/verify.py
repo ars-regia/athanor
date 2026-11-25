@@ -5237,10 +5237,10 @@ def decision_problems(root=None):
     return out
 
 
-@check("decisions", "decision records have valid front matter, unique ids, a matching README index and existing targets")
+@check("decisions", "decision records have valid front matter, unique ids, a matching README index, existing targets, no `## Amendment` heading, and every ADR-X amends ADR-Y confirmed by the status of ADR-Y")
 def check_decisions():
     r = Result()
-    for problem in decision_problems() + decision_amendment_problems():
+    for problem in decision_problems() + decision_amendment_problems(base=BASE_REF):
         r.fail(problem)
     return r
 
@@ -8117,37 +8117,49 @@ def check_spec_deps():
 # An `## Amendment` heading, singular: "## Amendments to approved specifications" lists the
 # specification text a record changes, which is its decision and not an amendment of it.
 DECISION_AMENDMENT_HEADING = re.compile(r"^## Amendment\b", re.M)
-# The records that held an `## Amendment` heading when the check was added. An approved record's
-# text is not edited (docs/decisions/README.md, "Superseding and amending"), and known-red.txt
-# takes no entry its base does not list, so these three are named here. A record that no longer
-# has the heading fails until it leaves the set; the set only shrinks, and no record joins it (#1461).
-DECISION_AMENDMENT_HEADING_KEPT = {
-    "0121-own-compositor-and-toolkit.md",
-    "0122-own-compositor-optional-session-and-desktop-first.md",
-    "0126-toolkit-ready-to-leave-the-repository.md",
-}
-# The claims of one sentence that a document outside docs/decisions makes: "ADR-X amends ADR-Y",
-# also "amends `ADR-Y`", "amends decision 3 of ADR-Y" and "ADR-Y is amended by ADR-X" (a link or a
-# parenthesis may follow the id). Only the first ADR after `amends` is read, not a list, and
-# "amended" alone, "amending", "amendment of" and a record that does not use the id `ADR-NNNN` are
-# not read.
-DECISION_AMENDS = re.compile(r"\bamends\s+(?:decision\s+\d+\s+of\s+)?[\[`]*(ADR-\d{4})", re.I)
+# The records that held an `## Amendment` heading when the check was added, one file name a line.
+# An approved record's text is not edited (docs/decisions/README.md, "Superseding and amending"),
+# and known-red.txt takes no entry its base does not list, so they are named here. The list only
+# shrinks: against the base it adds no entry (#1461).
+DECISION_AMENDMENT_KEPT = "forge/config/decision-amendment-kept.txt"
+# The claims of one sentence that a document under docs/ makes about a record named `ADR-NNNN` or
+# `ADR NNNN` (a link, backticks, bold or a parenthesis may surround it). Read:
+#   - "X amends ADR-Y", "X amends item(s) N of ADR-Y", "decision N of", "D12 of", where X is the
+#     first ADR of the clause that no preposition governs; with none ("which amends ADR-Y") the
+#     status of ADR-Y only has to read `amended by`;
+#   - "ADR-Y as amended by ADR-X", "ADR-Y item 6, amended by ADR-X".
+# Not read: a list of targets after one `amends` (only the first), a negation ("never amends",
+# "does not amend"), "amended" without `by ADR-X` (a date or a specification item such as
+# "VL8 as amended by ADR-0077"), and an id that is not `ADR-NNNN` (A2-1, W1-OLD).
+DECISION_ADR = r"ADR[- ](\d{4})"
+DECISION_MARK = r"[\[`*(]*"
+DECISION_PART = (r"(?:(?:decisions?|items?|points?)\s+\d+(?:\s*(?:,|and)\s*\d+)*\s+of\s+"
+                 r"|D\d+(?:\s*(?:,|and)\s*D?\d+)*\s+of\s+)?")
+DECISION_AMENDS = re.compile(rf"\bamends?\s+{DECISION_PART}{DECISION_MARK}{DECISION_ADR}", re.I)
 DECISION_AMENDED_BY = re.compile(
-    r"(ADR-\d{4})[\]`]*(?:\([^)]*\))?(?:\s*\([^)]*\))?,?\s+(?:(?:is|was|are|were|also|and)\s+)*"
-    r"amended\s+by\s+[\[`]*(ADR-\d{4})",
-    re.I,
-)
-DECISION_REF = re.compile(r"ADR-\d{4}", re.I)
+    rf"{DECISION_ADR}\b(?:(?!ADR[- ]\d{{4}})[^.;]){{0,60}}?\bamended\s+by\s+{DECISION_MARK}{DECISION_ADR}", re.I)
+DECISION_REF = re.compile(DECISION_ADR, re.I)
+DECISION_NEGATED = re.compile(r"(?:\bnever|\bnot|\bcannot|n't|\bnor|\bneither|\bno longer)\s+(?:\w+\s+)?$", re.I)
+DECISION_NEW_SUBJECT = re.compile(rf";|\s(?:but|while|whereas)\s|,\s+and\s+(?={DECISION_MARK}ADR[- ]\d{{4}})", re.I)
+DECISION_GOVERNED = re.compile(r"\b(?:of|by|per|under|with|in|from|to|as|than)\s+[\[`*(]*$", re.I)
 # A list item or a table row is a sentence of its own, with or without a final period.
 DECISION_UNIT = re.compile(r"\s*(?:[-*+]|\d+[.)]|\|)\s")
 # Generated trees that no check opens (AGENTS.md, "Names and generated files").
 DECISION_PROSE_SKIP = {"graph-vaults", "graph-pages"}
 
 
+def decision_subject(before, target):
+    """The ADR that is the subject of the clause ending in BEFORE, or None."""
+    clause = DECISION_NEW_SUBJECT.split(before)[-1]
+    for m in DECISION_REF.finditer(clause):
+        if m.group(1) != target and not DECISION_GOVERNED.search(clause[:m.start()]):
+            return f"ADR-{m.group(1)}"
+    return None
+
+
 def decision_claims(text):
     """[(target, amender)] of the amendment claims of the Markdown TEXT, outside code fences:
-    AMENDER is the ADR named before `amends` in its sentence, or None when the sentence names
-    none ("which amends ADR-Y"); a claim "ADR-Y is amended by ADR-X" names both."""
+    TARGET and AMENDER are `ADR-NNNN`, AMENDER None when the sentence names none."""
     claims = []
     for paragraph in "\n".join(prose_lines(text)).split("\n\n"):
         units = []
@@ -8159,24 +8171,34 @@ def decision_claims(text):
         for unit in units:
             for sentence in spec_sentences(" ".join(unit.split())):
                 for m in DECISION_AMENDS.finditer(sentence):
-                    target = m.group(1).upper()
-                    before = [a.upper() for a in DECISION_REF.findall(sentence[:m.start()])]
-                    amenders = [a for a in before if a != target]
-                    claims.append((target, amenders[-1] if amenders else None))
+                    before = sentence[:m.start()]
+                    if DECISION_NEGATED.search(before):
+                        continue
+                    claims.append((f"ADR-{m.group(1)}", decision_subject(before, m.group(1))))
                 for m in DECISION_AMENDED_BY.finditer(sentence):
-                    if m.group(1).upper() != m.group(2).upper():
-                        claims.append((m.group(1).upper(), m.group(2).upper()))
+                    if m.group(1) != m.group(2):
+                        claims.append((f"ADR-{m.group(1)}", f"ADR-{m.group(2)}"))
     return claims
 
 
-def decision_amendment_problems(root=None):
+def parse_decision_kept(text):
+    """The file names of the text of DECISION_AMENDMENT_KEPT: one a line, `#` comments."""
+    return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+
+
+def decision_amendment_problems(root=None, base=None):
     """#1461, the two ways a record is amended (docs/decisions/README.md, "Who owns which
-    decision"): no record holds an `## Amendment` heading outside a code fence, and every "ADR-X
-    amends ADR-Y" that a document outside docs/decisions states (decision_claims) is confirmed by
-    the status of ADR-Y, which names ADR-X by its id or by its file number. A record is known by
-    its front-matter id and by `ADR-NNNN`, its file number (ADR-0074 item 6)."""
+    decision"): no record holds an `## Amendment` heading outside a code fence unless
+    DECISION_AMENDMENT_KEPT names it (the list only shrinks against BASE, and names a record that
+    exists), and every claim of decision_claims in a document under docs/ is confirmed: the
+    target is a record, known by its front-matter id and by `ADR-NNNN`, its file number (ADR-0074
+    item 6), and its status names the amender by either."""
     root = Path(root or ROOT)
-    out, statuses, aliases = [], {}, {}
+    out, statuses, aliases, files = [], {}, {}, set()
+    try:
+        kept = set(parse_decision_kept(read(root / DECISION_AMENDMENT_KEPT)))
+    except OSError:
+        kept = set()
     for f in sorted((root / "docs" / "decisions").glob("[0-9][0-9][0-9][0-9]-*.md")):
         text = read(f)
         fm = decision_front_matter(text) or {}
@@ -8185,12 +8207,24 @@ def decision_amendment_problems(root=None):
             statuses[key] = fm.get("status", "")
         aliases[alias] = fm.get("id", alias)
         aliases[fm.get("id", alias)] = alias
+        files.add(f.name)
         has_heading = DECISION_AMENDMENT_HEADING.search("\n".join(prose_lines(text))) is not None
-        if has_heading and f.name not in DECISION_AMENDMENT_HEADING_KEPT:
+        if has_heading and f.name not in kept:
             out.append(f"{f.name}: has an '## Amendment' heading: an amendment is a new record that names this one "
                        "(docs/decisions/README.md, Who owns which decision)")
-        elif not has_heading and f.name in DECISION_AMENDMENT_HEADING_KEPT:
-            out.append(f"{f.name}: no longer has an '## Amendment' heading: remove it from DECISION_AMENDMENT_HEADING_KEPT")
+        elif not has_heading and f.name in kept:
+            out.append(f"{DECISION_AMENDMENT_KEPT}: {f.name} no longer has an '## Amendment' heading: remove its line")
+    out += [f"{DECISION_AMENDMENT_KEPT}: {n} is not a decision record: remove its line" for n in sorted(kept - files)]
+    if base:
+        try:
+            listed = own_base_entries(root, base, lambda t: [("record", n, "") for n in parse_decision_kept(t)],
+                                      DECISION_AMENDMENT_KEPT)
+        except ValueError as err:
+            out.append(f"{DECISION_AMENDMENT_KEPT}: {err}")
+        else:
+            if listed is not None:
+                out += [f"{DECISION_AMENDMENT_KEPT}: {n} is not listed at {base}; the list only shrinks"
+                        for n in sorted(kept - {name for _, name in listed})]
     docs = root / "docs"
     for top, dirs, names in os.walk(docs):
         dirs[:] = sorted(d for d in dirs if d not in DECISION_PROSE_SKIP)
@@ -8203,15 +8237,15 @@ def decision_amendment_problems(root=None):
             for target, amender in decision_claims(read(path)):
                 status = statuses.get(target)
                 if status is None:
-                    continue
-                if amender is None:
+                    out.append(f"{rel}: names {target} in an amendment, and no decision record has that number")
+                elif amender is None:
                     if not status.startswith("amended by"):
                         out.append(f"{rel}: says {target} is amended, but its status is '{status}'")
-                    continue
-                named = {amender, aliases.get(amender, amender)}
-                if not any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", status) for n in named):
-                    out.append(f"{rel}: says {amender} amends {target}, whose status "
-                               f"'{status}' does not name {amender}")
+                else:
+                    named = {amender, aliases.get(amender, amender)}
+                    if not any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", status) for n in named):
+                        out.append(f"{rel}: says {amender} amends {target}, whose status "
+                                   f"'{status}' does not name {amender}")
     return out
 
 

@@ -66,20 +66,28 @@ does not restate it.
 | What is in which release | `docs/operations/release-1.0.md`, and only that document |
 
 - **Release placement.** `docs/operations/release-1.0.md` is the only owner of release
-  placement. The records decide the changes (ADR-0141 decisions 2 and 4, ADR-0138, ADR-0135) and
-  `release-1.0.md` states the result (its section 5). A record that moves something between
-  releases is a decision of direction, and `release-1.0.md` takes its result in the same pull
-  request; a specification that needs a placement cites that document and does not state one.
+  placement. The records decide the changes (for example ADR-0141 decisions 2 and 4, ADR-0138
+  and ADR-0135) and `release-1.0.md` states the result (its sections 2 to 4). A record that
+  moves something between releases is a decision of direction, and `release-1.0.md` takes its
+  result in the same pull request; a specification that needs a placement cites that document
+  and does not state one.
 - **Amendments.** A record is never amended inside itself: an `## Amendment` heading in a
-  decision record is refused, except in the three records named below. An amendment is a new record that names the one it amends, and the
-  old record's `status` then reads `amended by <new id>` ("Superseding and amending", above). A document outside
-  `docs/decisions/` that says "ADR-X amends ADR-Y" is true only while the status of ADR-Y names
-  ADR-X. `scripts/verify.py decisions` checks both. The check knows a record by its front-matter id and
-  by `ADR-NNNN`, its file number, and reads each list item as a sentence of its own. It reads
-  "amends ADR-Y", "amends `ADR-Y`", "amends decision 3 of ADR-Y" and "ADR-Y is amended by
-  ADR-X", outside code fences; "amended" alone and a list of targets after one `amends` are not
-  read. ADRs 0121, 0122 and 0126 keep their `## Amendment` heading through
-  `DECISION_AMENDMENT_HEADING_KEPT` in `scripts/verify.py`; the set only shrinks.
+  decision record is refused, except in the three records that
+  `forge/config/decision-amendment-kept.txt` names (ADR-0121, ADR-0122 and ADR-0126). That list
+  only shrinks: against the base it adds no entry, and an entry whose record is gone or has
+  lost the heading fails. An amendment is a new record that names the one it amends, and the old
+  record's `status` then reads `amended by <new id>` ("Superseding and amending", above). A
+  claim in a document under `docs/` that "ADR-X amends ADR-Y" is true only while the status of
+  ADR-Y names ADR-X, and a claim about a number that has no record fails.
+  `scripts/verify.py decisions` checks all of it. The check knows a record by its front-matter
+  id and by `ADR-NNNN`, its file number, reads each list item as a sentence of its own, and
+  skips code fences. It reads "X amends ADR-Y", "amends item 2 of ADR-Y", "amends decision 3
+  of ADR-Y", "amends D12 of ADR-Y", "ADR-Y as amended by ADR-X" and "ADR-Y item 6, amended by
+  ADR-X", with a link, backticks or bold around the id and with "ADR 0044" spelled with a
+  space; X is the subject of the clause. It does not read a negation ("never amends", "does not
+  amend"), a second target after one `amends`, "amended" without `by ADR-X` (a date, or a
+  specification item as in "VL8 as amended by ADR-0077"), or an id that is not `ADR-NNNN`
+  (A2-1, W1-OLD).
 
 ## Approval
 
@@ -92,7 +100,7 @@ area approves records tagged with it.
 ids are unique, that this index lists every record and nothing else, and that every
 `superseded by` or `amended by` target exists. It also checks the two ways
 a record is amended (see "Who owns which decision"): no `## Amendment` heading outside the
-three kept records, and every "ADR-X amends ADR-Y" of a document outside this folder is
+three kept records, and every "ADR-X amends ADR-Y" of a document under `docs/` is
 confirmed by the status of ADR-Y.
 
 ## Index

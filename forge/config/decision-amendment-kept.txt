@@ -1,0 +1,5 @@
+# Decision records that keep an `## Amendment` heading (docs/decisions/README.md, "Who owns which decision").
+# An approved record is not edited, so these three stay; the list only shrinks and no record joins it (#1461).
+0121-own-compositor-and-toolkit.md
+0122-own-compositor-optional-session-and-desktop-first.md
+0126-toolkit-ready-to-leave-the-repository.md
