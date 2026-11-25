@@ -317,6 +317,14 @@ impl Catalog {
     }
 }
 
+/// Whether the program of `domain` is drawn right to left: by the language of the catalog
+/// [`Catalog::load`] gives it, the override included. Every program, the compositor's slide
+/// among them, settles its direction here, so two that read one catalog never disagree; a
+/// catalog that cannot be read gives English, left to right.
+pub fn is_rtl(domain: &str) -> bool {
+    Catalog::load(domain).is_ok_and(|catalog| catalog.is_rtl())
+}
+
 fn primary_language(locale: &str) -> &str {
     locale.split(['_', '.', '@']).next().unwrap_or(locale)
 }
