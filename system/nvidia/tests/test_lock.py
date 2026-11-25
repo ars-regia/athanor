@@ -593,6 +593,24 @@ class MirrorBlob(unittest.TestCase):
             self.assertFalse(mirror.has("a" * 64))
         self.assertEqual((slept.call_count, opened.call_count), (0, 1))
 
+    def test_a_read_with_a_fallback_makes_one_attempt(self):
+        mirror = lock.Mirror("registry.example/owner/athanor-nvidia-rpms")
+        for failure in (http_error(503), urllib.error.URLError("timed out")):
+            with self.subTest(failure=failure), \
+                    unittest.mock.patch("urllib.request.urlopen", side_effect=[failure]) as opened, \
+                    unittest.mock.patch("time.sleep") as slept, redirect_stderr(io.StringIO()):
+                self.assertIsNone(lock.from_mirror(mirror, "a" * 64, "a.rpm"))
+            self.assertEqual((slept.call_count, opened.call_count), (0, 1))
+
+    def test_a_body_cut_short_falls_back_to_the_lock_url(self):
+        class Cut(io.BytesIO):
+            def read(self, *args):
+                raise http.client.IncompleteRead(b"part")
+        mirror = lock.Mirror("registry.example/owner/athanor-nvidia-rpms")
+        with unittest.mock.patch("urllib.request.urlopen", return_value=Cut()), redirect_stderr(io.StringIO()) as err:
+            self.assertIsNone(lock.from_mirror(mirror, "a" * 64, "a.rpm"))
+        self.assertIn("not in the mirror", err.getvalue())
+
 
 def run(argv, download):
     err = io.StringIO()
@@ -612,6 +630,11 @@ class Latest(unittest.TestCase):
         )
         code, out, _ = run(["latest", "legacy", "--major", "580"], download)
         self.assertEqual((code, out), (0, "580.190.01\n"))
+
+    def test_the_driver_only_in_the_second_tree_is_found(self):
+        old = package(lock.BRANCHES["legacy"]["primary"], 3, "580.196.07", "1.fc45", "x86_64", "x/old.rpm", "a" * 64)
+        code, out, _ = run(["latest", "legacy", "--major", "580"], legacy_repo(releases=[old]))
+        self.assertEqual((code, out), (0, "580.196.07\n"))
 
     def test_no_version_in_the_major_is_not_published(self):
         download = legacy_repo(package(lock.BRANCHES["legacy"]["primary"], 3, "590.44.01", "1.fc43", "x86_64", "x/next.rpm", "c" * 64))

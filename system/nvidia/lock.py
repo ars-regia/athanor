@@ -188,7 +188,9 @@ class Mirror:
         self.host, _, self.name = repository.partition("/")
         self.token = None
 
-    def _open(self, sha, method):
+    def _open(self, sha, method, retry=True):
+        """The blob's response. `retry` repeats a transient failure as http_get does: it is for a
+        read with no fallback (`has`); `get` has one, the lock's URL, and makes a single attempt."""
         url = f"https://{self.host}/v2/{self.name}/blobs/sha256:{sha}"
         for attempt in (1, 2):
             request = urllib.request.Request(url, method=method)
@@ -196,7 +198,8 @@ class Mirror:
                 # Unredirected: the blob redirects to a CDN URL that must not see the token.
                 request.add_unredirected_header("Authorization", f"Bearer {self.token}")
             try:
-                return retrying(url, lambda: urllib.request.urlopen(request, timeout=120))
+                opened = functools.partial(urllib.request.urlopen, request, timeout=120)
+                return retrying(url, opened) if retry else opened()
             except urllib.error.HTTPError as error:
                 if error.code != 401 or attempt == 2:
                     raise
@@ -218,7 +221,7 @@ class Mirror:
             raise
 
     def get(self, sha):
-        with self._open(sha, "GET") as response:
+        with self._open(sha, "GET", retry=False) as response:
             return response.read()
 
 
@@ -226,7 +229,7 @@ def from_mirror(mirror, sha, name):
     """The RPM's bytes from the mirror, or None when the mirror cannot give the locked ones."""
     try:
         data = mirror.get(sha)
-    except (LockError, OSError) as error:
+    except (LockError, OSError, http.client.HTTPException) as error:
         print(f"lock.py: {name}: not in the mirror ({error}), using the lock's URL", file=sys.stderr)
         return None
     if hashlib.sha256(data).hexdigest() != sha:
@@ -404,10 +407,12 @@ def vtuple(version):
 
 
 def newest(primary_xml, name, major):
-    """The highest version `major`.* of package `name`, for x86_64 or noarch."""
+    """The highest version `major`.* of package `name`, for x86_64 or noarch, in one repository's
+    metadata or in a list of them."""
     versions = {
         attribute(pkg, f"{COMMON}version", "ver", name)
-        for pkg in parse_xml(primary_xml).iter(f"{COMMON}package")
+        for xml in ([primary_xml] if isinstance(primary_xml, bytes) else primary_xml)
+        for pkg in parse_xml(xml).iter(f"{COMMON}package")
         if pkg.findtext(f"{COMMON}name") == name and pkg.findtext(f"{COMMON}arch") in ARCHES
     }
     try:
@@ -505,7 +510,7 @@ def main(argv=None, download=http_get, mirror=None):
         if args.command == "latest":
             if not args.major:
                 raise LockError("latest needs --major")
-            print(newest(primary_xml(BRANCHES[args.branch]["baseurl"], download), BRANCHES[args.branch]["primary"], args.major))
+            print(newest([primary_xml(base, download) for base in trees(args.branch)], BRANCHES[args.branch]["primary"], args.major))
             return 0
         if args.command == "verify":
             path, version, entries = load_lock(args.locks, args.branch)
