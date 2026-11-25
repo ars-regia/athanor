@@ -83,6 +83,13 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(failures, [], order)
             self.assertIn(f"transcript {expected!r}", lines[0], order)
 
+    def test_a_greedy_pairing_can_take_the_candidate_a_later_node_needed(self):
+        # The limit of the pairing: the first reference node takes the better-stated candidate,
+        # which the second needed, and the second is left with the other.
+        reference = [node("check box", "P", ["showing"]), node("check box", "P", ["showing", "checked"])]
+        transcript = [node("check box", "P", ["showing", "checked"]), node("check box", "P", ["showing"])]
+        self.assertEqual(compare.compare(reference, transcript)[1], ["check box 'P': state 'checked' missing"])
+
     def test_a_state_that_moved_between_identical_siblings_is_not_reported(self):
         # The limit of the pairing: nodes of one name, role and description are told apart only
         # by their states, so the box that is checked is not the one the reference checks.

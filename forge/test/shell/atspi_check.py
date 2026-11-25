@@ -59,7 +59,7 @@ def problems(nodes, expected, required=(), window=None):
             # from it: its extent touches the window, and a bogus extent far away does not.
             wx, wy, ww, wh = own
             x, y, w, h = extents[index]
-            if w > 0 and h > 0 and (x >= wx + ww or x + w <= wx or y > wy + wh or y + h < wy):
+            if w > 0 and h > 0 and (x > wx + ww or x + w < wx or y > wy + wh or y + h < wy):
                 found.append(f"the showing 'menu' {name!r} at {(x, y, w, h)} is away from its window {own}")
         if not (showing and role in INTERACTIVE and index in extents and own is not None):
             continue

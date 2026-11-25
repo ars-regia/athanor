@@ -92,6 +92,17 @@ class ExtentsTest(unittest.TestCase):
             found, ["the showing 'menu' '' at (5000, 5000, 180, 220) is away from its window (0, 0, 985, 225)"]
         )
 
+    def test_a_menu_sharing_an_edge_with_its_window_touches_it_and_one_pixel_off_does_not(self):
+        # The window is (0, 0, 985, 225) and the menu 180 by 220: flush on each side, then 1 px away.
+        for x, y, touches in [
+            (985, 10, True), (-180, 10, True), (10, 225, True), (10, -220, True),
+            (986, 10, False), (-181, 10, False), (10, 226, False), (10, -221, False),
+        ]:
+            menu = Fake("menu", (x, y, 180, 220), [Fake("menu item", (x, y, 168, 30), name="New window")])
+            frame = Fake("frame", (0, 0, 985, 225), [Fake("button", (10, 10, 80, 30), [menu], "Open a menu")])
+            found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
+            self.assertEqual(found == [], touches, (x, y, found))
+
 
 class Fake:
     """An accessible of the AT-SPI calls with_extents() makes."""

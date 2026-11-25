@@ -311,6 +311,8 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
         # role and description are told apart only by their states, each reference node taking
         # its best in turn and extra states costing nothing: a state that moved between two such
         # siblings is not reported (test_a_state_that_moved_between_identical_siblings...).
+        # The pairing is greedy: a reference node may take the candidate a later one needed
+        # (test_a_greedy_pairing_can_take_the_candidate_a_later_node_needed).
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = min(named, key=lambda node: fit(ref, node), default=None)
         match = counterparts.get(id(ref), match)
