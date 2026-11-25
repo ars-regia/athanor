@@ -3,10 +3,10 @@
 atspi_compare.py --gallery <reference dir> <transcript dir> <en|it>
 
 doc_own_stack.md, OS8: a surface moves from GTK4 to athanor-sal only when what a screen
-reader is told about it holds every name, role, state and value of the GTK version. Both files
+reader is told about it holds every name, role, state, value and description of the GTK version. Both files
 are atspi_check.py's ATSPI_TRANSCRIPT; the reference is the GTK chooser's, recorded. Prints one
 line per element of the reference with its verdict, and fails when the transcript lacks an
-element, a role, a state or a value of the reference. A state said in other words, as a toggle
+element, a role, a state, a value or a description of the reference. A state said in other words, as a toggle
 button's "pressed" for "checked", is a note, not a failure.
 
 --own-compositor names the scene's bar preset and dock setting, as rig.sh seeds them: the
@@ -329,6 +329,13 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
                 problems.append(f"state {state!r} missing")
         if ref["value"] and match["value"] != ref["value"]:
             problems.append(f"value {match['value']!r}, expected {ref['value']!r}")
+        # A description the reference holds, a preference row's second line (SL4), is compared;
+        # a reference recorded before the field, or a node with none, holds none.
+        expected = ref.get("description", "")
+        if expected and match.get("description", "") != expected:
+            problems.append(
+                f"description {match.get('description', '')!r}, expected {expected!r}"
+            )
         failures.extend(f"{label}: {problem}" for problem in problems)
         verdict = "FAIL" if problems else "note" if notes else "same"
         detail = "; ".join(problems + notes)

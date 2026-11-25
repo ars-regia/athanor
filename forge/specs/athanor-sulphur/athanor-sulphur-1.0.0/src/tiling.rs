@@ -10,6 +10,19 @@ use smithay::utils::{Logical, Point, Rectangle};
 /// On a side of a tile at the edge of the area, and between two tiles, half on each (D4).
 const GAP: i32 = 8;
 
+/// What Super+R and Super+Shift+R move a split by: cosmic-comp's first step of a keyboard
+/// resize, its default of 10 and an increment of 2 (`src/shell/mod.rs`, `Shell::resize`, at `epoch-1.11.0`).
+pub const STEP: i32 = 12;
+
+/// A way from a tile to its neighbour (issue #1419).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 /// The side a split divides.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Along {
@@ -144,6 +157,30 @@ impl<T: PartialEq> Node<T> {
         let part = part.clamp(least, room - least);
         *share = f64::from(part) / f64::from(room);
         true
+    }
+
+    /// `Tree::turn` in this node: whether a split turned.
+    fn turn(&mut self, window: &T) -> bool {
+        let Self::Split {
+            along,
+            first,
+            second,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        let parent = [&**first, &**second]
+            .iter()
+            .any(|child| matches!(child, Self::Tile(tile) if tile == window));
+        if parent {
+            *along = match along {
+                Along::Width => Along::Height,
+                Along::Height => Along::Width,
+            };
+            return true;
+        }
+        first.turn(window) || second.turn(window)
     }
 
     fn swap(&mut self, one: &T, other: &T)
@@ -361,6 +398,84 @@ impl<T: PartialEq + Clone> Tree<T> {
         }
     }
 
+    /// Moves each side of the tile of `window` in `area` that borders another tile `by` pixels,
+    /// outward when `by` is positive and inward when not (Super+R, Super+Shift+R), as `resize`
+    /// moves them: a side on the edge of the area stays, and each split stops where it stops.
+    pub fn grow(&mut self, window: &T, by: i32, area: Rectangle<i32, Logical>) {
+        let Some(tile) = self
+            .layout(area)
+            .into_iter()
+            .find(|(kept, _)| *kept == window)
+            .map(|(_, tile)| tile)
+        else {
+            return;
+        };
+        // Inward, no further than the middle of the tile, so that no side crosses another.
+        let (x, y) = (
+            by.max((tile.size.w / 2).saturating_neg()),
+            by.max((tile.size.h / 2).saturating_neg()),
+        );
+        let to = Rectangle::new(
+            (tile.loc.x.saturating_sub(x), tile.loc.y.saturating_sub(y)).into(),
+            (
+                tile.size.w.saturating_add(x.saturating_mul(2)),
+                tile.size.h.saturating_add(y.saturating_mul(2)),
+            )
+                .into(),
+        );
+        // Of two splits on one axis one holds the other, which keeps its share when the outer
+        // moves after it: a second pass puts it where the step does, the outer staying.
+        self.resize(window, to, area);
+        self.resize(window, to, area);
+    }
+
+    /// Turns the split that divides the tile of `window` from its sibling, so that it divides
+    /// the other side, each keeping its share (Super+O); a tile alone has none.
+    pub fn turn(&mut self, window: &T) {
+        if let Some(root) = &mut self.root {
+            root.turn(window);
+        }
+    }
+
+    /// The tile next to that of `window` in `area` toward `to`: of the tiles that lie wholly that
+    /// way and share part of its other side, the nearest, and of those the one focused last.
+    /// None at an edge, or when the tree does not hold `window`.
+    pub fn neighbour(&self, window: &T, to: Direction, area: Rectangle<i32, Logical>) -> Option<&T> {
+        let tiles = self.layout(area);
+        let tile = tiles.iter().find(|(kept, _)| *kept == window)?.1;
+        let end = |at: i32, size: i32| at.saturating_add(size);
+        let shared = |at: i32, size: i32, other: i32, other_size: i32| {
+            at < end(other, other_size) && other < end(at, size)
+        };
+        let focus = |kept: &T| self.focused.iter().position(|focused| focused == kept);
+        tiles
+            .iter()
+            .filter(|(kept, _)| *kept != window)
+            .filter_map(|(kept, other)| {
+                let (away, beside) = match to {
+                    Direction::Left => (
+                        tile.loc.x.saturating_sub(end(other.loc.x, other.size.w)),
+                        shared(tile.loc.y, tile.size.h, other.loc.y, other.size.h),
+                    ),
+                    Direction::Right => (
+                        other.loc.x.saturating_sub(end(tile.loc.x, tile.size.w)),
+                        shared(tile.loc.y, tile.size.h, other.loc.y, other.size.h),
+                    ),
+                    Direction::Up => (
+                        tile.loc.y.saturating_sub(end(other.loc.y, other.size.h)),
+                        shared(tile.loc.x, tile.size.w, other.loc.x, other.size.w),
+                    ),
+                    Direction::Down => (
+                        other.loc.y.saturating_sub(end(tile.loc.y, tile.size.h)),
+                        shared(tile.loc.x, tile.size.w, other.loc.x, other.size.w),
+                    ),
+                };
+                (away >= 0 && beside).then_some((away, std::cmp::Reverse(focus(kept)), *kept))
+            })
+            .min_by_key(|(away, focused, _)| (*away, *focused))
+            .map(|(_, _, kept)| kept)
+    }
+
     /// Notes that the focus went to `window`, which the next tile will split.
     pub fn focus(&mut self, window: &T) {
         if let Some(index) = self.focused.iter().position(|kept| kept == window) {
@@ -403,6 +518,38 @@ mod tests {
     fn tiles(tree: &Tree<u8>, area: Rectangle<i32, Logical>) -> Vec<(u8, Rectangle<i32, Logical>)> {
         let shown = tree.layout(area);
         shown.into_iter().map(|(tile, at)| (*tile, at)).collect()
+    }
+
+    /// A tile between two others moves each of its sides a step, whichever split is the outer.
+    #[test]
+    fn a_step_moves_both_sides_of_a_middle_tile() {
+        let whole = area(3000, 600);
+        // ((1|3)|2), then (1|(2|3)): the middle tile is 3, then 2.
+        for (focus, middle) in [(1, 3), (2, 2)] {
+            let mut tree = Tree::default();
+            tree.insert(1, whole);
+            tree.insert(2, whole);
+            tree.focus(&focus);
+            tree.insert(3, whole);
+            let before = tiles(&tree, whole);
+            let at = |shown: &[(u8, Rectangle<i32, Logical>)]| {
+                shown.iter().find(|(tile, _)| *tile == middle).map(|(_, at)| *at)
+            };
+            let tile = at(&before).expect("the middle tile");
+            assert!(tile.loc.x > 8 && tile.loc.x + tile.size.w < 2992, "{before:?}");
+
+            tree.grow(&middle, STEP, whole);
+
+            let grown = at(&tiles(&tree, whole)).expect("the middle tile");
+            assert_eq!(grown.loc.x, tile.loc.x - STEP, "middle {middle}: the left side");
+            assert_eq!(
+                grown.loc.x + grown.size.w,
+                tile.loc.x + tile.size.w + STEP,
+                "middle {middle}: the right side"
+            );
+            tree.grow(&middle, -STEP, whole);
+            assert_eq!(tiles(&tree, whole), before, "middle {middle}: back");
+        }
     }
 
     #[test]

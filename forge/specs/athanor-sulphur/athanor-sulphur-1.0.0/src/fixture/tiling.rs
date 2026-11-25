@@ -1773,3 +1773,305 @@ fn a_tile_activated_under_a_full_screen_tile_comes_above_it() {
     assert!(level(&run, &pair.below) > level(&run, &pair.above), "above the full-screen tile");
     run.stop();
 }
+
+const KEY_R: u32 = 19;
+const KEY_O: u32 = 24;
+const KEY_G: u32 = 34;
+
+/// `tiled_pair` and a third window, which splits the tile of the one above: that one at
+/// `LEFT_TOP`, the third at `LEFT_BOTTOM` with the keyboard, the one below at `RIGHT`.
+fn tiled_three(run: &mut Running) -> (Pair, Local, Window) {
+    let pair = tiled_pair(run);
+    let (third, _, new) = window(run);
+    assert_eq!(tile_of(run, pair.id, &pair.above), rect(LEFT_TOP));
+    assert_eq!(tile_of(run, pair.id, &new), rect(LEFT_BOTTOM));
+    assert_eq!(tile_of(run, pair.id, &pair.below), rect(RIGHT));
+    (pair, third, new)
+}
+
+/// Super with Left, Right, Up, Down or h, l, k, j gives the focus to the nearest tile that way
+/// that shares part of the focused tile's other side, of two the one focused last; at an edge
+/// the focus stays; while locked the keys reach the lock surface (issue #1419).
+#[test]
+fn super_and_a_direction_focuses_the_neighbouring_tile() {
+    use crate::bindings::Action;
+    use crate::tiling::Direction;
+    let mut run = Running::start(None);
+    let (pair, _third, new) = tiled_three(&mut run);
+    let (above, below) = (pair.above.clone(), pair.below.clone());
+    for (key, to, from, reached) in [
+        (KEY_UP, Direction::Up, &new, &above),
+        (KEY_K, Direction::Up, &new, &above),
+        (KEY_DOWN, Direction::Down, &above, &new),
+        (KEY_J, Direction::Down, &above, &new),
+        (KEY_RIGHT, Direction::Right, &new, &below),
+        (KEY_L, Direction::Right, &above, &below),
+        (KEY_LEFT, Direction::Left, &above, &above),
+        (KEY_H, Direction::Left, &new, &new),
+        (KEY_UP, Direction::Up, &above, &above),
+        (KEY_RIGHT, Direction::Right, &below, &below),
+        (KEY_DOWN, Direction::Down, &below, &below),
+    ] {
+        run.state.focus(from);
+        assert_eq!(
+            fires(&mut run, &[KEY_LEFTMETA, key]),
+            [Action::FocusToward(to)],
+            "key {key}"
+        );
+        assert_eq!(
+            run.state.focused_window().as_ref(),
+            Some(reached),
+            "key {key} {to:?}"
+        );
+    }
+    run.state.focus(&new);
+    run.state.focus(&below);
+    fires(&mut run, &[KEY_LEFTMETA, KEY_LEFT]);
+    assert_eq!(
+        run.state.focused_window(),
+        Some(new.clone()),
+        "the one focused last"
+    );
+    run.state.focus(&above);
+    run.state.focus(&below);
+    fires(&mut run, &[KEY_LEFTMETA, KEY_H]);
+    assert_eq!(
+        run.state.focused_window(),
+        Some(above.clone()),
+        "the one focused last"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_RIGHT],
+        "Super+Right",
+    );
+    run.stop();
+}
+
+/// Super+Shift with a direction key trades the tiles of the focused window and its neighbour
+/// that way, which keeps the keyboard; at an edge nothing changes; while locked the keys reach
+/// the lock surface.
+#[test]
+fn super_shift_and_a_direction_swaps_with_the_neighbouring_tile() {
+    use crate::bindings::Action;
+    use crate::tiling::Direction;
+    let mut run = Running::start(None);
+    let (pair, _third, new) = tiled_three(&mut run);
+    let id = pair.id;
+    run.state.focus(&new);
+
+    assert_eq!(
+        fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_K]),
+        [Action::SwapToward(Direction::Up)]
+    );
+    assert_eq!(tile_of(&run, id, &new), rect(LEFT_TOP));
+    assert_eq!(tile_of(&run, id, &pair.above), rect(LEFT_BOTTOM));
+    assert_eq!(tile_of(&run, id, &pair.below), rect(RIGHT));
+    assert_eq!(run.state.focused_window(), Some(new.clone()));
+
+    assert_eq!(
+        fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT]),
+        [Action::SwapToward(Direction::Right)]
+    );
+    assert_eq!(tile_of(&run, id, &new), rect(RIGHT));
+    assert_eq!(tile_of(&run, id, &pair.below), rect(LEFT_TOP));
+    assert_eq!(tile_of(&run, id, &pair.above), rect(LEFT_BOTTOM));
+
+    for key in [KEY_RIGHT, KEY_L, KEY_UP, KEY_DOWN] {
+        fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTSHIFT, key]);
+        assert_eq!(tile_of(&run, id, &new), rect(RIGHT), "key {key}: an edge");
+    }
+    run.state.focus(&pair.below);
+    run.state.focus(&new);
+    assert_eq!(
+        fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_H]),
+        [Action::SwapToward(Direction::Left)]
+    );
+    assert_eq!(
+        tile_of(&run, id, &new),
+        rect(LEFT_TOP),
+        "of two, the one focused last"
+    );
+    assert_eq!(tile_of(&run, id, &pair.below), rect(RIGHT));
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT],
+        "Super+Shift+Right",
+    );
+    assert_eq!(tile_of(&run, id, &new), rect(LEFT_TOP));
+    run.stop();
+}
+
+/// Super+O turns the split of the focused tile to divide the other side, each part keeping its
+/// share, and again turns it back; while locked the key reaches the lock surface.
+#[test]
+fn super_o_turns_the_split_of_the_focused_tile() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let pair = tiled_pair(&mut run);
+    let id = pair.id;
+    run.state.focus(&pair.above);
+
+    assert_eq!(fires(&mut run, &[KEY_LEFTMETA, KEY_O]), [Action::TurnSplit]);
+    assert_eq!(tile_of(&run, id, &pair.above), rect((8, 8, 1264, 388)));
+    assert_eq!(tile_of(&run, id, &pair.below), rect((8, 404, 1264, 388)));
+
+    fires(&mut run, &[KEY_LEFTMETA, KEY_O]);
+    assert_eq!(tile_of(&run, id, &pair.above), rect(LEFT));
+    fires(&mut run, &[KEY_LEFTMETA, KEY_R]);
+    let grown = tile_of(&run, id, &pair.above);
+    fires(&mut run, &[KEY_LEFTMETA, KEY_O]);
+    fires(&mut run, &[KEY_LEFTMETA, KEY_O]);
+    assert_eq!(tile_of(&run, id, &pair.above), grown, "the share is kept");
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &[KEY_LEFTMETA, KEY_O], "Super+O");
+    assert_eq!(tile_of(&run, id, &pair.above), grown);
+    run.stop();
+}
+
+/// Super+R moves each side of the focused tile that borders another tile 12 pixels out, and
+/// Super+Shift+R 12 in (cosmic-comp's first step); a side on the edge of the area stays, and
+/// each part keeps room for a tile; while locked the keys reach the lock surface.
+#[test]
+fn super_r_resizes_the_focused_tile_by_a_step() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (pair, _third, new) = tiled_three(&mut run);
+    let id = pair.id;
+    run.state.focus(&new);
+
+    assert_eq!(fires(&mut run, &[KEY_LEFTMETA, KEY_R]), [Action::GrowTile]);
+    assert_eq!(tile_of(&run, id, &new), rect((8, 392, 640, 400)));
+    assert_eq!(tile_of(&run, id, &pair.above), rect((8, 8, 640, 376)));
+    assert_eq!(tile_of(&run, id, &pair.below), rect((656, 8, 616, 784)));
+
+    assert_eq!(
+        fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_R]),
+        [Action::ShrinkTile]
+    );
+    assert_eq!(tile_of(&run, id, &new), rect(LEFT_BOTTOM));
+    assert_eq!(tile_of(&run, id, &pair.above), rect(LEFT_TOP));
+    assert_eq!(tile_of(&run, id, &pair.below), rect(RIGHT));
+
+    for _ in 0..80 {
+        run.state.fire(Action::GrowTile);
+    }
+    let largest = tile_of(&run, id, &new);
+    fires(&mut run, &[KEY_LEFTMETA, KEY_R]);
+    assert_eq!(tile_of(&run, id, &new), largest, "at its bound");
+    assert_eq!(
+        (largest.loc.x, largest.loc.y + largest.size.h),
+        (8, 792),
+        "the edges stay"
+    );
+    assert!(tile_of(&run, id, &pair.above).size.h > 0);
+    assert!(tile_of(&run, id, &pair.below).size.w > 0);
+
+    for _ in 0..160 {
+        run.state.fire(Action::ShrinkTile);
+    }
+    let smallest = tile_of(&run, id, &new);
+    fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_R]);
+    assert_eq!(tile_of(&run, id, &new), smallest, "at its bound");
+    assert!(smallest.size.w > 0 && smallest.size.h > 0);
+    assert_eq!(
+        (smallest.loc.x, smallest.loc.y + smallest.size.h),
+        (8, 792),
+        "the edges stay"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &[KEY_LEFTMETA, KEY_R], "Super+R");
+    assert_eq!(tile_of(&run, id, &new), smallest);
+    run.stop();
+}
+
+/// Super+G takes the focused tile out of the tree, its neighbour taking the space, and it stays
+/// out when it draws again; Super+G again puts it back as a new window is placed, and the
+/// tiling of its workspace toggled off and on takes it as any window; while locked the key
+/// reaches the lock surface.
+#[test]
+fn super_g_floats_the_focused_tile_and_tiles_it_again() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        below,
+        above,
+        id,
+        ..
+    } = tiled_pair(&mut run);
+    run.state.focus(&above);
+
+    let fired = std::cell::RefCell::new(Vec::new());
+    answer_all(&mut run, &mut [&mut lower, &mut upper], |run| {
+        fired.replace(fires(run, &[KEY_LEFTMETA, KEY_G]));
+    });
+    assert_eq!(fired.take(), [Action::ToggleFloating]);
+    // Its answer to the configure is a draw, which would give it a tile (`tile_shown`).
+    assert!(!run.state.is_tile(&above), "a draw does not tile it again");
+    assert_eq!(tiled_states(&above), 0);
+    assert_eq!(tiles(&run, id), 1);
+    assert_eq!(geometry(&run, &below), rect(WHOLE));
+
+    answer_all(&mut run, &mut [&mut lower, &mut upper], |run| {
+        fires(run, &[KEY_LEFTMETA, KEY_G]);
+    });
+    assert!(run.state.is_tile(&above));
+    assert_eq!(geometry(&run, &below), rect(LEFT));
+    assert_eq!(geometry(&run, &above), rect(RIGHT));
+
+    fires(&mut run, &[KEY_LEFTMETA, KEY_G]);
+    assert!(!run.state.is_tile(&above));
+    run.state.set_tiling(id, false);
+    run.state.set_tiling(id, true);
+    assert!(run.state.is_tile(&above), "the toggle takes every window");
+    upper.hide(&mut run);
+    upper.redraw(&mut run);
+    assert!(
+        run.state.is_tile(&above),
+        "and it takes a tile again when it draws"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &[KEY_LEFTMETA, KEY_G], "Super+G");
+    assert!(run.state.is_tile(&above));
+    run.stop();
+}
+
+/// On a workspace not tiled the tiling keys are no binding: each reaches the focused window
+/// whole, and the compositor does nothing with it (OS13, issue #1419).
+#[test]
+fn the_tiling_keys_reach_a_window_on_a_floating_workspace() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    let id = run.state.workspace_of(&window).expect("a workspace");
+    assert!(!run.state.is_tiled(id));
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_LEFT][..], "Super+Left"),
+        (&[KEY_LEFTMETA, KEY_L], "Super+L"),
+        (
+            &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT],
+            "Super+Shift+Right",
+        ),
+        (&[KEY_LEFTMETA, KEY_O], "Super+O"),
+        (&[KEY_LEFTMETA, KEY_R], "Super+R"),
+        (&[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_R], "Super+Shift+R"),
+        (&[KEY_LEFTMETA, KEY_G], "Super+G"),
+    ] {
+        reaches(&mut local, &mut run, codes, what);
+    }
+    assert!(!run.state.is_tiled(id), "Super+G tiles nothing");
+    run.stop();
+}
