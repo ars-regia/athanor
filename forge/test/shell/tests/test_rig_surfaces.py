@@ -8,12 +8,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import fake_v3
+
 SHELL = Path(__file__).resolve().parent.parent
 RIG = SHELL / "rig.sh"
 
 
 def rig(*args, compositor=None):
-    env = {k: v for k, v in os.environ.items() if k != "RIG_COMPOSITOR"}
+    env = {**{k: v for k, v in os.environ.items() if k != "RIG_COMPOSITOR"}, **fake_v3.ENV}
     if compositor:
         env["RIG_COMPOSITOR"] = compositor
     return subprocess.run(["bash", str(RIG), *args], capture_output=True, text=True, env=env, check=False)
@@ -108,6 +110,7 @@ class OwnCompositorScenesRunInSystemdMode(unittest.TestCase):
             podman.write_text(f'#!/bin/sh\necho "${{RIG_COMPOSITOR:-}}|$*" >> {tmp}/runs\n')
             podman.chmod(0o755)
             env = {k: v for k, v in os.environ.items() if k != "RIG_COMPOSITOR"}
+            env.update(fake_v3.ENV)
             env.update(PATH=f"{tmp / 'path'}:{env['PATH']}", ATHANOR_RIG_OUT=str(tmp / "out"))
             subprocess.run(["bash", str(RIG), *args], capture_output=True, text=True, env=env, check=False)
             runs = (tmp / "runs").read_text(encoding="utf-8").splitlines()

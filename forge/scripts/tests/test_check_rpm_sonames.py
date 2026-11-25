@@ -143,6 +143,12 @@ class RunSpecBuildTest(unittest.TestCase):
             )
             stub.chmod(0o755)
             log = pathlib.Path(tmp) / "calls"
+            # A loader that reports x86-64-v3, so the result does not depend on this CPU (#1508).
+            loader = pathlib.Path(tmp) / "ld.so"
+            loader.write_text("#!/bin/sh\necho '  x86-64-v3 (supported, searched)'\n")
+            loader.chmod(0o755)
+            cpuinfo = pathlib.Path(tmp) / "cpuinfo"
+            cpuinfo.write_text("model name\t: Fake CPU\n")
             result = subprocess.run(
                 [
                     "bash",
@@ -156,6 +162,8 @@ class RunSpecBuildTest(unittest.TestCase):
                     **os.environ,
                     "PATH": f"{tmp}:{os.environ['PATH']}",
                     "STUB_LOG": str(log),
+                    "ATHANOR_LD_SO": str(loader),
+                    "ATHANOR_CPUINFO": str(cpuinfo),
                 },
             )
             self.assertEqual(0, result.returncode, result.stderr)

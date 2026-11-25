@@ -228,5 +228,16 @@ def tearDownModule():
     _environ.stop()
 
 
+class GuestCpuModel(unittest.TestCase):
+    """The guests pass the host's CPU flags through: the workspace is built for x86-64-v3
+    (ADR-0143, #1508), and a named model would hide AVX2 from it."""
+
+    def test_the_qemu_command_lines_keep_cpu_host(self):
+        for name in ("vm.sh", "build-image.sh"):
+            text = (RUNNER / name).read_text(encoding="utf-8")
+            command = text[text.index("qemu-system-x86_64 \\") :]
+            self.assertRegex(command.split("\n\n")[0], r"-cpu host\b", name)
+
+
 if __name__ == "__main__":
     unittest.main()

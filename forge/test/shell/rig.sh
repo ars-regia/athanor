@@ -772,6 +772,15 @@ require_for() { # require_for <surface>
     esac
 }
 
+# A host below x86-64-v3 fails here with a named cause (#1508), before any workspace binary runs.
+# The subcommands this skips are pinned by forge/test/shell/tests/test_rig_v3_guard.py.
+case "${1:-}" in
+build-image | build-image-ref | build-inputs) ;;
+build-* | no-gtk | cargo | cosmic-comp-version | compositor-* | *-e2e | toolkit-* | dock-roundtrip | layer-guard | greeter-preview | bar-preview | launcher-window-preview | atspi | orca | measure-chooser | input-method | surface | update-goldens | golden-report | cosmic-preview)
+    bash "$root/scripts/ci/check-x86-64-v3.sh"
+    ;;
+esac
+
 case "${1:-}" in
 build-image | build-image-ref | build-inputs) ;;
 build-* | no-gtk | cargo) cargo_cache_setup ;;
