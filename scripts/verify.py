@@ -8117,27 +8117,23 @@ def check_spec_deps():
 REFUSED_NAMES = "forge/config/refused-names.txt"
 REFUSED_NAMES_ALLOW = "forge/config/refused-names-allow.txt"
 REFUSED_NAMES_KEPT = "forge/config/refused-names-kept.txt"
-# Documents of docs/architecture that carry no Status line because they approve nothing: a guide,
-# an overview and a register. The check does not read them; one that gains a Status line leaves
-# this list, and any other document without a Status line is reported.
-REFUSED_NOT_SPECS = (
-    "doc_build_system.md",
-    "doc_forge_development_guide.md",
-    "doc_platform_experience.md",
-    "shell-features.md",
-)
-# The sections of an approved specification that are history: they say what the document replaces
-# or why, not what Athanor does. Every other section binds, whatever its heading says ("Decisions
-# (revision 4)", "Decisions this document records", "The toolkit", "Placement and packages",
-# "Amendment of ...", "Revision N: ..."): text in force is normative wherever it sits (maintainer
-# decision, #1460), and a section nobody classified is read rather than skipped. "Decisions
-# taken" is the record of what the maintainer chose before the document, not a decision of it.
-# "The compositor", "The first two milestones" and "Order" of doc_own_stack.md are the rationale
-# of its decisions, and "State after plan 3a" of doc_launcher.md a report on a past state.
+# Documents of docs/architecture that the check does not read. shell-features.md is a reference
+# register: its rows quote what other shells and desktops do, to be compared with Athanor's own
+# decisions, and say nothing of what Athanor ships. A document without a Status line is read in
+# full, as an approved one (doc_build_system.md, which components.toml names as the `spec =` of
+# a component, doc_forge_development_guide.md, doc_platform_experience.md), and the check says
+# so; one of these that gains a Status line is read as the Status says.
+REFUSED_NOT_SPECS = ("shell-features.md",)
+# The sections of a specification that are history or rationale, matched on the whole heading
+# after its number (`context\b` would skip "Context menus"): Context, Sources, Spikes, Open
+# doubts or questions and Risks. Every other section binds, whatever its heading says ("Decisions
+# (revision 4)", "Decisions taken", "Scope, non-goals and rationale", "Changes to other
+# documents", "State after plan 3a", "The compositor", "Order", "Amendment of ...", "Revision N:
+# ..."), and so does the text before the first heading, where the amendment notes live: text in
+# force is normative wherever it sits, and a section nobody classified is read rather than
+# skipped (maintainer decisions, 2026-11-25).
 REFUSED_HISTORICAL = re.compile(
-    r"(?:\d+(?:\.\d+)*\.? +)?(?:context\b|scope\b|changes to other documents\b|open (?:doubts|questions)\b"
-    r"|decisions taken\b|the maintainer's decisions and the draft's recommendations\b|state after plan\b"
-    r"|sources\b|spikes\b|risks$|the compositor$|the first two milestones$|order$)",
+    r"(?:\d+(?:\.\d+)*\.? +)?(?:context|sources|spikes|open (?:doubts|questions)|risks)",
     re.I,
 )
 REFUSED_STATUS = (
@@ -8170,15 +8166,20 @@ def refused_names_pattern(text):
 
 
 def refused_line_names(line, pattern):
-    """The refused names (lower case, `-` for `_`, no space) that LINE holds; a `cosmic-NAME` is
-    reported by its first word, an `AdwType` as `adw`."""
+    """The refused names (lower case, `-` for `_` and for the space of `COSMIC Files`, `gtk4` for
+    `GTK 4` and `gtk-4`) that LINE holds; a `cosmic-NAME` is reported by its first word, an
+    `AdwType` and an `adw::` path as `adw`."""
     names = set()
     for m in pattern.finditer(line):
-        name = m.group(0).lower().replace("_", "-").replace(" ", "")
-        if name.startswith("cosmic-"):
-            name = re.match(r"cosmic-[a-z0-9]+", name).group()
+        name = m.group(0).lower().replace("_", "-")
+        if re.match(r"cosmic[ -]", name):
+            name = re.match(r"cosmic[ -][a-z0-9]+", name).group().replace(" ", "-")
+        elif re.fullmatch(r"gtk[ -]?4", name):
+            name = "gtk4"
         elif name.startswith("adw"):
             name = "adw"
+        else:
+            name = name.replace(" ", "")
         names.add(name)
     return names
 
@@ -8244,130 +8245,157 @@ def spec_status(text):
 
 
 def spec_approved(status):
-    """True for a Status that says the maintainer approved the document: not a draft, and not
-    one still `to be approved`."""
-    s = status.lower()
-    if re.match(r"\W*(?:draft|bozza)\b", s) or re.search(
-        r"\bto be approved\b|\bnot (?:yet )?approved\b", s
-    ):
+    """True when the opening clause of STATUS, the revision in force (up to its first full stop
+    or semicolon), says the maintainer approved it: not a draft, not `to be approved`, not
+    `not yet approved`. An amendment that follows, proposed or pending, does not change that."""
+    m = re.search(r"\.\*\*|\.\s|;\s|\.$", status)
+    clause = (status[: m.start()] if m else status).strip().lstrip("*").strip().lower()
+    if re.match(r"(?:draft|bozza|proposed|pending|to be approved|not (?:yet )?approved)\b", clause):
         return False
-    return re.search(r"\b(?:approved|approvata)\b", s) is not None
+    return re.search(r"\b(?:approved|approvata)\b", clause) is not None
+
+
+REFUSED_UNIT = re.compile(r"\s*(?:[-*+]|\d+[.)]|\|)\s|\s*#")
 
 
 def refused_scan(text, pattern):
-    """(state, lines, sections) of the specification TEXT: state is "none" without a Status
-    line, "draft" when it is not approved and "approved"; LINES holds the (number, line) of the
-    lines of the normative sections that name a refused name, SECTIONS counts those sections.
-    A `## ` line inside a code fence is no heading."""
+    """(state, hits, sections) of the specification TEXT: state is "none" without a Status line
+    (the text is read all the same), "draft" when its Status is not an approval (nothing is read)
+    and "approved"; HITS holds the (line, sentence) of the sentences of the normative sections,
+    and of the text before the first heading, that name a refused name; SECTIONS counts the
+    normative sections. A paragraph, a list item or a table row is cut into sentences
+    (spec_sentences), a line of a code fence stands alone, and a `## ` line inside a fence is no
+    heading."""
     status = spec_status(text)
-    if status is None:
-        return "none", [], 0
-    if not spec_approved(status):
+    if status is not None and not spec_approved(status):
         return "draft", [], 0
-    lines, sections, normative, fence = [], 0, False, False
+    hits, sections, normative, fence = [], 0, True, False
+    unit, start = [], 0
+
+    def flush():
+        if normative and unit:
+            for sentence in spec_sentences(" ".join(" ".join(unit).split())):
+                if pattern.search(sentence):
+                    hits.append((start, sentence.strip()))
+        unit.clear()
+
     for number, line in enumerate(text.splitlines(), 1):
         if line.lstrip().startswith(("```", "~~~")):
+            flush()
             fence = not fence
-        heading = None if fence else re.match(r"## (.*)", line)
-        if heading:
-            normative = REFUSED_HISTORICAL.match(heading.group(1).strip()) is None
+        elif fence:
+            flush()
+            unit.append(line)
+            start = number
+            flush()
+        elif line.startswith("## "):
+            flush()
+            normative = REFUSED_HISTORICAL.fullmatch(line[3:].strip()) is None
             sections += normative
-        elif normative and pattern.search(line):
-            lines.append((number, line))
-    return "approved", lines, sections
+        elif not line.strip():
+            flush()
+        else:
+            if not unit or REFUSED_UNIT.match(line):
+                flush()
+                start = number
+            unit.append(line)
+    flush()
+    return ("none" if status is None else "approved"), hits, sections
 
 
 def refused_base_text(root, base, path):
-    """The text of PATH at revision BASE, None when BASE has no such file (the adoption);
-    ValueError when BASE is not a commit."""
+    """The text of PATH at revision BASE, None when BASE is a commit that has no such file (the
+    adoption); ValueError when BASE is not a commit or the file's blob cannot be read."""
 
     def git(*args):
-        return subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True
-        )
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
     commit = git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")
     if commit.returncode != 0:
         raise ValueError(f"{base} is not a commit of {root}")
-    blob = f"{commit.stdout.strip()}:{path}"
-    if git("cat-file", "-e", blob).returncode != 0:
+    listing = git("ls-tree", commit.stdout.strip(), "--", path)
+    if listing.returncode != 0:
+        raise ValueError(f"{path} cannot be listed at {base}: {listing.stderr.strip()}")
+    if not listing.stdout.strip():
         return None
-    return git("show", blob).stdout
+    shown = git("show", f"{commit.stdout.strip()}:{path}")
+    if shown.returncode != 0:
+        raise ValueError(f"{path} cannot be read at {base}: {shown.stderr.strip()}")
+    return shown.stdout
 
 
 def refused_scan_docs(root, pattern, kept):
-    """(problems, used, hits) of the approved specifications under ROOT/docs/architecture: the
-    problems of their Status lines and sections, the texts of the KEPT entries that a normative
-    line holds, and {(document, name): lines} for the lines that still name a refused name once
-    the kept text is taken out."""
-    problems, kept_texts = [], {}
+    """(problems, notes, used, hits) of the specifications under ROOT/docs/architecture: the
+    problems of their sections, the notes (a draft, a document with no Status line), the
+    (document, text) of the KEPT entries that a normative sentence holds, and {(document, name):
+    sentences} for the sentences that still name a refused name once the kept text is taken
+    out."""
+    problems, notes, kept_texts = [], [], {}
     for doc, names, text, _ in kept:
         for name in names.split(","):
             kept_texts.setdefault((doc, name), []).append(text)
     used, hits = set(), {}
     for path in sorted((root / "docs/architecture").glob("*.md")):
-        state, lines, sections = refused_scan(read(path), pattern)
         if path.name in REFUSED_NOT_SPECS:
-            if state != "none":
-                problems.append(f"docs/architecture/{path.name} has a Status line: remove it from REFUSED_NOT_SPECS")
+            continue
+        state, found, sections = refused_scan(read(path), pattern)
+        if state == "draft":
+            notes.append(f"docs/architecture/{path.name} is a draft: its refused names are not read")
             continue
         if state == "none":
-            problems.append(f"docs/architecture/{path.name} has no Status line: add one, or list it in "
-                            "REFUSED_NOT_SPECS (scripts/verify.py) if it approves nothing")
-        if state != "approved":
-            continue
+            notes.append(f"docs/architecture/{path.name} has no Status line: read in full, as an approved specification")
         if not sections:
-            problems.append(f"docs/architecture/{path.name} is approved but has no section outside the "
-                            "historical ones, so its refused names cannot be checked")
-        for _, line in lines:
-            for name in refused_line_names(line, pattern):
-                rest = line
+            problems.append(f"docs/architecture/{path.name} has no section outside the historical ones, "
+                            "so its refused names cannot be checked")
+        for _, sentence in found:
+            for name in refused_line_names(sentence, pattern):
+                rest = sentence
                 for text in kept_texts.get((path.name, name), []):
                     if text in rest:
-                        used.add(text)
+                        used.add((path.name, text))
                         rest = rest.replace(text, " ")
                 if name in refused_line_names(rest, pattern):
                     hits[(path.name, name)] = hits.get((path.name, name), 0) + 1
-    return problems, used, hits
+    return problems, notes, used, hits
 
 
-def refused_names_problems(root=None, base=None, today=None):
-    """#1460: no approved specification under docs/architecture names a refused name in a
-    normative section unless REFUSED_NAMES_KEPT keeps the text, a line that records a retirement
-    or a third party's fact, or REFUSED_NAMES_ALLOW lists the pair with an issue, an expiry that
-    has not passed and the number of lines it covers; every entry still applies; and against BASE
-    the lists add no entry, no expiry or issue moves and no count rises."""
+def refused_names_report(root=None, base=None, today=None):
+    """(problems, notes) of #1460: no specification under docs/architecture names a refused name
+    in a normative sentence unless REFUSED_NAMES_KEPT keeps the sentence, which records a
+    retirement or a third party's fact, or REFUSED_NAMES_ALLOW lists the pair with an issue, an
+    expiry that has not passed and the number of sentences it covers; every entry still applies;
+    and against BASE the lists add no entry, no expiry or issue moves and no count rises."""
     root = Path(root or ROOT)
     today = today or datetime.date.today()
     try:
         pattern = refused_names_pattern(read(root / REFUSED_NAMES))
     except (OSError, ValueError) as err:
-        return [f"{REFUSED_NAMES}: {err}"]
+        return [f"{REFUSED_NAMES}: {err}"], []
     try:
         entries = parse_refused_allow(read(root / REFUSED_NAMES_ALLOW))
     except (OSError, ValueError) as err:
-        return [f"{REFUSED_NAMES_ALLOW}: {err}"]
+        return [f"{REFUSED_NAMES_ALLOW}: {err}"], []
     try:
         kept = parse_refused_kept(read(root / REFUSED_NAMES_KEPT))
     except (OSError, ValueError) as err:
-        return [f"{REFUSED_NAMES_KEPT}: {err}"]
+        return [f"{REFUSED_NAMES_KEPT}: {err}"], []
     problems = []
     for doc, names, text, _ in kept:
         for name in names.split(","):
             if name not in refused_line_names(text, pattern):
                 problems.append(f"{REFUSED_NAMES_KEPT}: {doc}: the text does not name `{name}`: {text}")
-    scanned, used, hits = refused_scan_docs(root, pattern, kept)
+    scanned, notes, used, hits = refused_scan_docs(root, pattern, kept)
     problems += scanned
     problems += [f"{REFUSED_NAMES_KEPT}: {doc} {names}: the text no longer appears in a normative section: {text}"
-                 for doc, names, text, _ in kept if text not in used]
+                 for doc, names, text, _ in kept if (doc, text) not in used]
     listed = {(doc, name): (rest, count) for doc, name, rest, count in entries}
     for doc, name in sorted(set(hits) | set(listed)):
         actual = hits.get((doc, name), 0)
         if (doc, name) not in listed:
             problems.append(
-                f"docs/architecture/{doc} names `{name}` in {actual} line(s) of a normative section, "
+                f"docs/architecture/{doc} names `{name}` in {actual} sentence(s) of a normative section, "
                 "which ADR-0141 refuses: say what Athanor's own stack does, move the sentence to a "
-                f"historical section, or keep a line that records a retirement ({REFUSED_NAMES_KEPT})"
+                f"historical section, or keep a sentence that records a retirement ({REFUSED_NAMES_KEPT})"
             )
             continue
         (issue, expires), count = listed[(doc, name)][0].split(), listed[(doc, name)][1]
@@ -8377,79 +8405,68 @@ def refused_names_problems(root=None, base=None, today=None):
             )
             continue
         if datetime.date.fromisoformat(expires) < today:
-            problems.append(
-                f"{REFUSED_NAMES_ALLOW}: {doc} {name} expired on {expires} ({issue})"
-            )
+            problems.append(f"{REFUSED_NAMES_ALLOW}: {doc} {name} expired on {expires} ({issue})")
         if actual > count:
             problems.append(
-                f"{REFUSED_NAMES_ALLOW}: {doc} names `{name}` in {actual} lines, its entry covers {count}"
+                f"{REFUSED_NAMES_ALLOW}: {doc} names `{name}` in {actual} sentences, its entry covers {count}"
             )
         elif actual < count:
             problems.append(
-                f"{REFUSED_NAMES_ALLOW}: {doc} {name} now covers {actual} lines: lower its count from {count} to {actual}"
+                f"{REFUSED_NAMES_ALLOW}: {doc} {name} now covers {actual} sentences: lower its count from {count} to {actual}"
             )
-    if base is not None:
-        try:
-            old_allow = refused_base_text(root, base, REFUSED_NAMES_ALLOW)
-            old_kept = refused_base_text(root, base, REFUSED_NAMES_KEPT)
-            before = (
-                None
-                if old_allow is None
-                else {
-                    (d, n): (r.split(), c)
-                    for d, n, r, c in parse_refused_allow(old_allow)
-                }
-            )
-            kept_before = (
-                None
-                if old_kept is None
-                else {(d, n, t) for d, n, t, _ in parse_refused_kept(old_kept)}
-            )
-        except ValueError as err:
-            return problems + [
-                f"{REFUSED_NAMES_ALLOW} or {REFUSED_NAMES_KEPT} at {base}: {err}"
-            ]
-        for doc, name, rest, count in entries if before is not None else []:
-            if (doc, name) not in before:
-                problems.append(
-                    f"{REFUSED_NAMES_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks"
-                )
-                continue
-            (was_issue, was_expires), was_count = before[(doc, name)]
-            issue, expires = rest.split()
-            if issue != was_issue:
-                problems.append(
-                    f"{REFUSED_NAMES_ALLOW}: {doc} {name}: issue moved from {was_issue} to {issue}"
-                )
-            if expires > was_expires:
-                problems.append(
-                    f"{REFUSED_NAMES_ALLOW}: {doc} {name}: expiry moved from {was_expires} to {expires}"
-                )
-            if count > was_count:
-                problems.append(
-                    f"{REFUSED_NAMES_ALLOW}: {doc} {name}: count rose from {was_count} to {count}"
-                )
-        for doc, name, text, _ in kept if kept_before is not None else []:
-            if (doc, name, text) not in kept_before:
-                problems.append(
-                    f"{REFUSED_NAMES_KEPT}: {doc} {name} is not listed at {base}; the list only shrinks: {text}"
-                )
-    return problems
+    if base is None:
+        return problems, notes
+    try:
+        old_allow = refused_base_text(root, base, REFUSED_NAMES_ALLOW)
+        old_kept = refused_base_text(root, base, REFUSED_NAMES_KEPT)
+        before = None if old_allow is None else {(d, n): (r.split(), c) for d, n, r, c in parse_refused_allow(old_allow)}
+        kept_before = None if old_kept is None else {(d, n, t) for d, n, t, _ in parse_refused_kept(old_kept)}
+    except ValueError as err:
+        return problems + [f"{REFUSED_NAMES_ALLOW} or {REFUSED_NAMES_KEPT} at {base}: {err}"], notes
+    for path, text in ((REFUSED_NAMES_ALLOW, before), (REFUSED_NAMES_KEPT, kept_before)):
+        if text is None:
+            notes.append(f"{base} has no {path}: the ratchets against it did not run (expected in the pull request that adds it)")
+    for doc, name, rest, count in entries if before is not None else []:
+        if (doc, name) not in before:
+            problems.append(f"{REFUSED_NAMES_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks")
+            continue
+        (was_issue, was_expires), was_count = before[(doc, name)]
+        issue, expires = rest.split()
+        if issue != was_issue:
+            problems.append(f"{REFUSED_NAMES_ALLOW}: {doc} {name}: issue moved from {was_issue} to {issue}")
+        if expires > was_expires:
+            problems.append(f"{REFUSED_NAMES_ALLOW}: {doc} {name}: expiry moved from {was_expires} to {expires}")
+        if count > was_count:
+            problems.append(f"{REFUSED_NAMES_ALLOW}: {doc} {name}: count rose from {was_count} to {count}")
+    for doc, name, text, _ in kept if kept_before is not None else []:
+        if (doc, name, text) not in kept_before:
+            problems.append(f"{REFUSED_NAMES_KEPT}: {doc} {name} is not listed at {base}; the list only shrinks: {text}")
+    return problems, notes
+
+
+def refused_names_problems(root=None, base=None, today=None):
+    """The problems of refused_names_report."""
+    return refused_names_report(root, base, today)[0]
 
 
 @check(
     "refused-names",
-    "No approved specification names a component ADR-0141 refuses in a normative section, unless refused-names-kept.txt keeps the line or refused-names-allow.txt lists it with an issue, an expiry and a count, and neither list grows (#1460)",
+    "No specification names a component ADR-0141 refuses in a normative sentence, unless refused-names-kept.txt keeps the sentence or refused-names-allow.txt lists it with an issue, an expiry and a count, and neither list grows (#1460)",
 )
 def check_refused_names():
     r = Result()
-    for problem in refused_names_problems(base=BASE_REF):
+    problems, notes = refused_names_report(base=BASE_REF)
+    for problem in problems:
         r.fail(problem)
+    for note in notes:
+        r.note(note)
     if BASE_REF is None:
         r.note(
             f"no base revision (--known-red-base REF): entries added to {REFUSED_NAMES_ALLOW} or {REFUSED_NAMES_KEPT} were not checked"
         )
     return r
+
+
 def load_toml(name, text):
     """The parsed TOML `text`, or a ValueError that names the file `name`."""
     try:

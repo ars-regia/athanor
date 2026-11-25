@@ -8,6 +8,7 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("verify", ROOT / "scripts" / "verify.py")
@@ -37,12 +38,18 @@ SAMPLES = [
     ("GTK 4 and gtk4-rs", {"gtk4"}),
     ("libadwaita 1.8", {"libadwaita"}),
     ("an `AdwAlertDialog`", {"adw"}),
+    ("COSMIC Files, a cosmic files window", {"cosmic-files"}),
+    ("COSMIC Store", {"cosmic-store"}),
+    ("the gtk-4 toolkit", {"gtk4"}),
+    ("`adw::Dialog` and adw::prelude", {"adw"}),
 ]
 NOT_NAMES = [
     "cosmic-ray, cosmic-scale and cosmic-specific",
     "the `athanor-cosmic-x` crate, unGTK4ed, the greeter-gtk4x",
     "the interface org.gtk.gtk4.Settings.FileChooser",
     "adware, Adwaita and an Adw prefix",
+    "`/usr/share/athanor/cosmic-defaults` and `cosmic-allowed`",
+    "the cosmic filesystem, a cosmic storefront and the word adw:: alone",
 ]
 
 
@@ -91,19 +98,20 @@ class RefusedNames(unittest.TestCase):
             "2. Decisions", "The dialog uses libadwaita and cosmic-comp."
         )
         self.assertEqual(len(problems), 2, problems)
-        self.assertIn("doc_x.md names `cosmic-comp` in 1 line(s)", problems[0])
-        self.assertIn("doc_x.md names `libadwaita` in 1 line(s)", problems[1])
+        self.assertIn("doc_x.md names `cosmic-comp` in 1 sentence(s)", problems[0])
+        self.assertIn("doc_x.md names `libadwaita` in 1 sentence(s)", problems[1])
 
     def test_a_historical_mention_passes(self):
         for heading in (
             "1. Context",
             "1. context",
-            "1. Scope, non-goals and rationale",
+            "1.2 Context",
+            "Context",
             "4. Open doubts",
             "4. Open questions",
-            "6. Decisions taken",
-            "6. Decisions taken (revision 4)",
-            "3. Changes to other documents",
+            "14. Risks",
+            "3. Spikes",
+            "16. Sources",
         ):
             with self.subTest(heading=heading):
                 body = "It replaces cosmic-launcher and GTK4."
@@ -113,6 +121,27 @@ class RefusedNames(unittest.TestCase):
                     ),
                     [],
                 )
+
+    def test_a_section_that_is_not_pure_history_is_read(self):
+        for heading in (
+            "1. Context menus",
+            "1. Contextual rules",
+            "1. Scope, non-goals and rationale",
+            "6. Decisions taken",
+            "6. Decisions taken (revision 4)",
+            "6. The maintainer's decisions and the draft's recommendations",
+            "3. Changes to other documents",
+            "6. State after plan 3a",
+            "3. The compositor",
+            "6. Order",
+            "5. The first two milestones",
+            "5. Risks and declared limits",
+            "4. Spikes and their results",
+        ):
+            with self.subTest(heading=heading):
+                problems = self.under(heading)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("names `libadwaita`", problems[0])
 
     def test_a_section_that_binds_is_read_whatever_its_heading(self):
         for heading in (
@@ -160,26 +189,63 @@ class RefusedNames(unittest.TestCase):
             with self.subTest(head=head):
                 self.assertEqual(len(self.under("2. Decisions", head=head)), 1)
 
-    def test_a_status_that_is_not_an_approval_passes(self):
+    def write_head(self, head, body="It uses libadwaita."):
+        self.write(DOC, head + f"## 2. Decisions\n\n{body}\n")
+        return verify.refused_names_report(self.root)
+
+    def test_a_draft_is_noted_and_not_read(self):
         for head in (
             "# X\n\nStatus: **draft.**\n\n",
             "# X\n\nStatus: draft, to be approved by the maintainer\n\n",
             "# X\n\nStatus: not yet approved\n\n",
+            "# X\n\nStatus: **to be approved by the maintainer.** Revision 2 is approved.\n\n",
         ):
             with self.subTest(head=head):
-                self.assertEqual(self.under("2. Decisions", head=head), [])
+                problems, notes = self.write_head(head)
+                self.assertEqual(problems, [])
+                self.assertEqual(len(notes), 1, notes)
+                self.assertIn("doc_x.md is a draft", notes[0])
 
-    def test_a_document_without_a_status_is_reported(self):
-        problems = self.under("2. Decisions", head="# X\n\n")
+    def test_an_approved_document_with_a_pending_amendment_is_still_read(self):
+        for head in (
+            "# X\n\nStatus: **revision 4, approved by the maintainer on 2026-11-21.** An amendment of 2026-11-25 (proposed, to be approved) adds A.\n\n",
+            "# X\n\nStatus: revision 4, approved on 2026-11-21; an amendment is not yet approved.\n\n",
+            "# X\n\nStato: **approvata il 2026-09-03**; una modifica e' da approvare.\n\n",
+        ):
+            with self.subTest(head=head):
+                problems, notes = self.write_head(head)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertEqual(notes, [])
+
+    def test_a_document_without_a_status_is_read_in_full_and_noted(self):
+        problems, notes = self.write_head("# X\n\n")
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("doc_x.md has no Status line", problems[0])
-        name = verify.REFUSED_NOT_SPECS[0]
+        self.assertIn("names `libadwaita`", problems[0])
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("doc_x.md has no Status line", notes[0])
+
+    def test_the_reference_register_alone_is_not_read(self):
+        self.assertEqual(verify.REFUSED_NOT_SPECS, ("shell-features.md",))
         self.write(
-            f"docs/architecture/{name}", "# Guide\n\n## 2. Decisions\n\nlibadwaita\n"
+            "docs/architecture/shell-features.md", "# Register\n\n## 2. Rows\n\nlibadwaita\n"
         )
-        self.assertEqual(len(self.problems()), 1)
-        self.write(f"docs/architecture/{name}", "# Guide\n\nStatus: approved.\n")
-        self.assertTrue(any(f"{name} has a Status line" in p for p in self.problems()))
+        self.assertEqual(self.problems(), [])
+        self.write(
+            "docs/architecture/doc_build_system.md", "# Build\n\n## 2. Rows\n\nlibadwaita\n"
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_build_system.md names `libadwaita`", problems[0])
+
+    def test_the_text_before_the_first_heading_is_read(self):
+        head = (
+            "# X\n\nStatus: **revision 4, approved by the maintainer on 2026-11-21.** "
+            "An amendment replaces libadwaita here.\n\nA note: GTK4 stays.\n\n"
+        )
+        problems, _ = self.write_head(head, "Nothing.")
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("`gtk4`" in p for p in problems))
+        self.assertTrue(any("`libadwaita`" in p for p in problems))
 
     def test_every_refused_name_is_read(self):
         lines = [
@@ -256,7 +322,7 @@ class RefusedNames(unittest.TestCase):
         self.write(verify.REFUSED_NAMES_ALLOW, ALLOW)
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("names `libadwaita` in 2 lines, its entry covers 1", problems[0])
+        self.assertIn("names `libadwaita` in 2 sentences, its entry covers 1", problems[0])
         self.write(
             verify.REFUSED_NAMES_ALLOW, "doc_x.md libadwaita #1355 2027-01-31 3\n"
         )
@@ -314,7 +380,7 @@ class RefusedNames(unittest.TestCase):
             "2. Decisions", KEPT_SENTENCE + " The dialog uses libadwaita."
         )
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("names `libadwaita` in 1 line(s)", problems[0])
+        self.assertIn("names `libadwaita` in 1 sentence(s)", problems[0])
 
     def test_a_changed_kept_sentence_fails(self):
         self.kept()
@@ -346,6 +412,60 @@ class RefusedNames(unittest.TestCase):
         problems = self.problems("HEAD")
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("is not listed at HEAD; the list only shrinks", problems[0])
+
+    def test_a_base_without_the_lists_is_noted(self):
+        self.git("rm", "-q", "--", verify.REFUSED_NAMES_ALLOW, verify.REFUSED_NAMES_KEPT)
+        self.commit()
+        self.write(verify.REFUSED_NAMES_ALLOW, "# header\n")
+        self.write(verify.REFUSED_NAMES_KEPT, "# header\n")
+        problems, notes = verify.refused_names_report(self.root, "HEAD")
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 2, notes)
+        self.assertIn("the ratchets against it did not run", notes[0])
+
+    def test_a_base_that_is_not_a_commit_is_an_error(self):
+        problems, _ = verify.refused_names_report(self.root, "no-such-revision")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("is not a commit", problems[0])
+
+    def test_a_blob_that_cannot_be_read_is_an_error(self):
+        real = subprocess.run
+
+        def run(cmd, *a, **k):
+            if "show" in cmd:
+                return subprocess.CompletedProcess(cmd, 128, "", "fatal: bad object")
+            return real(cmd, *a, **k)
+
+        with mock.patch.object(verify.subprocess, "run", run):
+            with self.assertRaises(ValueError) as caught:
+                verify.refused_base_text(self.root, "HEAD", verify.REFUSED_NAMES_ALLOW)
+        self.assertIn("cannot be read at HEAD", str(caught.exception))
+        self.assertIsNone(verify.refused_base_text(self.root, "HEAD", "no/such/file"))
+        self.assertEqual(
+            verify.refused_base_text(self.root, "HEAD", verify.REFUSED_NAMES_ALLOW), "# header\n"
+        )
+
+    def test_a_kept_text_is_keyed_by_its_document(self):
+        other = "docs/architecture/doc_y.md"
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{KEPT_SENTENCE}\n")
+        self.write(other, APPROVED + f"## 2. Decisions\n\n{KEPT_SENTENCE}\n")
+        self.kept()
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("doc_y.md names `libadwaita`", problems[0])
+        self.write(DOC, APPROVED + "## 2. Decisions\n\nNone.\n")
+        problems = self.problems()
+        self.assertTrue(any("no longer appears" in p for p in problems), problems)
+
+    def test_a_kept_entry_is_a_whole_sentence_of_a_wrapped_paragraph(self):
+        sentence = "ADR-0141 removes libadwaita from the shell and\nleaves GTK4 to third parties."
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{sentence}\n")
+        joined = " ".join(sentence.split())
+        self.kept(text=joined, names="gtk4,libadwaita")
+        self.assertEqual(self.problems(), [])
+        self.kept(text="leaves GTK4 to third parties.", names="gtk4")
+        problems = self.problems()
+        self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
 
     def test_a_malformed_entry_fails(self):
         for text in (

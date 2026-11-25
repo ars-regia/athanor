@@ -9,20 +9,26 @@
 # A `cosmic-NAME` (or a `cosmic_name` crate) is reported by its first word only
 # (`cosmic-settings-daemon` reads `cosmic-settings`). The wildcard keeps decision 3's "every
 # COSMIC package", so a package no document names yet is caught; it excludes the three English
-# compounds `cosmic-ray`, `cosmic-scale` and `cosmic-specific`, which name no package.
-cosmic[-_](?!(?:ray|scale|specific)(?![a-z0-9]))[a-z][a-z0-9]*(?![a-z0-9])
+# compounds `cosmic-ray`, `cosmic-scale` and `cosmic-specific`, which name no package, and
+# `cosmic-defaults` and `cosmic-allowed`, which are Athanor's own paths, not COSMIC packages.
+cosmic[-_](?!(?:ray|scale|specific|defaults|allowed)(?![a-z0-9]))[a-z][a-z0-9]*(?![a-z0-9])
 # A package named by a suffix, which the `cosmic-` prefix rule cannot see.
 xdg-desktop-portal-cosmic
+# The applications of the COSMIC suite, named by their product name with a space.
+cosmic files
+cosmic store
 libcosmic
 pop-launcher
 gtk4-layer-shell
 gtk-layer-shell
 xdg-user-dirs-gtk
-# GTK4, with or without a space ("GTK 4"). `org.gtk.gtk4.` is the D-Bus namespace of the file
+# GTK4, with a space ("GTK 4") or a hyphen (`gtk-4`). `org.gtk.gtk4.` is the D-Bus namespace of the file
 # chooser's settings, a third party's name for an interface, not the toolkit. `gtk4-rs`, the Rust
 # bindings, is the toolkit and stays a hit.
-(?<!org\.gtk\.)gtk ?4
+(?<!org\.gtk\.)gtk[ -]?4
 libadwaita
 # An libadwaita type (`AdwDialog`, `AdwToastOverlay`) without the word libadwaita; reported as
 # `adw`. Case-sensitive, so `adware` is no name; `Adwaita`, the theme, has no type prefix.
 (?-i:Adw[A-Z][A-Za-z]+)
+# A libadwaita path (`adw::Dialog`); reported as `adw`.
+(?-i:adw::[A-Za-z_]+)
