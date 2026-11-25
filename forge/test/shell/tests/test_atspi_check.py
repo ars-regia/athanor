@@ -74,6 +74,15 @@ class ExtentsTest(unittest.TestCase):
         found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [bar, popup]), FakeAtspi), 2)
         self.assertEqual(found, ["the showing 'button' 'Low' at (0, 50, 34, 32) is outside its window (0, 0, 1280, 56)"])
 
+    def test_a_popover_menu_hanging_out_of_the_window_holds_its_entries(self):
+        # GTK 4.24 keeps the popover's menu in the window's tree, below the window's edge.
+        entry = Fake("menu item", (405, 228, 168, 30), name="New window")
+        outside = Fake("menu item", (405, 500, 168, 30), name="Far")
+        menu = Fake("menu", (400, 220, 180, 220), [entry, outside])
+        frame = Fake("frame", (0, 0, 985, 225), [Fake("button", (10, 10, 80, 30), [menu], "Open a menu")])
+        found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [frame]), FakeAtspi), 2)
+        self.assertEqual(found, ["the showing 'menu item' 'Far' at (405, 500, 168, 30) is outside its window (400, 220, 180, 220)"])
+
 
 class Fake:
     """An accessible of the AT-SPI calls with_extents() makes."""

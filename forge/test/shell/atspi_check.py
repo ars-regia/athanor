@@ -172,13 +172,17 @@ def extents_of(accessible, Atspi):
 def with_extents(accessible, Atspi, out=None, window=None, depth=0):
     """[(role, name, showing, extents, window)] depth first, as walk() orders them: `window` is
     the node's own top-level window, a child of the application, at the origin of its own
-    coordinates, since a popup is a window of its own with extents in its own coordinates. The
-    application's node has none."""
+    coordinates, since a popup is a window of its own with extents in its own coordinates; a
+    menu's entries are in the menu's. The application's node has none."""
     out = [] if out is None else out
     showing = accessible.get_state_set().contains(Atspi.StateType.SHOWING)
     extents = extents_of(accessible, Atspi) or (0, 0, 0, 0)
     if depth == 1:
         window = (0, 0, extents[2], extents[3])
+    elif accessible.get_role_name() == "menu" and extents[2] > 0 and extents[3] > 0:
+        # GTK 4.24's popover menu is a node of the window's own tree, drawn in a surface that
+        # hangs out of the window: its entries lie inside the menu, not inside the window.
+        window = extents
     node = (accessible.get_role_name(), accessible.get_name() or "", showing, extents)
     out.append(node if window is None else node + (window,))
     for child in children(accessible):
