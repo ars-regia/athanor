@@ -1834,6 +1834,7 @@ impl State {
             edge: self.focus_theme.edge(),
             blurred: self.blurred.clone(),
             drag: self.drawn_drag_icons(),
+            slides: self.slides(),
         }
     }
 }

@@ -300,6 +300,8 @@ pub struct Marks {
     pub blurred: crate::background_effect::Regions,
     /// The drag icons and where each goes (`State::drawn_drag_icons`).
     pub drag: Vec<(WlSurface, Point<i32, Logical>)>,
+    /// The workspace slides under way (`slide.rs`).
+    pub slides: Vec<crate::slide::Shown>,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,
@@ -1179,6 +1181,9 @@ where
         .into_iter()
         .partition(|layer| layer.layer() == Layer::Overlay);
     let lifted = lifted(marks.focused.as_ref(), space, output);
+    let slide = marks.slides.iter().find(|shown| shown.output == *output);
+    let shifted =
+        |window: &Window, located| slide.map_or(located, |shown| shown.shifted(window, located));
     let places = space.output_geometry(output).map(|geometry| {
         // As `State::window_area_on`, which would take the map's lock again.
         let area = laid_out(output).map(|size| inset(geometry, size, map.non_exclusive_zone()));
@@ -1197,6 +1202,7 @@ where
     layers(renderer, overlay, &mut elements);
     if let Some((window, place)) = lifted.zip(places.as_ref()) {
         if let Some(located) = space.element_geometry(window) {
+            let located = shifted(window, located);
             window_elements(renderer, &mut elements, window, located, marks, place);
         }
     }
@@ -1207,8 +1213,13 @@ where
                 .element_bbox(window)
                 .is_some_and(|bbox| place.output.overlaps(bbox));
             if let Some(located) = space.element_geometry(window).filter(|_| overlaps) {
+                let located = shifted(window, located);
                 window_elements(renderer, &mut elements, window, located, marks, place);
             }
+        }
+        // The workspace left, out of the space, below the one activated.
+        for (window, located) in slide.iter().flat_map(|shown| shown.leaving.iter().rev()) {
+            window_elements(renderer, &mut elements, window, *located, marks, place);
         }
     }
     layers(renderer, lower, &mut elements);

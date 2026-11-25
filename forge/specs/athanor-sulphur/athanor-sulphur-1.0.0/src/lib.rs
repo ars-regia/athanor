@@ -48,6 +48,7 @@ mod ready;
 mod screen_filter;
 mod session_calls;
 mod shutdown;
+mod slide;
 mod state;
 mod tablet;
 mod tearing;

@@ -13785,3 +13785,7 @@ mod dnd;
 // OS12: a window move or resize starts only from a press still held.
 #[cfg(test)]
 mod window_grab;
+
+// VL9 and AX9: the workspace slide, and reduced motion.
+#[cfg(test)]
+mod slide;

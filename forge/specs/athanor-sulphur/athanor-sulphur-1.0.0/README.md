@@ -106,7 +106,8 @@ refuses every capture, and confirms the lock once every output has drawn it (`sr
 last, which a window placed on it turns into a new empty one after it, and a workspace emptied
 that is neither the last nor the active one is removed. A window maps on the first output's
 active workspace; the windows of an inactive one leave the space, keeping their place, and come
-back there when it is activated, at once, with no animation. A window on an inactive workspace
+back there when it is activated, at once; they are drawn sliding in with `EaseInOutCubic` for
+200 ms (`src/slide.rs`, doc_visual_language.md VL9), or shown at once under reduced motion. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
 first; an xdg-activation token switches no workspace. A client gets one for a serial of its
 own input since it took the keyboard, or, outside a security context, for a button press
@@ -289,7 +290,7 @@ keymap is the environment's and the repeat 25 per second after 200 ms.
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
 granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
-`enable-animations` (AX9) to stop the bell blinking; the compositor keeps it in memory only,
+`enable-animations` (AX9) to stop the bell blinking and the workspace slide; the compositor keeps it in memory only,
 false until a bar sends it, and the last value sent stands after the bar exits. The inversion
 and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron` under the state root,
 read at start and written atomically, in cosmic-comp's format, at each change; a file that cannot be read changes nothing and is written over only at the next change,

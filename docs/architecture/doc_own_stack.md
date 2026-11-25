@@ -313,8 +313,8 @@ version, with one difference from cosmic-comp that the switch's pull request lis
 interactivity takes the keyboard on a click or on Ctrl+Alt+Tab (AX7), not when it maps as under
 cosmic-comp (#614), so the dock says nothing to Orca until Ctrl+Alt+Tab (the shell rig's Orca
 walk of the dock starts with that key, #841); the behaviour is not changed. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
-three-finger swipe) is behaviour of the own compositor too, and row 4 waits for it to have a
-slide to reduce: the patches of `doc_overview.md` decisions 4 and 5 are not written (decision 32). Row 8's behaviour, an input method's
+three-finger swipe) is behaviour of the own compositor too, and so is row 4: its 200 ms
+slide is at once under reduced motion (#1414), and the patches of `doc_overview.md` decisions 4 and 5 are not written (decision 32). Row 8's behaviour, an input method's
 grab dropped while locked, is a requirement tested in the fixture of OS6 (#750). Row 9, the special
 layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
 S3 says what behaviour the namespace needs (OS9 plan, question 8).
@@ -1372,8 +1372,8 @@ compositor and that the own compositor did not yet offer:
       `window_actions()` binds the actions interface, and only the overview makes it.
     - **The patches of `doc_overview.md` decisions 4 and 5 are not written.** The three-finger
       swipe and the reduced-motion switch are behaviour of the own compositor, register rows 3
-      and 4: the swipe comes with the overview, and the switch once the own compositor has a slide
-      to reduce. cosmic-comp's session keeps its four-finger switch and its 200 ms slide.
+      and 4: the swipe comes with the overview, and the switch with the own compositor's slide, at
+      once under reduced motion (#1414). cosmic-comp's session keeps its four-finger switch and its 200 ms slide.
 
     Not taken: version 2 of `athanor_toplevel_state_v1` and `athanor_toplevel_actions_v1`, since a
     grant goes by global and not by version, so that the bar, the dock, the launcher and the
