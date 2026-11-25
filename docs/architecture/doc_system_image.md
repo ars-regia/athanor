@@ -1,6 +1,6 @@
 # System image: base and GPU variants
 
-Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`; S1 revised for the Fedora 45 base (ADR-0078) on 2026-10-21; S5 and the RPM Fusion risk revised for RPM Fusion's Fedora 45 tree on 2026-11-04 (#669)**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
+Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`; S1 revised for the Fedora 45 base (ADR-0078) on 2026-10-21; S5 and the RPM Fusion risk revised for RPM Fusion's Fedora 45 tree on 2026-11-04 (#669), and again on 2026-11-25 when the legacy set moved to `updates/45` (#1488)**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
 
 ## 1. Context
 
@@ -145,7 +145,7 @@ A mismatch is a build failure with the exact values, never a warning.
   - A package negativo17 drops before the bot mirrors it is still lost. The bot mirrors on every daily run and right after it regenerates a manifest, which leaves a window of about one day.
   - The last-resort fallback is to extract firmware and userspace from NVIDIA's `.run` of the pinned version ourselves. `nvidia.sh` already downloads it for the legacy branch.
 - **RPM Fusion keeps only the latest release.**
-  - The Fedora 45 tree the lock reads (`releases/45` while `updates/45` carries no NVIDIA package) publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock every day and regenerates it by pull request; its kernel group moves the pin weekly (ADR-0109).
+  - The Fedora 45 trees the lock reads, `updates/45` and then `releases/45` for a package `updates/45` does not carry (`nvidia-settings-580xx`, which the driver requires), each publish only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock every day and regenerates it by pull request; its kernel group moves the pin weekly (ADR-0109).
   - When 580 became a legacy series, RPM Fusion renamed the packages (`xorg-x11-drv-nvidia-580xx*`), and the shim `azoth-nvidia-kmod` provides `nvidia-580xx-kmod` for them. A further rename needs a change to the package list in `lock.py`, not only a version bump.
 - **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the initramfs are paid three times.
 - **Flatpak applications** need the NVIDIA GL runtime extension matching the host driver version (`org.freedesktop.Platform.GL.nvidia-<version>`). flatpak installs it when the host driver is present; the hardware check covers it.
