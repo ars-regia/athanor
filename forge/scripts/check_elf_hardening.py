@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Fail a built RPM whose /usr/bin/athanor-* executables lack the hardening of the workspace's
+"""Fail the RPMs of a workspace spec whose ELF executables lack the hardening of the workspace's
 build policy (#1350; ADR-0075 decision 3, ADR-0143 decision 2).
 
-build_spec.sh runs it on every RPM after rpmbuild. Each ELF file the RPM ships as
-/usr/bin/athanor-* must be:
+build_spec.sh runs it after rpmbuild with the spec and its RPMs. A workspace spec builds in place
+(no Source line) and runs `cargo build`: its every ELF file, wherever it lands (/usr/bin,
+/usr/libexec: athanor-unlockd, athanor-preview-render, xdg-desktop-portal-athanor), comes from the
+workspace's target/release and must be:
 
 - a position-independent executable: ELF type ET_DYN with a PT_INTERP program header (a shared
   library is ET_DYN without one);
@@ -20,9 +22,14 @@ build_spec.sh runs it on every RPM after rpmbuild. Each ELF file the RPM ships a
   gives too), and release builds with the flags of .cargo/config.toml 94 to 99 %
   (athanor-sulphur 12867 of 13020, athanor-bar 2115 of 2246).
 
-Files that are not ELF (shell wrappers such as athanor-sulphur-session) are skipped. Usage:
-check_elf_hardening.py RPM... ; exit 1 on a finding, 2 on a file it cannot read.
+Files that are not ELF (shell wrappers such as athanor-sulphur-session) and symbolic links are
+skipped. RPMs of a workspace spec that hold no ELF file at all are a finding: the workspace's
+specs all install a binary, so none found means the gate looked in the wrong place. An upstream
+spec (with Source lines, such as cosmic-comp) keeps its own flags and is not checked. Usage:
+check_elf_hardening.py SPEC RPM... ; exit 1 on a finding, 2 on a file it cannot read.
 """
+
+import re
 
 import struct
 import subprocess
@@ -31,7 +38,6 @@ import tempfile
 from pathlib import Path
 
 FRAME_POINTER_SHARE = 0.5
-PREFIX = "usr/bin/athanor-"
 
 ET_DYN = 3
 PT_DYNAMIC, PT_INTERP, PT_GNU_RELRO = 2, 3, 0x6474E552
@@ -254,38 +260,44 @@ def problems(data):
     return found
 
 
-def rpm_executables(rpm, into):
-    """The /usr/bin/athanor-* files of RPM, unpacked under into. rpm names the payload's files
-    `./usr/...`, GNU cpio's own archives `usr/...`: both spellings match."""
+def workspace_spec(text):
+    """Whether a spec's text builds the workspace: in place (no Source line) with `cargo build`."""
+    return not re.search(r"(?mi)^\s*Source\d*\s*:", text) and bool(
+        re.search(r"(?m)^\s*cargo build\b", text)
+    )
+
+
+def rpm_files(rpm, into):
+    """The regular files of RPM's payload, unpacked under into; symbolic links are left out, as
+    one that points to an absolute path would lead out of into."""
     payload = subprocess.run(
         ["rpm2cpio", str(rpm)], check=True, capture_output=True
     ).stdout
     subprocess.run(
-        [
-            "cpio",
-            "-idm",
-            "--quiet",
-            "--no-absolute-filenames",
-            f"./{PREFIX}*",
-            f"{PREFIX}*",
-        ],
+        ["cpio", "-idm", "--quiet", "--no-absolute-filenames"],
         cwd=into,
         input=payload,
         check=True,
         capture_output=True,
     )
-    return sorted(p for p in Path(into, "usr/bin").glob("athanor-*") if p.is_file())
+    return sorted(
+        p for p in Path(into).rglob("*") if p.is_file() and not p.is_symlink()
+    )
 
 
 def main(argv):
-    if not argv:
+    if len(argv) < 2:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
-    bad = 0
-    for rpm in argv:
+    spec, rpms = argv[0], argv[1:]
+    if not workspace_spec(Path(spec).read_text()):
+        print(f"{Path(spec).name}: not a workspace spec, its ELF files are not checked")
+        return 0
+    bad = elves = 0
+    for rpm in rpms:
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                files = rpm_executables(rpm, tmp)
+                files = rpm_files(rpm, tmp)
             except subprocess.CalledProcessError as e:
                 print(
                     f"error: {rpm}: cannot unpack: {e.stderr.decode(errors='replace').strip()}",
@@ -296,20 +308,29 @@ def main(argv):
                 data = path.read_bytes()
                 if data[:4] != b"\x7fELF":
                     continue
+                elves += 1
+                shipped = "/" + path.relative_to(tmp).as_posix()
                 try:
                     found = problems(data)
                 except (ElfError, struct.error, IndexError, ValueError) as e:
                     print(
-                        f"error: {Path(rpm).name}: /usr/bin/{path.name}: cannot read it: {e}",
+                        f"error: {Path(rpm).name}: {shipped}: cannot read it: {e}",
                         file=sys.stderr,
                     )
                     return 2
                 for finding in found:
                     print(
-                        f"error: {Path(rpm).name}: /usr/bin/{path.name}: {finding}",
+                        f"error: {Path(rpm).name}: {shipped}: {finding}",
                         file=sys.stderr,
                     )
                     bad = 1
+    if elves == 0:
+        print(
+            f"error: {Path(spec).name}: a workspace spec whose RPMs ship no ELF file "
+            f"({', '.join(Path(r).name for r in rpms)}): nothing was checked",
+            file=sys.stderr,
+        )
+        return 1
     return bad
 
 

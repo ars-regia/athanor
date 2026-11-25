@@ -78,9 +78,9 @@ build() {
         rpmbuild -bb --nodeps "${define[@]}" "$SPEC_DIR"/*.spec
     fi
     check_sonames ~/rpmbuild/RPMS/*/*.rpm
-    # Every /usr/bin/athanor-* executable is a PIE with full RELRO, immediate binding and frame
+    # Every ELF file a workspace spec ships is a PIE with full RELRO, immediate binding and frame
     # pointers, the policy of .cargo/config.toml (ADR-0143 decision 2, #1350).
-    python3 -B /workspace/forge/scripts/check_elf_hardening.py ~/rpmbuild/RPMS/*/*.rpm
+    python3 -B /workspace/forge/scripts/check_elf_hardening.py "$SPEC_DIR"/*.spec ~/rpmbuild/RPMS/*/*.rpm
     mkdir -p /workspace/forge/RPMS
     cp ~/rpmbuild/RPMS/*/*.rpm /workspace/forge/RPMS/
     sccache --show-stats

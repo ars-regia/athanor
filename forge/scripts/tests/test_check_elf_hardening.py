@@ -1,6 +1,7 @@
-"""check_elf_hardening.py fails a /usr/bin/athanor-* executable that is not a PIE, lacks full
-RELRO or immediate binding, or was built without frame pointers, and build_spec.sh runs it on
-every RPM it builds (#1350; python3 -B -m unittest discover -s forge/scripts/tests -v)."""
+"""check_elf_hardening.py fails an ELF file of a workspace spec's RPMs that is not a PIE, lacks
+full RELRO or immediate binding, or was built without frame pointers, and fails RPMs of a
+workspace spec that hold no ELF file; build_spec.sh runs it on every spec it builds (#1350;
+python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
 import io
@@ -27,6 +28,8 @@ CIE_BODY = b"\x00\x00\x00\x00\x01zR\x00\x01\x78\x10\x01\x1b\x0c\x07\x08\x90\x01\
 WITH_FRAME_POINTER = b"\x41\x0e\x10\x86\x02\x43\x0d\x06"
 # A function that only moves rsp.
 WITHOUT_FRAME_POINTER = b"\x41\x0e\x10\x00"
+# The shape of a workspace spec: built in place, no Source line, with cargo.
+WORKSPACE_SPEC = "Name: athanor-launcher\n%build\ncargo build --release --locked -p athanor-launcher\n"
 
 
 def eh_frame(fdes):
@@ -170,9 +173,9 @@ class MainTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def rpm(self, files):
+    def rpm(self, files, rpm_name="package.rpm"):
         """A cpio archive of files, {path under the root: bytes}, standing for an RPM."""
-        tree = self.dir / "tree"
+        tree = self.dir / f"tree-{rpm_name}"
         for name, data in files.items():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_bytes(data)
@@ -184,25 +187,97 @@ class MainTest(unittest.TestCase):
             check=True,
             capture_output=True,
         ).stdout
-        out = self.dir / "package.rpm"
+        out = self.dir / rpm_name
         out.write_bytes(archive)
         return str(out)
 
-    def test_an_rpm_without_athanor_executables_passes(self):
-        rpm = self.rpm({"usr/bin/matugen": elf(e_type=2), "usr/share/doc/x": b"x"})
-        self.assertEqual(check.main([rpm]), 0)
+    def spec(self, text=WORKSPACE_SPEC):
+        out = self.dir / "package.spec"
+        out.write_text(text)
+        return str(out)
 
-    def test_a_weak_athanor_executable_fails_and_a_script_is_skipped(self):
+    def main(self, *argv):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = check.main(list(argv))
+        return code, err.getvalue()
+
+    def test_hardened_executables_pass_and_a_script_is_skipped(self):
         rpm = self.rpm(
             {
-                "usr/bin/athanor-bar": elf(relro=False),
+                "usr/bin/athanor-bar": elf(),
                 "usr/bin/athanor-session": b"#!/bin/sh\n",
             }
         )
-        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
-            self.assertEqual(check.main([rpm]), 1)
-        self.assertIn("/usr/bin/athanor-bar: no PT_GNU_RELRO", err.getvalue())
-        self.assertNotIn("athanor-session", err.getvalue())
+        self.assertEqual(self.main(self.spec(), rpm), (0, ""))
+
+    def test_a_weak_executable_fails(self):
+        rpm = self.rpm({"usr/bin/athanor-bar": elf(relro=False)})
+        code, err = self.main(self.spec(), rpm)
+        self.assertEqual(code, 1)
+        self.assertIn("/usr/bin/athanor-bar: no PT_GNU_RELRO", err)
+
+    def test_a_weak_executable_under_libexec_fails(self):
+        rpm = self.rpm(
+            {
+                "usr/bin/athanor-launcher": elf(),
+                "usr/libexec/athanor-preview-render": elf(flags=0),
+            }
+        )
+        code, err = self.main(self.spec(), rpm)
+        self.assertEqual(code, 1)
+        self.assertIn("/usr/libexec/athanor-preview-render: no immediate binding", err)
+        self.assertNotIn("athanor-launcher", err)
+
+    def test_a_weak_executable_in_a_second_rpm_fails(self):
+        first = self.rpm({"usr/bin/athanor-update": elf()}, "first.rpm")
+        weak = self.rpm({"usr/libexec/athanor-unlockd": elf(fdes=(False,) * 10)})
+        code, err = self.main(self.spec(), first, weak)
+        self.assertEqual(code, 1)
+        self.assertIn("/usr/libexec/athanor-unlockd: frame pointers", err)
+
+    def test_workspace_rpms_without_an_elf_file_fail(self):
+        rpm = self.rpm(
+            {
+                "usr/bin/athanor-session": b"#!/bin/sh\n",
+                "usr/share/doc/x": b"x",
+            }
+        )
+        code, err = self.main(self.spec(), rpm)
+        self.assertEqual(code, 1)
+        self.assertIn("ship no ELF file", err)
+
+    def test_an_upstream_spec_is_not_checked(self):
+        rpm = self.rpm({"usr/bin/cosmic-comp": elf(e_type=2)})
+        upstream = "Name: cosmic-comp\nSource0: cosmic-comp.tar.gz\n%build\ncargo build --release\n"
+        self.assertEqual(self.main(self.spec(upstream), rpm)[0], 0)
+
+    def test_a_symbolic_link_is_not_followed(self):
+        tree = self.dir / "tree-link"
+        (tree / "usr/bin").mkdir(parents=True)
+        (tree / "usr/bin/athanor-bar").write_bytes(elf())
+        (tree / "usr/bin/athanor-link").symlink_to("/usr/bin/true")
+        listing = b"./usr/bin/athanor-bar\n./usr/bin/athanor-link\n"
+        archive = subprocess.run(
+            ["cpio", "-o", "-H", "newc", "--quiet"],
+            cwd=tree,
+            input=listing,
+            check=True,
+            capture_output=True,
+        ).stdout
+        rpm = self.dir / "package.rpm"
+        rpm.write_bytes(archive)
+        self.assertEqual(self.main(self.spec(), str(rpm)), (0, ""))
+
+
+class WorkspaceSpecTest(unittest.TestCase):
+    def test_in_place_cargo_spec(self):
+        self.assertTrue(check.workspace_spec(WORKSPACE_SPEC))
+
+    def test_spec_with_a_source(self):
+        self.assertFalse(check.workspace_spec("Source1: x.tar.gz\n" + WORKSPACE_SPEC))
+
+    def test_in_place_spec_without_cargo(self):
+        self.assertFalse(check.workspace_spec("Name: athanor-calmo\n%build\nmake\n"))
 
 
 @unittest.skipUnless(shutil.which("rustc"), "rustc is not on PATH")
