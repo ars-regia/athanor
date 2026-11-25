@@ -44,6 +44,83 @@ class CompareTest(unittest.TestCase):
             len(lines), 4, "the application and the unnamed panel are not spoken"
         )
 
+    def test_same_named_nodes_are_paired_by_fit_not_only_by_order(self):
+        # A dialog: GTK puts its Close button first and the title bar's Close last; Sal puts the
+        # title bar first.
+        shown = ["focusable", "showing"]
+        title = ("Close the window", shown)
+        content = ("", [*shown, "focused"])
+        reference = [node("button", "Close", c[1], description=c[0]) for c in (content, title)]
+        transcript = [node("button", "Close", c[1], description=c[0]) for c in (title, content)]
+        self.assertEqual(compare.compare(reference, transcript)[1], [])
+
+    def test_same_named_nodes_are_paired_by_the_states_each_carries(self):
+        reference = [node("check box", "Pick", ["checked"]), node("check box", "Pick", [])]
+        transcript = [node("check box", "Pick", []), node("check box", "Pick", ["checked"])]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("transcript 'check box' ['checked']", lines[0])
+        self.assertIn("transcript 'check box' []", lines[1])
+
+    def test_the_description_outweighs_the_states_in_a_pairing(self):
+        reference = [node("button", "Go", ["checked"], description="Does it")]
+        transcript = [
+            node("button", "Go", ["checked"], description="Other"),
+            node("button", "Go", [], description="Does it"),
+        ]
+        _, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, ["button 'Go': state 'checked' missing"])
+
+    def test_a_role_of_its_own_beats_one_said_alike_and_either_beats_another(self):
+        for ref_role, name, order, expected in [
+            ("button", "Go", ["push button", "button"], "button"),
+            ("check box", "A switch", ["toggle button", "check box"], "check box"),
+            ("button", "Go", ["label", "push button"], "push button"),
+            ("check box", "A switch", ["label", "toggle button"], "toggle button"),
+        ]:
+            transcript = [node(role, name) for role in order]
+            lines, failures = compare.compare([node(ref_role, name)], transcript)
+            self.assertEqual(failures, [], order)
+            self.assertIn(f"transcript {expected!r}", lines[0], order)
+
+    def test_a_greedy_pairing_can_take_the_candidate_a_later_node_needed(self):
+        # The limit of the pairing: the first reference node takes the better-stated candidate,
+        # which the second needed, and the second is left with the other.
+        reference = [node("check box", "P", ["showing"]), node("check box", "P", ["showing", "checked"])]
+        transcript = [node("check box", "P", ["showing", "checked"]), node("check box", "P", ["showing"])]
+        self.assertEqual(compare.compare(reference, transcript)[1], ["check box 'P': state 'checked' missing"])
+
+    def test_a_state_that_moved_between_identical_siblings_is_not_reported(self):
+        # The limit of the pairing: nodes of one name, role and description are told apart only
+        # by their states, so the box that is checked is not the one the reference checks.
+        reference = [node("check box", "Pick", ["checked"]), node("check box", "Pick", [])]
+        transcript = [node("check box", "Pick", []), node("check box", "Pick", ["checked"])]
+        self.assertEqual(compare.compare(reference, transcript)[1], [])
+
+    def test_a_description_the_transcript_lacks_still_fails(self):
+        shown = ["focusable", "showing"]
+        reference = [
+            node("button", "Close", shown, description=""),
+            node("button", "Close", shown, description="Close the window"),
+        ]
+        transcript = [node("button", "Close", shown), node("button", "Close", shown)]
+        self.assertEqual(
+            compare.compare(reference, transcript)[1],
+            ["button 'Close': description '', expected 'Close the window'"],
+        )
+
+    def test_identical_candidates_are_paired_in_order(self):
+        shown = ["showing"]
+        reference = [node("label", "Same", shown, "one"), node("label", "Same", shown, "two")]
+        transcript = [node("label", "Same", shown, "two"), node("label", "Same", shown, "one")]
+        self.assertEqual(
+            compare.compare(reference, transcript)[1],
+            [
+                "label 'Same': value 'two', expected 'one'",
+                "label 'Same': value 'one', expected 'two'",
+            ],
+        )
+
     def test_a_lost_or_changed_description_fails(self):
         # SL4: a preference row's second line is its switch's description.
         row = ["checkable", "showing"]
@@ -486,6 +563,18 @@ class CompareTest(unittest.TestCase):
             with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
                 self.assertEqual(compare.main([str(paths["atspi-bar"]), str(paths["t"])]), 1)
                 self.assertEqual(compare.main([str(paths["atspi-bar-calendar"]), str(paths["t"])]), 0)
+
+    def test_a_failure_against_another_gtk_names_both_versions(self):
+        def gtk(version, name):
+            first = dict(node("application", "gallery_gtk.py"), toolkit=f"GTK {version}")
+            return [first, node("button", name)]
+
+        reference, transcript = gtk("4.20.0", "Gallery"), gtk("4.24.1", "Gallery frame")
+        failures = compare.compare(reference, transcript)[1]
+        self.assertEqual(failures[-1], "the reference was recorded from GTK 4.20.0, the transcript is from GTK 4.24.1")
+        # The same GTK, or a toolkit that is not GTK's, adds nothing.
+        self.assertEqual(len(compare.compare(gtk("4.24.1", "Gallery"), transcript)[1]), 1)
+        self.assertEqual(len(compare.compare(reference, [node("button", "Gallery frame")])[1]), 1)
 
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]

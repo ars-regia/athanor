@@ -1039,6 +1039,12 @@ mod tests {
             ]
         );
         assert!(parts[1..].iter().all(|n| n.supports_action(Action::Click)));
+        // GTK 4.24 describes the two buttons, and a reference of the rig holds both.
+        let described: Vec<_> = parts[1..].iter().map(|n| n.description()).collect();
+        assert_eq!(
+            described,
+            [Some("Minimize the window"), Some("Close the window")]
+        );
     }
 
     #[test]

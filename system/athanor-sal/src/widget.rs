@@ -1456,8 +1456,8 @@ impl Ui {
     }
 
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
-    /// the tree, as GTK's does. Its buttons come first in the Tab order too, where GTK's Tab
-    /// never reaches them, so the keyboard can minimize and close the window.
+    /// the tree and in the Tab order, where GTK's title bar is last and its Tab never reaches
+    /// the buttons: the keyboard reaches Minimize and Close at once.
     pub fn add_title_bar(&mut self) {
         if self.title_bar.is_some() {
             return;
@@ -1472,9 +1472,9 @@ impl Ui {
         }
         // A dialog is not minimized on its own, as GTK's title bar hides the button of one.
         if !self.modal {
-            self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+            self.add_window_button(bar, WindowButton::Minimize);
         }
-        self.add(bar, Kind::WindowButton(WindowButton::Close));
+        self.add_window_button(bar, WindowButton::Close);
         self.title_bar = Some(bar);
     }
 
@@ -3811,6 +3811,24 @@ fn slider_fraction(r: Rect, rtl: bool, font: f32, x: f32) -> f32 {
 /// change how text reads without being seen.
 fn is_invisible_format(c: char) -> bool {
     matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+impl WindowButton {
+    /// The description assistive technologies read after the name: GTK 4.24's for the same
+    /// buttons, in English whatever the language, as the name.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Minimize => "Minimize the window",
+            Self::Close => "Close the window",
+        }
+    }
+}
+
+impl Ui {
+    fn add_window_button(&mut self, bar: WidgetId, button: WindowButton) {
+        let id = self.add(bar, Kind::WindowButton(button));
+        self.set_description(id, Some(button.description()));
+    }
 }
 
 #[cfg(test)]

@@ -3,13 +3,16 @@
   "depth": 0,
   "role": "application",
   "name": "gallery_gtk.py",
+  "description": "gallery_gtk.py",
   "states": [],
-  "value": ""
+  "value": "",
+  "toolkit": "GTK 4.24.1"
  },
  {
   "depth": 1,
   "role": "frame",
   "name": "Galleria",
+  "description": "",
   "states": [
    "active",
    "sensitive",
@@ -22,6 +25,7 @@
   "depth": 2,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -34,6 +38,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -46,6 +51,7 @@
   "depth": 4,
   "role": "label",
   "name": "Pagine",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -57,6 +63,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -69,6 +76,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Pulsanti",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -81,6 +89,7 @@
   "depth": 6,
   "role": "label",
   "name": "Pulsanti",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -92,6 +101,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Scelte",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -104,6 +114,7 @@
   "depth": 6,
   "role": "label",
   "name": "Scelte",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -115,6 +126,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Valori",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -127,6 +139,7 @@
   "depth": 6,
   "role": "label",
   "name": "Valori",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -138,6 +151,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Elenchi",
+  "description": "",
   "states": [
    "focusable",
    "focused",
@@ -152,6 +166,7 @@
   "depth": 6,
   "role": "label",
   "name": "Elenchi",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -163,6 +178,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Testo",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -175,6 +191,7 @@
   "depth": 6,
   "role": "label",
   "name": "Testo",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -186,6 +203,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Stati",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -198,6 +216,7 @@
   "depth": 6,
   "role": "label",
   "name": "Stati",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -209,6 +228,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Calendario",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -221,6 +241,7 @@
   "depth": 6,
   "role": "label",
   "name": "Calendario",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -232,6 +253,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Dialoghi",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -244,6 +266,7 @@
   "depth": 6,
   "role": "label",
   "name": "Dialoghi",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -255,6 +278,7 @@
   "depth": 5,
   "role": "toggle button",
   "name": "Menu",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -267,6 +291,7 @@
   "depth": 6,
   "role": "label",
   "name": "Menu",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -278,6 +303,7 @@
   "depth": 3,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -290,6 +316,7 @@
   "depth": 4,
   "role": "label",
   "name": "Elenchi",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -301,6 +328,7 @@
   "depth": 4,
   "role": "button",
   "name": "Sostituisci le righe",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -313,6 +341,7 @@
   "depth": 5,
   "role": "label",
   "name": "Sostituisci le righe",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -324,6 +353,7 @@
   "depth": 4,
   "role": "scroll pane",
   "name": "",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -336,6 +366,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -347,6 +378,7 @@
   "depth": 6,
   "role": "list",
   "name": "Un elenco",
+  "description": "",
   "states": [
    "focusable",
    "sensitive",
@@ -359,6 +391,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 1",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -372,6 +405,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -384,6 +418,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 1",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -395,6 +430,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -406,6 +442,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 2",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -419,6 +456,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -431,6 +469,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 2",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -442,6 +481,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -453,6 +493,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 3",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -466,6 +507,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -478,6 +520,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 3",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -489,6 +532,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -500,6 +544,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 4",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -513,6 +558,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -525,6 +571,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 4",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -536,6 +583,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -547,6 +595,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 5",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -560,6 +609,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -572,6 +622,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 5",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -583,6 +634,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -594,6 +646,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 6",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -607,6 +660,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -619,6 +673,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 6",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -630,6 +685,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -641,6 +697,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 7",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -654,6 +711,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -666,6 +724,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 7",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -677,6 +736,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -688,6 +748,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 8",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -701,6 +762,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -713,6 +775,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 8",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -724,6 +787,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -735,6 +799,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 9",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -748,6 +813,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -760,6 +826,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 9",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -771,6 +838,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -782,6 +850,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 10",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -795,6 +864,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -807,6 +877,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 10",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -818,6 +889,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -829,6 +901,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 11",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -842,6 +915,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -854,6 +928,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 11",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -865,6 +940,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -876,6 +952,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 12",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -889,6 +966,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -901,6 +979,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 12",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -912,6 +991,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -923,6 +1003,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 13",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -936,6 +1017,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -948,6 +1030,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 13",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -959,6 +1042,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -970,6 +1054,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 14",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -983,6 +1068,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -995,6 +1081,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 14",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1006,6 +1093,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1017,6 +1105,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 15",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1030,6 +1119,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1042,6 +1132,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 15",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1053,6 +1144,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1064,6 +1156,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 16",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1077,6 +1170,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1089,6 +1183,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 16",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1100,6 +1195,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1111,6 +1207,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 17",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1124,6 +1221,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1136,6 +1234,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 17",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1147,6 +1246,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1158,6 +1258,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 18",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1171,6 +1272,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1183,6 +1285,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 18",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1194,6 +1297,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1205,6 +1309,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 19",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1218,6 +1323,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1230,6 +1336,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 19",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1241,6 +1348,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1252,6 +1360,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 20",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1265,6 +1374,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1277,6 +1387,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 20",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1288,6 +1399,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1299,6 +1411,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 21",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1312,6 +1425,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1324,6 +1438,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 21",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1335,6 +1450,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1346,6 +1462,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 22",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1359,6 +1476,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1371,6 +1489,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 22",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1382,6 +1501,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1393,6 +1513,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 23",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1406,6 +1527,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1418,6 +1540,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 23",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1429,6 +1552,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1440,6 +1564,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 24",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1453,6 +1578,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1465,6 +1591,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 24",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1476,6 +1603,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1487,6 +1615,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 25",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1500,6 +1629,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1512,6 +1642,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 25",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1523,6 +1654,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1534,6 +1666,7 @@
   "depth": 7,
   "role": "list item",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1545,6 +1678,7 @@
   "depth": 8,
   "role": "label",
   "name": "Righe 26–50",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1556,6 +1690,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 26",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1569,6 +1704,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1581,6 +1717,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 26",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1592,6 +1729,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1603,6 +1741,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 27",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1616,6 +1755,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1628,6 +1768,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 27",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1639,6 +1780,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1650,6 +1792,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 28",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1663,6 +1806,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1675,6 +1819,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 28",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1686,6 +1831,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1697,6 +1843,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 29",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1710,6 +1857,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1722,6 +1870,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 29",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1733,6 +1882,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1744,6 +1894,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 30",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1757,6 +1908,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1769,6 +1921,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 30",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1780,6 +1933,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1791,6 +1945,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 31",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1804,6 +1959,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1816,6 +1972,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 31",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1827,6 +1984,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1838,6 +1996,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 32",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1851,6 +2010,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1863,6 +2023,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 32",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1874,6 +2035,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1885,6 +2047,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 33",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1898,6 +2061,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1910,6 +2074,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 33",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1921,6 +2086,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1932,6 +2098,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 34",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1945,6 +2112,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1957,6 +2125,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 34",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1968,6 +2137,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -1979,6 +2149,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 35",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -1992,6 +2163,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2004,6 +2176,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 35",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2015,6 +2188,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2026,6 +2200,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 36",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2039,6 +2214,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2051,6 +2227,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 36",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2062,6 +2239,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2073,6 +2251,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 37",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2086,6 +2265,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2098,6 +2278,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 37",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2109,6 +2290,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2120,6 +2302,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 38",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2133,6 +2316,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2145,6 +2329,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 38",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2156,6 +2341,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2167,6 +2353,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 39",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2180,6 +2367,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2192,6 +2380,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 39",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2203,6 +2392,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2214,6 +2404,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 40",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2227,6 +2418,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2239,6 +2431,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 40",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2250,6 +2443,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2261,6 +2455,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 41",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2274,6 +2469,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2286,6 +2482,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 41",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2297,6 +2494,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2308,6 +2506,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 42",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2321,6 +2520,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2333,6 +2533,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 42",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2344,6 +2545,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2355,6 +2557,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 43",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2368,6 +2571,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2380,6 +2584,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 43",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2391,6 +2596,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2402,6 +2608,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 44",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2415,6 +2622,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2427,6 +2635,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 44",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2438,6 +2647,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2449,6 +2659,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 45",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2462,6 +2673,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2474,6 +2686,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 45",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2485,6 +2698,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2496,6 +2710,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 46",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2509,6 +2724,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2521,6 +2737,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 46",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2532,6 +2749,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2543,6 +2761,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 47",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2556,6 +2775,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2568,6 +2788,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 47",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2579,6 +2800,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2590,6 +2812,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 48",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2603,6 +2826,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2615,6 +2839,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 48",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2626,6 +2851,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2637,6 +2863,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 49",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2650,6 +2877,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2662,6 +2890,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 49",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2673,6 +2902,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2684,6 +2914,7 @@
   "depth": 7,
   "role": "list item",
   "name": "Riga 50",
+  "description": "",
   "states": [
    "focusable",
    "selectable",
@@ -2697,6 +2928,7 @@
   "depth": 8,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2709,6 +2941,7 @@
   "depth": 9,
   "role": "label",
   "name": "Riga 50",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2720,6 +2953,7 @@
   "depth": 9,
   "role": "label",
   "name": "Una seconda riga",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2731,6 +2965,7 @@
   "depth": 5,
   "role": "scroll bar",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2743,6 +2978,7 @@
   "depth": 6,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2755,6 +2991,7 @@
   "depth": 2,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2766,6 +3003,7 @@
   "depth": 3,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2777,6 +3015,7 @@
   "depth": 4,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2788,6 +3027,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -2800,6 +3040,7 @@
   "depth": 5,
   "role": "label",
   "name": "Galleria",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2811,6 +3052,7 @@
   "depth": 5,
   "role": "panel",
   "name": "",
+  "description": "",
   "states": [
    "horizontal",
    "sensitive",
@@ -2823,6 +3065,7 @@
   "depth": 6,
   "role": "grouping",
   "name": "",
+  "description": "",
   "states": [
    "sensitive",
    "showing",
@@ -2834,6 +3077,7 @@
   "depth": 7,
   "role": "button",
   "name": "Minimize",
+  "description": "Minimize the window",
   "states": [
    "focusable",
    "sensitive",
@@ -2846,6 +3090,7 @@
   "depth": 7,
   "role": "button",
   "name": "Close",
+  "description": "Close the window",
   "states": [
    "focusable",
    "sensitive",
