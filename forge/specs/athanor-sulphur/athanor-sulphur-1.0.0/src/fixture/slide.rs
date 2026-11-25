@@ -177,8 +177,10 @@ fn a_right_to_left_language_mirrors_the_slide() {
     run.stop();
 }
 
-/// A popup slides with its window: half way out it is drawn half the output's width from where
-/// it stood, and nothing of it is left there.
+/// A popup slides with its window. The popups of the windows left are dismissed (`park`), so
+/// only a window of the workspace coming in can have one during a slide: opened half way in,
+/// it is drawn half the output's width from its place, with its window, and nothing of it is
+/// drawn at its place until the slide is over.
 #[test]
 fn a_popup_slides_with_its_window() {
     let mut run = Running::start(None);
@@ -188,6 +190,10 @@ fn a_popup_slides_with_its_window() {
     let window = local.server_window(&run, &parent.surface);
     run.state.space.relocate_element(&window, (100, 560));
     run.state.settle(&window);
+    assert!(run.state.activate_workspace(two.list[0]));
+    advance(DURATION);
+    // Back to the second workspace, which comes in from the right.
+    assert!(run.state.activate_workspace(two.list[1]));
     let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -215,19 +221,19 @@ fn a_popup_slides_with_its_window() {
         .expect("the popup");
     let placed = run.state.space.element_geometry(&window).expect("shown");
     let middle = placed.loc + offset + Point::from((WIDTH / 2, HEIGHT / 2));
-    let green = at(&frame(&mut run), middle.x, middle.y);
-    assert!(!background(&green), "the popup is drawn");
-    assert!(run.state.activate_workspace(two.list[0]));
     advance(DURATION / 2);
-    let shown = frame(&mut run);
+    let half = frame(&mut run);
+    advance(DURATION);
+    let green = at(&frame(&mut run), middle.x, middle.y);
+    assert!(!background(&green), "the popup is drawn at its place once over");
     assert_eq!(
-        at(&shown, middle.x + 640, middle.y),
+        at(&half, middle.x + 640, middle.y),
         green,
-        "half way out with its window"
+        "half way in with its window"
     );
     assert!(
-        background(&at(&shown, middle.x, middle.y)),
-        "nothing of it where it stood"
+        background(&at(&half, middle.x, middle.y)),
+        "nothing of it at its place half way in"
     );
     run.stop();
 }
