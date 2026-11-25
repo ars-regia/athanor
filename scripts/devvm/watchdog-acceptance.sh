@@ -22,6 +22,7 @@ declare -A UNITS=([sessiond]=athanor-sessiond.service [idle]=athanor-idle.servic
     [portal]=xdg-desktop-portal-athanor.service)
 STAGE=
 declare -A STARTED=() # units this run started, stopped again by cleanup
+ACTIVE_BEFORE=()      # stages whose unit was active before the run, started again by cleanup
 
 in_session() {
     # shellcheck disable=SC2016 # expanded by the guest's shell
@@ -70,7 +71,11 @@ run_stage() {
     # The drop-in is read by the next run: restart, then take the pid to stop.
     unit restart || fail "restart ${UNITS[$STAGE]}"
     wait_until 20 new_main_pid 0 || fail "${UNITS[$STAGE]} is not active after the restart"
-    pid=$(prop MainPID) inv=$(prop InvocationID) n=$(prop NRestarts) since=$(in_session date +%s)
+    pid=$(prop MainPID) || fail "read MainPID"
+    inv=$(prop InvocationID) || fail "read InvocationID"
+    n=$(prop NRestarts) || fail "read NRestarts"
+    since=$(in_session date +%s) || fail "read the guest's clock"
+    [[ -n $inv && -n $n ]] || fail "InvocationID '$inv' or NRestarts '$n' read empty"
     unit kill --kill-whom=main -s SIGSTOP || fail "SIGSTOP to ${UNITS[$STAGE]} $pid"
     # 30 s of silence, plus the time systemd takes to end the stopped process.
     wait_until 90 result_is watchdog ||
@@ -79,7 +84,10 @@ run_stage() {
         fail "no new active MainPID after the watchdog ended $pid: $(prop ActiveState)"
     # A new pid alone could be a D-Bus activation of a unit that was not restarted: the
     # manager's restart counter and a new invocation say that Restart= brought it back.
-    pid2=$(prop MainPID) inv2=$(prop InvocationID) n2=$(prop NRestarts)
+    pid2=$(prop MainPID) || fail "read MainPID after the watchdog"
+    inv2=$(prop InvocationID) || fail "read InvocationID after the watchdog"
+    n2=$(prop NRestarts) || fail "read NRestarts after the watchdog"
+    [[ -n $inv2 && -n $n2 ]] || fail "InvocationID '$inv2' or NRestarts '$n2' read empty after the watchdog"
     [[ $n2 == $((n + 1)) ]] || fail "NRestarts went from $n to $n2 after the watchdog, not to $((n + 1))"
     [[ $inv2 != "$inv" ]] || fail "InvocationID is still $inv after the watchdog"
     line=$(in_session "journalctl --user -q -o cat -u ${UNITS[$STAGE]} --since @$since |
@@ -105,6 +113,19 @@ cleanup() {
         echo "cleanup: systemctl --user daemon-reload failed" >&2
         failed=1
     }
+    for s in "${ACTIVE_BEFORE[@]}"; do
+        STAGE=$s
+        if [[ $(prop ActiveState) == failed ]]; then
+            unit reset-failed || {
+                echo "cleanup: reset-failed ${UNITS[$s]} failed" >&2
+                failed=1
+            }
+        fi
+        unit start || {
+            echo "cleanup: starting ${UNITS[$s]} failed; it was running before the run" >&2
+            failed=1
+        }
+    done
     for s in "${!STARTED[@]}"; do
         in_session systemctl --user stop "${UNITS[$s]}" || {
             echo "cleanup: stopping ${UNITS[$s]} failed" >&2
@@ -118,6 +139,9 @@ run=("$@")
 ((${#run[@]})) || run=("${STAGES[@]}")
 for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
+done
+for STAGE in "${run[@]}"; do
+    [[ $(prop ActiveState) != active ]] || ACTIVE_BEFORE+=("$STAGE")
 done
 trap cleanup EXIT
 for STAGE in "${run[@]}"; do

@@ -188,8 +188,11 @@ stage_watchdog() {
     unit start || fail "systemctl --user start athanor-shelld failed"
     [[ $(unit show -p WatchdogUSec --value) == 30s ]] ||
         fail "WatchdogUSec is '$(unit show -p WatchdogUSec --value)', not 30s"
-    pid=$(unit show -p MainPID --value) inv=$(unit show -p InvocationID --value)
-    n=$(unit show -p NRestarts --value) since=$(in_session date +%s)
+    pid=$(unit show -p MainPID --value) || fail "read MainPID"
+    inv=$(unit show -p InvocationID --value) || fail "read InvocationID"
+    n=$(unit show -p NRestarts --value) || fail "read NRestarts"
+    since=$(in_session date +%s) || fail "read the guest's clock"
+    [[ -n $inv && -n $n ]] || fail "InvocationID '$inv' or NRestarts '$n' read empty"
     unit kill --kill-whom=main -s SIGSTOP || fail "SIGSTOP to athanor-shelld $pid"
     # 30 s of silence, plus the time systemd takes to end the stopped process.
     wait_until 90 result_is watchdog ||
@@ -197,8 +200,10 @@ stage_watchdog() {
     in_session "rm -f $dropin && systemctl --user daemon-reload" || fail "remove the watchdog drop-in"
     wait_until 30 new_main_pid "$pid" || fail "no new active MainPID after the watchdog ended $pid"
     # The manager's restart counter and a new invocation say that Restart= brought it back.
-    pid2=$(unit show -p MainPID --value) inv2=$(unit show -p InvocationID --value)
-    n2=$(unit show -p NRestarts --value)
+    pid2=$(unit show -p MainPID --value) || fail "read MainPID after the watchdog"
+    inv2=$(unit show -p InvocationID --value) || fail "read InvocationID after the watchdog"
+    n2=$(unit show -p NRestarts --value) || fail "read NRestarts after the watchdog"
+    [[ -n $inv2 && -n $n2 ]] || fail "InvocationID '$inv2' or NRestarts '$n2' read empty after the watchdog"
     [[ $n2 == $((n + 1)) ]] || fail "NRestarts went from $n to $n2 after the watchdog, not to $((n + 1))"
     [[ $inv2 != "$inv" ]] || fail "InvocationID is still $inv after the watchdog"
     line=$(in_session "journalctl --user -q -o cat -u athanor-shelld --since @$since |
