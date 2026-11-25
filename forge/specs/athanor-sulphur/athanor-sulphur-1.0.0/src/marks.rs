@@ -983,7 +983,7 @@ fn window_elements<R>(
     let Some(toplevel) = window.toplevel() else {
         return;
     };
-    // A workspace slide draws the window `shift` from its place.
+    // A workspace slide draws the window `shift` from its place, its black with it.
     let located = Rectangle::new(moved(located.loc, shift), located.size);
     let surface = toplevel.wl_surface();
     let offset = window.geometry().loc;
@@ -1072,9 +1072,10 @@ fn window_elements<R>(
             let backdrop = states.data_map.get_or_insert(|| Backdrop(Id::new()));
             backdrop.0.clone()
         });
+        let backdrop = Rectangle::new(moved(place.output.loc, shift), place.output.size);
         elements.push(Stacked::Line(SolidColorRenderElement::new(
             id,
-            place.physical(place.output),
+            place.physical(backdrop),
             CommitCounter::default(),
             Color32F::new(0.0, 0.0, 0.0, 1.0),
             Kind::Unspecified,

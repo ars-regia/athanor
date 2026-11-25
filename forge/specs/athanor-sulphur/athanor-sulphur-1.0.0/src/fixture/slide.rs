@@ -1,7 +1,8 @@
 //! VL9 (`workspace/slide.rs`): the workspace switch slides for 200 ms, read from the frame,
 //! and AX9's reduced motion makes it at once.
 
-use super::marks::{at, frame, paint};
+use super::full_screen::{enter, window};
+use super::marks::{at, clear_the_fixture, frame, paint};
 use super::*;
 use crate::workspace::slide::{DURATION, advance, right_to_left, under_way};
 use crate::workspace::WorkspaceId;
@@ -233,3 +234,22 @@ fn a_slide_leaves_the_other_output_still() {
     run.stop();
 }
 
+/// The black behind a full-screen client smaller than its output moves with it: half way out,
+/// the half of the output it left shows the workspace activated.
+#[test]
+fn the_black_of_a_full_screen_client_slides_with_it() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, toplevel, _) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+    paint(&mut run, &mut local, 400, 300, [0x60, 0x20, 0x60, 255]);
+    let black = [0, 0, 0, 255];
+    assert_eq!(at(&frame(&mut run), 1000, 50), black, "black at rest");
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.activate_workspace(list[1]));
+    advance(DURATION / 2);
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 100, 50), black, "the black, 640 pixels out");
+    assert!(background(&at(&shown, 1000, 50)), "the workspace activated");
+    run.stop();
+}
