@@ -8,7 +8,8 @@ are found, which is what an empty or missing tree looks like. With ATSPI_REQUIRE
 set, a showing node must carry that name: the greeter's seal says its badge so (section 7,
 item 3). An environment variable, because scene.sh splits RIG_HOLD on spaces.
 With ATSPI_TRANSCRIPT set, the tree is also written there as JSON, every node with its role,
-name, description, states and value, for atspi_compare.py (doc_own_stack.md, OS8).
+name, description, states and value, for atspi_compare.py (doc_own_stack.md, OS8); the
+application's node also names its toolkit and version ("GTK 4.24.1").
 AX17 (doc_accessibility.md): every showing interactive widget has extents inside its window; a
 password field gives out only the invisible character over Text.GetText and
 Text.GetStringAtOffset (AX4); with ATSPI_RING set, the focused control's ring has a contrast of
@@ -53,6 +54,13 @@ def problems(nodes, expected, required=(), window=None):
             found.append(f"a showing '{role}' has no accessible name")
     for index, (role, name, showing) in enumerate(nodes):
         own = windows.get(index, window)
+        if role == "menu" and showing and index in extents and own is not None:
+            # A popover menu hangs out of its window, so it is not held inside it, but it opens
+            # from it: its extent touches the window, and a bogus extent far away does not.
+            wx, wy, ww, wh = own
+            x, y, w, h = extents[index]
+            if w > 0 and h > 0 and (x > wx + ww or x + w < wx or y > wy + wh or y + h < wy):
+                found.append(f"the showing 'menu' {name!r} at {(x, y, w, h)} is away from its window {own}")
         if not (showing and role in INTERACTIVE and index in extents and own is not None):
             continue
         wx, wy, ww, wh = own
@@ -148,8 +156,13 @@ def transcript(accessible, Atspi, depth=0, out=None):
     """Every node, depth first: its role, name, description, sorted state names and value."""
     out = [] if out is None else out
     states = sorted(state.value_nick for state in accessible.get_state_set().get_states())
-    out.append({"depth": depth, "role": accessible.get_role_name(), "name": accessible.get_name() or "",
-                "description": accessible.get_description() or "", "states": states, "value": value_of(accessible, Atspi)})
+    node = {"depth": depth, "role": accessible.get_role_name(), "name": accessible.get_name() or "",
+            "description": accessible.get_description() or "", "states": states, "value": value_of(accessible, Atspi)}
+    if depth == 0 and accessible.get_toolkit_name():
+        # The toolkit and version the tree was read from, so a reference names its GTK
+        # (atspi_compare.toolkit_mismatch).
+        node["toolkit"] = f"{accessible.get_toolkit_name()} {accessible.get_toolkit_version() or ''}".strip()
+    out.append(node)
     for child in children(accessible):
         transcript(child, Atspi, depth + 1, out)
     return out
@@ -166,8 +179,8 @@ def extents_of(accessible, Atspi):
 def with_extents(accessible, Atspi, out=None, window=None, depth=0):
     """[(role, name, showing, extents, window)] depth first, as walk() orders them: `window` is
     the node's own top-level window, a child of the application, at the origin of its own
-    coordinates, since a popup is a window of its own with extents in its own coordinates. The
-    application's node has none."""
+    coordinates, since a popup is a window of its own with extents in its own coordinates; a
+    menu's entries are in the menu's. The application's node has none."""
     out = [] if out is None else out
     showing = accessible.get_state_set().contains(Atspi.StateType.SHOWING)
     extents = extents_of(accessible, Atspi) or (0, 0, 0, 0)
@@ -175,6 +188,10 @@ def with_extents(accessible, Atspi, out=None, window=None, depth=0):
         window = (0, 0, extents[2], extents[3])
     node = (accessible.get_role_name(), accessible.get_name() or "", showing, extents)
     out.append(node if window is None else node + (window,))
+    if depth > 1 and node[0] == "menu" and extents[2] > 0 and extents[3] > 0:
+        # GTK 4.24's popover menu is a node of the window's own tree, drawn in a surface that
+        # hangs out of the window: its entries lie inside the menu, not inside the window.
+        window = extents
     for child in children(accessible):
         with_extents(child, Atspi, out, window, depth + 1)
     return out

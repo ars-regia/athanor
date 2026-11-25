@@ -1,20 +1,28 @@
 # Crates a specification under docs/architecture names as a dependency although no Cargo.toml
-# of the repository uses them (scripts/verify.py spec-deps, #1289), one entry per line:
-# `DOCUMENT CRATE REASON`. The forms the check reads are those of SPEC_DEPS_FORMS; a sentence
-# that says the crate is planned, or absent, names no dependency.
-# The list only shrinks: an entry that no longer applies leaves it, and a pull request adds none.
-doc_disks.md libadwaita the GTK4 application that section 7 withdraws (amendment of 2026-10-06, GNOME Disks instead)
-doc_disks.md zxcvbn the strength hint of DK11, withdrawn with the GTK4 application by section 7 (amendment of 2026-10-06)
-doc_files.md bzip2 planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md flate2 planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md lzma-rust2 planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md ruzstd planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md sevenz-rust2 planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md tar planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md zip planned: an archive crate of FM8, whose helper is not yet built
-doc_files.md zstd not a dependency: the C crate that the default features of `zip` would pull
-doc_languages.md gettext-rs the binding of the libadwaita applications that ADR-0141 retires
-doc_lock_and_prompts.md oo7 planned: the secret exchange of the prompter, pinned by L12b (LP12)
-doc_portal.md pipewire planned: the PipeWire producer of step 5 of S2
-doc_session_daemons.md jxl-oxide not a dependency: a dependency of upstream cosmic-bg, which the section reads
-doc_visual_language.md material-colors planned: the accent colour taken from the wallpaper
+# of its components uses them (scripts/verify.py spec-deps, #1289, #1510), one entry per line:
+# `DOCUMENT COMPONENT CRATE REASON`. COMPONENT is a path of docs/architecture/components.toml
+# that the document owns and that holds a manifest, or `repo` for a document that owns none, whose
+# crates are matched against every manifest of the repository. The forms the check reads are those of
+# SPEC_DEPS_FORMS; a sentence that says the crate is planned, or absent, names no dependency.
+# The list only shrinks: an entry that no longer applies leaves it, and against --known-red-base a pull
+# request adds none, except an entry whose finding the base already had under this matcher: the document,
+# components.toml and every tracked Cargo.toml outside vendored trees (the same files, the same bytes) are
+# identical at the base. A stricter matcher can list what it finds that way; an edit of a text or of any
+# manifest, or of components.toml, cannot. The check prints each entry it accepts as new.
+doc_disks.md repo libadwaita the GTK4 application that section 7 withdraws (amendment of 2026-10-06, GNOME Disks instead)
+doc_disks.md repo zxcvbn the strength hint of DK11, withdrawn with the GTK4 application by section 7 (amendment of 2026-10-06)
+doc_files.md repo bzip2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo flate2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo lzma-rust2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo ruzstd planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo sevenz-rust2 planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo tar planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo zip planned: an archive crate of FM8, whose helper is not yet built
+doc_files.md repo zstd not a dependency: the C crate that the default features of `zip` would pull
+doc_languages.md system/athanor-i18n gettext-rs the binding of the libadwaita applications that ADR-0141 retires
+doc_lock_and_prompts.md forge/specs/athanor-lock oo7 planned: the secret exchange of the prompter, pinned by L12b (LP12)
+doc_portal.md forge/specs/athanor-xdg-desktop-portal-athanor pipewire planned: the PipeWire producer of step 5 of S2
+doc_session_daemons.md system/athanor-wallpaper jxl-oxide not a dependency: a dependency of upstream cosmic-bg, which the section reads
+doc_visual_language.md repo material-colors planned: the accent colour taken from the wallpaper
+doc_accessibility.md repo athanor-keyboard planned: the library crate of the on-screen keyboard (AX12), not yet built; approved text (ADR-0074)
+doc_lock_and_prompts.md forge/specs/athanor-lock pam not a dependency: an upstream crate read for the plan of LP18 step 1, the helper calls libpam by FFI; approved text (ADR-0074)
