@@ -1,8 +1,15 @@
+# The codegen and link policy of every build of the workspace, the RPM builds included
+# (ADR-0075 decision 3, ADR-0143 decision 2): full RELRO with BIND_NOW, PIC, frame pointers, the
+# x86-64-v3 baseline of ADR-0054 and the mold linker. The lints are in Cargo.toml's
+# [workspace.lints]. A RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS in the environment replaces these
+# flags. The target table shadows [build] on Linux, so both carry the same list.
 [build]
 rustflags = [
     "-C", "link-arg=-Wl,-z,relro,-z,now",
     "-C", "relocation-model=pic",
     "-C", "force-frame-pointers=yes",
+    "-C", "target-cpu=x86-64-v3",
+    "-C", "link-arg=-fuse-ld=mold",
 ]
 
 [target.'cfg(target_os = "linux")']
@@ -10,5 +17,7 @@ rustflags = [
     "-C", "link-arg=-Wl,-z,relro,-z,now",
     "-C", "relocation-model=pic",
     "-C", "force-frame-pointers=yes",
+    "-C", "target-cpu=x86-64-v3",
+    "-C", "link-arg=-fuse-ld=mold",
 ]
 

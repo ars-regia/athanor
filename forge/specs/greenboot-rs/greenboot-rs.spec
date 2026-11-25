@@ -13,7 +13,7 @@
 
 Name:           greenboot-rs
 Version:        0.16.4
-Release:        %{fedora_release}.athanor1
+Release:        %{fedora_release}.athanor2
 Summary:        Generic Health Check Framework for systemd
 # Fedora's expression, from the crates it links statically.
 License:        BSD-3-Clause AND ISC AND MIT AND Unicode-DFS-2016 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND (Unlicense OR MIT)
@@ -75,6 +75,13 @@ cp %{SOURCE1} Cargo.lock
 
 %build
 %set_build_flags
+# The flags forge/config/rpmmacros exported for every %build until #1350, kept as they were for
+# this upstream package: x86-64-v3, opt-level 3, 16 codegen units and stripped symbols for every
+# crate, build scripts and proc macros included, linked with mold, and upstream's release profile
+# with thin LTO and panic=abort. Cargo.toml's policy is the workspace's, not this package's
+# (ADR-0143 decision 2). %check gets none of them, as before.
+export RUSTFLAGS="-C target-cpu=x86-64-v3 -C opt-level=3 -C codegen-units=16 -C strip=symbols -C link-arg=-fuse-ld=mold"
+export CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_RELEASE_STRIP=symbols
 cargo build --release --locked
 
 %check
@@ -154,6 +161,10 @@ fi
 %{_unitdir}/greenboot-healthcheck.service.d/10-network-online.conf
 
 %changelog
+* Wed Nov 25 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc45.athanor2
+- State in the spec the Rust flags that the forge's RPM macros exported for every build
+  (#1350): the same flags, the same payload.
+
 * Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc45.athanor1
 - Fedora's greenboot-rs 0.16.4-0.fc45, for the Fedora 45 base; the three patches are unchanged.
 

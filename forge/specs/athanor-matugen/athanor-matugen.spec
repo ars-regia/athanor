@@ -19,6 +19,13 @@ pinned by its Cargo.lock.
 
 %build
 %set_build_flags
+# The flags forge/config/rpmmacros exported for every %build until #1350, kept as they were for
+# this upstream package: x86-64-v3, opt-level 3, 16 codegen units and stripped symbols for every
+# crate, build scripts and proc macros included, linked with mold, and upstream's release profile
+# with thin LTO and panic=abort. Cargo.toml's policy is the workspace's, not this package's
+# (ADR-0143 decision 2).
+export RUSTFLAGS="-C target-cpu=x86-64-v3 -C opt-level=3 -C codegen-units=16 -C strip=symbols -C link-arg=-fuse-ld=mold"
+export CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_RELEASE_STRIP=symbols
 cargo build --release --locked
 
 %install

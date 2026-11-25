@@ -35,9 +35,11 @@ The kernel, Azoth, is built by its own workflow from `specs/azoth`
 
 ## Compiler flags
 
-`config/rpmmacros` sets the flags for every package: `-O3 -march=x86-64-v3`, LTO
-(`-flto=auto`) and the mold linker for C and C++; `target-cpu=x86-64-v3`, `opt-level=3`
-and mold for Rust.
+`config/rpmmacros` sets the flags for C and C++: `-O3 -march=x86-64-v3`, LTO
+(`-flto=auto`) and the mold linker. It sets nothing for Rust (ADR-0143 decision 2): the
+workspace's packages take the root `Cargo.toml` (`[profile.release]`, `[workspace.lints]`) and
+`.cargo/config.toml` (full RELRO, PIC, frame pointers, `target-cpu=x86-64-v3`, mold), and an
+upstream Rust package states its flags in its own spec.
 
 ## Pipeline
 
