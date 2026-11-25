@@ -7869,7 +7869,10 @@ SPEC_DEPS_CUE = re.compile(r"\bcrates?\b|crates\.io|docs\.rs|Cargo\.toml")
 # "no" in a later clause of the sentence ("no GTK type") does not hide the crate. A `,` between
 # two code spans ("no `gtk4`, `gdk4` or `gtk4-layer-shell` crate") is a list's, not a bound. The
 # detector still reads words, not meaning.
-SPEC_DEPS_SKIP = re.compile(r"\b(?:no|not|rejected|deleted|removed|dropped|refused|planned|new|without)\b", re.I)
+SPEC_DEPS_SKIP = re.compile(r"\b(?:no|not|rejected|deleted|removed|dropped|refused|planned)\b", re.I)
+# "new" and "without" skip only in front of the name: "a new crate" or "New:", and "without".
+# "depends on `zip` without its default features" and "a new `tokio` version" stay claims.
+SPEC_DEPS_SKIP_BEFORE = re.compile(r"\ba new crates?\b|\bNew:|\bwithout\b", re.I)
 
 
 def parse_spec_deps_allow(text):
@@ -7939,19 +7942,17 @@ def spec_world(root):
         table = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
         workspace = {(dep.get("package", key) if isinstance(dep, dict) else key).replace("_", "-")
                      for key, dep in table.items()}
-    components, owned, specs = set(), {}, []
+    components, owned = set(), {}
     for comp in tomllib.loads(read(root / COMPONENTS)).get("component", []):
         path, spec = comp.get("path", ""), comp.get("spec", "")
         components.add(path)
-        specs.append((path, spec))
         mine = [m for m in manifests if m == path or m.startswith(path + "/")]
         if mine:
             owned.setdefault(spec, {})[path] = set().union(*(manifests[m] for m in mine))
     scopes = {doc.name: (tuple(sorted(owned.get(doc.name, {}))),
                          set().union(*owned[doc.name].values()) if doc.name in owned else everything)
               for doc in sorted((root / "docs/architecture").glob("*.md"))}
-    return {"manifests": manifests, "components": components, "specs": specs,
-            "workspace": workspace, "scopes": scopes}
+    return {"manifests": manifests, "components": components, "workspace": workspace, "scopes": scopes}
 
 
 def spec_name_used(name, names):
@@ -7974,7 +7975,7 @@ def spec_sentences(line):
 
 def spec_clause(sentence, start, end):
     """The part of SENTENCE that holds [START, END), between the `,` or `;` outside parentheses
-    that precede and follow it, a `,` that joins two code spans excepted."""
+    that precede and follow it, a `,` that joins two code spans excepted, as (left, right)."""
     depth, left, right = 0, 0, len(sentence)
     for i, ch in enumerate(sentence):
         depth = max(0, depth + (ch == "(") - (ch == ")"))
@@ -7986,7 +7987,7 @@ def spec_clause(sentence, start, end):
             elif i >= end:
                 right = i
                 break
-    return sentence[left:right]
+    return left, right
 
 
 def spec_dependencies(text):
@@ -8001,7 +8002,9 @@ def spec_dependencies(text):
             workspace = {m.group(1) for m in SPEC_DEPS_WORKSPACE.finditer(sentence)}
             for form in forms:
                 for m in form.finditer(sentence):
-                    if not SPEC_DEPS_SKIP.search(spec_clause(sentence, m.start(), m.end())):
+                    left, right = spec_clause(sentence, m.start(), m.end())
+                    if not (SPEC_DEPS_SKIP.search(sentence[left:right])
+                            or SPEC_DEPS_SKIP_BEFORE.search(sentence[left:m.end()])):
                         found.add((m.group(1), cites, m.group(1) in workspace))
     return found
 
@@ -8013,29 +8016,20 @@ def spec_cited_names(cites, manifests):
                                 if path == cite or ("/" in cite and path.endswith("/" + cite))))
 
 
-def spec_input_paths(manifests, specs, doc, cites):
-    """The manifests among MANIFESTS (paths) that decide what the document DOC may name: those of
-    the components SPECS (path, spec) give it, or all when it owns none, the root's (the
-    workspace rule) and those its CITES point at."""
-    mine = {m for path, spec in specs if spec == doc for m in manifests if m == path or m.startswith(path + "/")}
-    return (mine or set(manifests)) | {m for m in manifests if m == "Cargo.toml" or any(
-        m == cite or ("/" in cite and m.endswith("/" + cite)) for cite in cites)}
-
-
-def spec_inputs_unchanged(root, base, doc, manifests, specs, cites):
-    """Whether everything that decides what DOC may name is byte-identical at BASE and in ROOT: the
-    document, COMPONENTS and the manifests of spec_input_paths, read from BASE as own_base_entries
-    reads, the set of those manifests included. A finding then comes from the matcher alone."""
+def spec_inputs_unchanged(root, base, doc, manifests):
+    """Whether everything the matcher reads is byte-identical at BASE and in ROOT: the document
+    DOC, COMPONENTS and every tracked Cargo.toml outside vendored trees (MANIFESTS, the paths),
+    the same files with the same bytes, read from BASE as own_base_entries reads. A finding then
+    comes from the matcher alone, and no edit of a manifest, in the scope or out, creates it."""
     def git(*args):
         return subprocess.run(["git", "-C", str(root), *args], capture_output=True)
 
     commit = git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").stdout.decode().strip()
     at_base = {path for path in git("ls-tree", "-r", "-z", "--name-only", commit).stdout.decode().split("\0")
                if path.endswith("Cargo.toml") and not third_party_cargo(path)}
-    scope = spec_input_paths(manifests, specs, doc, cites)
-    if not commit or spec_input_paths(at_base, specs, doc, cites) != scope:
+    if not commit or at_base != set(manifests):
         return False
-    for path in (f"docs/architecture/{doc}", COMPONENTS, *sorted(scope)):
+    for path in (f"docs/architecture/{doc}", COMPONENTS, *sorted(manifests)):
         blob = f"{commit}:{path}"
         if git("cat-file", "-e", blob).returncode != 0 or git("show", blob).stdout != (root / path).read_bytes():
             return False
@@ -8060,12 +8054,10 @@ def spec_deps_report(root=None, base=None):
         world = spec_world(root)
     except (OSError, ValueError, tomllib.TOMLDecodeError, subprocess.CalledProcessError) as err:
         return [f"{COMPONENTS} or a Cargo.toml: cannot read ({err})"], [], []
-    scopes, named, where, cited, accepted = world["scopes"], set(), {}, {}, []
+    scopes, named, where, accepted = world["scopes"], set(), {}, []
     for doc, (components, names) in scopes.items():
         where[doc] = components or (SPEC_DEPS_REPO,)
-        cited[doc] = set()
         for name, cites, workspace in spec_dependencies(read(root / "docs/architecture" / doc)):
-            cited[doc].update(cites)
             if not (spec_name_used(name, names)
                     or spec_name_used(name, spec_cited_names(cites, world["manifests"]))
                     or (workspace and spec_name_used(name, world["workspace"]))):
@@ -8088,8 +8080,7 @@ def spec_deps_report(root=None, base=None):
         except ValueError as err:
             return problems + [f"{SPEC_DEPS_ALLOW} at {base}: {err}"], [], []
         for doc, _, name, _ in [e for e in entries if before is not None and (e[0], e[2]) not in before]:
-            if (doc, name) in named and spec_inputs_unchanged(root, base, doc, world["manifests"],
-                                                              world["specs"], cited[doc]):
+            if (doc, name) in named and spec_inputs_unchanged(root, base, doc, world["manifests"]):
                 accepted.append(f"accepted as new: {doc} {name} (inputs unchanged since {base}; the matcher found it)")
             else:
                 problems.append(f"{SPEC_DEPS_ALLOW}: {doc} {name} is not listed at {base}; the list only shrinks")

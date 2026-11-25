@@ -355,6 +355,33 @@ class SpecDeps(unittest.TestCase):
                 self.write(DOC_FREE, sentence + "\n")
                 self.assertEqual(self.problems(), [])
 
+    def test_new_and_without_hide_a_crate_only_in_front_of_its_name(self):
+        for sentence in (
+            "It depends on `zip` without its default features.",
+            "A new `tokio` 1.4 crate bump.",
+        ):
+            with self.subTest(sentence=sentence):
+                found = {n for n, _, _ in verify.spec_dependencies(sentence + "\n")}
+                self.assertEqual(len(found), 1, found)
+        for sentence in (
+            "New: the pure-Rust archive crates of FM8: `zip` 8.6.0 (MIT).",
+            "It talks through a new crate, `athanor-ibus`, with no GTK type.",
+            "Without the `ring` crate, it signs.",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(verify.spec_dependencies(sentence + "\n"), set())
+
+    def test_an_added_entry_with_an_edit_of_an_out_of_scope_manifest_fails(self):
+        # barn is owned by no document: the edit is outside the scope of doc_x.md
+        problems, _, accepted = self.grown(
+            lambda: self.write(
+                "barn/Cargo.toml",
+                '[package]\nname = "barn"\n\n[dependencies]\nother = "1"\n',
+            )
+        )
+        self.assertEqual(accepted, [])
+        self.assertIn("doc_x.md ring is not listed at HEAD", "".join(problems))
+
     def test_a_malformed_manifest_fails_the_check_without_a_traceback(self):
         self.write("bad/Cargo.toml", "[package\n")
         problems, fallback, _ = verify.spec_deps_report(self.root)
