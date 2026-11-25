@@ -66,6 +66,7 @@ def test_pass(tmp: pathlib.Path) -> None:
             ("origin-stable-signed", 397),
             ("greeter-alive", 400),
             ("session-alive", 460),
+            ("grants-kept", 461),
             ("settings-alive", 500),
             ("mok-enrolled", 380),
         ],
@@ -89,6 +90,7 @@ COMPLETE = [
     ("origin-stable-signed", 397),
     ("greeter-alive", 400),
     ("session-alive", 460),
+    ("grants-kept", 461),
     ("settings-alive", 500),
     ("mok-enrolled", 380),
 ]
@@ -103,6 +105,7 @@ def test_verdict_json_on_pass(tmp: pathlib.Path) -> None:
     assert data["checks"] == {
         "installed": True, "kickstart-done": True, "profile": True, "karg": True,
         "origin": True, "greeter": True, "session": True, "settings": True, "no-guest-failure": True,
+        "session-grants": True,
     }, data
 
 
@@ -239,6 +242,7 @@ def test_karg_not_applicable_passes(tmp: pathlib.Path) -> None:
             ("origin-stable-signed", 397),
             ("greeter-alive", 400),
             ("session-alive", 460),
+            ("grants-kept", 461),
             ("settings-alive", 500),
             ("mok-enrolled", 380),
         ],
@@ -643,7 +647,11 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     try:
         conn = play_first_boot(server, run)
         started = time.time()
-        conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
+        # The three answers arrive together, the grants one first and a memory answer
+        # longer than the console's tail between it and Settings', as they do from a
+        # session of a dozen processes or more.
+        memory = b"".join(b"MEMORY_ROW %d athanor-bar 41234 kB\r\n" % n for n in range(400))
+        conn.sendall(b"GRANTS_KEPT\r\n" + memory + b"SETTINGS_ALIVE name-after:3s\r\n")
         proc.wait(timeout=40)
         waited = time.time() - started
     finally:
@@ -670,6 +678,8 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         "greeter-alive",
         "login-sent",
         "session-alive",
+        "grants-asked",
+        "grants-kept",
         "settings-asked",
         "settings-alive",
         "settings-shot",
@@ -900,6 +910,120 @@ def test_session_probe_skips_only_absent_units(tmp: pathlib.Path) -> None:
     for probe in (held, strict):
         assert answer(probe, "", target) == f"SESSION_DEAD c7 down: {target}", probe
     assert b"2>/dev/null)\" = not-found" not in held, "a real error of show must not be hidden"
+
+
+def test_session_diagnostics_lead_with_the_down_units(tmp: pathlib.Path) -> None:
+    """The units the probe names as down come first in the diagnostics, status and whole
+    journal, ahead of every section that caps its lines: the runs since 2026-11-22 named
+    athanor-shelld.service and the `head -60` over the status of six units cut it off."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    commands = console.SESSION_DIAGNOSTICS
+    first = next(
+        (i for i, c in enumerate(commands) if b'journalctl --user -b --no-pager -u "$u"' in c), None
+    )
+    assert first is not None, "no diagnostic prints the journal of a down unit"
+    for command in commands[: first + 1]:
+        assert b"head" not in command and b"tail" not in command, command
+
+    work = tmp / "session-diagnostics"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    fakes = {
+        "systemctl": 'if [ "$2" = -q ]; then case " $FAKE_DOWN " in *" $4 "*) exit 3;; esac; exit 0; fi;'
+        ' echo "status $3"',
+        "journalctl": 'for a; do u=$a; done; echo "journal $u"',
+    }
+    for name, body in fakes.items():
+        (work / "bin" / name).write_text("#!/bin/sh\n" + body + "\n")
+        (work / "bin" / name).chmod(0o755)
+    (work / "run.sh").write_bytes(commands[first] + b"\n")
+    down = "athanor-shelld.service athanor-bar.service"
+    proc = subprocess.run(
+        ["sh", str(work / "run.sh")], capture_output=True, text=True, timeout=60,
+        env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_DOWN": down},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.split("\n")[:-1] == [
+        "status athanor-bar.service", "journal athanor-bar.service",
+        "status athanor-shelld.service", "journal athanor-shelld.service",
+    ], proc.stdout
+
+
+def test_lost_grant_fails_the_verdict(tmp: pathlib.Path) -> None:
+    """A service that lost a Landlock grant keeps running with a warning, and a desktop
+    whose bar, dock and launcher ran on without theirs passed Acceptance (#1490). The
+    verdict names it, and a run that never asked, or could not read the journal, is not
+    a pass either; the upgrade case, whose first boot is the old :stable, is not asked."""
+    base = [p for p in COMPLETE if p[0] != "grants-kept"]
+    # Bracketed paste puts an escape before the answer, on the same line.
+    serial = b"\x1b[?2004l\rGRANTS_LOST 2\r\nMay 1 athanor_shelld: cannot confine the daemon with Landlock\r\n"
+    for extra, text in (
+        ([("grants-lost", 462)], "NO, 2 journal line(s)"),
+        ([], "NO ANSWER"),
+        ([("grants-unreadable", 462)], "NO ANSWER (grants-unreadable)"),
+    ):
+        code, report = verdict(tmp, base + extra, serial=serial)
+        assert code != 0 and "**FAIL**" in report, report
+        assert f"keep their Landlock grants: {text}" in report, report
+        assert json.loads((tmp / "run" / "verdict.json").read_text())["checks"]["session-grants"] is False
+    code, report = verdict(tmp, base + [("grants-kept", 462)])
+    assert code == 0, report
+    assert "keep their Landlock grants: grants-kept" in report, report
+
+
+def test_grants_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
+    """The question the guest is asked, run as a shell command against a fake journal: a
+    `not granted` or a `cannot confine` line is a loss, none is a keep, and a journal that
+    cannot be read, or reads empty, is neither."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    work = tmp / "grants-probe"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    (work / "bin" / "journalctl").write_text('#!/bin/sh\n[ -n "$FAKE_FAIL" ] && exit 1\nprintf "%s\\n" "$FAKE_JOURNAL"\n')
+    (work / "bin" / "journalctl").chmod(0o755)
+    grep = shutil.which("grep")
+    (work / "bin" / "grep").write_text(f'#!/bin/sh\n[ -n "$FAKE_GREP_FAIL" ] && exit 2\nexec {grep} "$@"\n')
+    (work / "bin" / "grep").chmod(0o755)
+    (work / "probe.sh").write_bytes(console.GRANTS_PROBE + b"\n")
+
+    def answer(journal: str, fail: str = "", grep_fail: str = "") -> list[str]:
+        proc = subprocess.run(
+            ["sh", str(work / "probe.sh")], capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}",
+                 "FAKE_JOURNAL": journal, "FAKE_FAIL": fail, "FAKE_GREP_FAIL": grep_fail},
+        )
+        return proc.stdout.splitlines()
+
+    quiet = "Nov 25 athanor-bar[1]: started\nNov 25 athanor-dock[2]: started"
+    refused = "athanor_bar: not granted: it fails the check"
+    assert answer(quiet) == ["GRANTS_KEPT"]
+    assert answer(quiet + "\n" + refused) == ["GRANTS_LOST 1", refused]
+    cannot = "athanor_shelld: cannot confine the daemon with Landlock"
+    assert answer(cannot + "\n" + refused)[0] == "GRANTS_LOST 2"
+    assert answer(quiet, fail="1") == ["GRANTS_UNREADABLE"]
+    # Unreadable as well: a journal that reads empty, as one hidden by its permissions does.
+    assert answer("") == ["GRANTS_UNREADABLE"]
+    # A search that fails is no answer either, not a keep.
+    assert answer(quiet, grep_fail="1") == ["GRANTS_UNREADABLE"]
+    # The count is every loss, though the lines shown stop at twenty.
+    many = answer("\n".join([refused] * 25))
+    assert many[0] == "GRANTS_LOST 25" and len(many) == 21, many
+    # Sulphur's refusal of a top layer is not a lost grant.
+    assert answer(quiet + "\nathanor_sulphur: a client not granted them was closed") == ["GRANTS_KEPT"]
+    # A daemon that cannot apply Landlock and refuses to run is a lost grant.
+    unconfined = "athanor_sessiond: Landlock cannot be applied; refusing to run unconfined"
+    assert answer(quiet + "\n" + unconfined) == ["GRANTS_LOST 1", unconfined]
+    # A directory refused by name is a lost grant.
+    assert answer("athanor_idle: dconf's runtime directory is not granted")[0] == "GRANTS_LOST 1"
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--classify", "p-"],
+        input=b"GRANTS_LOST 1\r\n", capture_output=True,
+    )
+    assert re.fullmatch(r"p-grants-lost \d+\n", proc.stdout.decode()), proc
 
 
 def test_origin_missing_or_wrong_fails(tmp: pathlib.Path) -> None:
@@ -1511,6 +1635,9 @@ def main() -> int:
             test_karg_not_applicable_passes,
             test_karg_probe_answers_from_the_guest,
             test_session_probe_skips_only_absent_units,
+            test_session_diagnostics_lead_with_the_down_units,
+            test_lost_grant_fails_the_verdict,
+            test_grants_probe_answers_from_the_guest,
             test_origin_missing_or_wrong_fails,
             test_origin_unreadable_is_not_wrong,
             test_origin_probe_answers_from_the_guest,
