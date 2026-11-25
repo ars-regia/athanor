@@ -7968,10 +7968,13 @@ REFUSED_NAMES = "forge/config/refused-names.txt"
 REFUSED_NAMES_ALLOW = "forge/config/refused-names-allow.txt"
 # The sections of a specification that bind: its decisions and its acceptance criteria, under
 # the headings of ADR-0076 point 7 as the approved documents spell them ("Decisions",
-# "Interfaces and decisions", "Acceptance", "Acceptance criteria"). Context, rationale, open
-# doubts, "Decisions taken", amendments and revisions are history: they name what the document
-# replaces.
-REFUSED_NORMATIVE = re.compile(r"(?:\d+\. )?(?:Decisions|Interfaces and decisions|Acceptance\b.*)")
+# "Interfaces and decisions", "Acceptance", "Acceptance criteria"), and its amendments and
+# revisions ("Amendment of ...", "Amendments of ...", "Revision N: ..."), whose text is in force
+# wherever it sits (maintainer decision, #1460). Context, rationale, open doubts, "Decisions
+# taken" and "Changes to other documents" are history: they name what the document replaces.
+REFUSED_NORMATIVE = re.compile(
+    r"(?:\d+\. )?(?:Decisions|Interfaces and decisions|(?:Acceptance|Amendments?|Revision \d+)\b.*)"
+)
 REFUSED_ALLOW_ENTRY = re.compile(r"(\S+)\s+(\S+)\s+(#\d+)\s+(\d{4}-\d{2}-\d{2})")
 
 

@@ -69,8 +69,10 @@ class RefusedNames(unittest.TestCase):
     def test_a_historical_mention_passes(self):
         for heading in (
             "1. Context",
+            "1. Scope, non-goals and rationale",
+            "4. Open doubts",
             "6. Decisions taken",
-            "7. Amendment of 2026-10-06: GNOME",
+            "3. Changes to other documents",
         ):
             with self.subTest(heading=heading):
                 self.write(
@@ -79,6 +81,18 @@ class RefusedNames(unittest.TestCase):
                     + f"## {heading}\n\nIt replaces cosmic-launcher and GTK4.\n",
                 )
                 self.assertEqual(self.problems(), [])
+
+    def test_an_amendment_or_a_revision_section_is_normative(self):
+        for heading in (
+            "7. Amendment of 2026-10-06: GNOME Disks instead",
+            "9. Amendments of 2026-10-06",
+            "8. Revision 3: the file manager on Sal",
+        ):
+            with self.subTest(heading=heading):
+                self.write(DOC, APPROVED + f"## {heading}\n\nIt uses libadwaita.\n")
+                problems = self.problems()
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("names `libadwaita`", problems[0])
 
     def test_a_document_not_approved_passes(self):
         self.write(
