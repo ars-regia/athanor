@@ -292,6 +292,8 @@ class Repomd(unittest.TestCase):
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
             base + "repodata/p.xml.gz": gzip.compress(xml),
+            RELEASES + "repodata/repomd.xml": REPOMD,
+            RELEASES + "repodata/p.xml.gz": gzip.compress(primary()),
         }
         with tempfile.TemporaryDirectory() as d:
             code = lock.main(["generate", "legacy", "--version", "580.178.04", "--locks", d], download=lambda url: files.get(url, rpm))
@@ -316,6 +318,8 @@ class Repomd(unittest.TestCase):
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
             base + "repodata/p.xml.gz": gzip.compress(xml),
+            RELEASES + "repodata/repomd.xml": REPOMD,
+            RELEASES + "repodata/p.xml.gz": gzip.compress(primary()),
         }
         with tempfile.TemporaryDirectory() as d:
             tmp = pathlib.Path(d)
@@ -342,6 +346,8 @@ class Repomd(unittest.TestCase):
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
             base + "repodata/p.xml.gz": gzip.compress(xml),
+            RELEASES + "repodata/repomd.xml": REPOMD,
+            RELEASES + "repodata/p.xml.gz": gzip.compress(primary()),
         }
         code = lock.main(["check", "legacy", "--version", "580.178.04"], download=lambda url: files.get(url, rpm))
         self.assertEqual(code, 0)
@@ -358,6 +364,8 @@ class Repomd(unittest.TestCase):
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
             base + "repodata/p.xml.gz": gzip.compress(xml),
+            RELEASES + "repodata/repomd.xml": REPOMD,
+            RELEASES + "repodata/p.xml.gz": gzip.compress(primary()),
         }
         err = io.StringIO()
         with redirect_stderr(err):
@@ -377,16 +385,16 @@ class Repomd(unittest.TestCase):
 
 
 LEGACY = lock.BRANCHES["legacy"]["baseurl"]
-# The legacy set's successor repository: verify reads it on every run.
-UPDATES = "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/"
+# The legacy set's second tree: the releases tree, read after the updates tree (LEGACY).
+RELEASES = "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/"
 REPOMD = b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>'
 
 
-def legacy_repo(*packages, updates=()):
-    """A download function serving RPM Fusion metadata that lists `packages`, and the legacy
-    set's successor tree listing `updates` (empty on 2026-11-04)."""
+def legacy_repo(*packages, releases=()):
+    """A download function serving RPM Fusion metadata that lists `packages` in the legacy set's
+    first tree, and `releases` in its second (empty unless a test fills it)."""
     files = {LEGACY + "repodata/repomd.xml": REPOMD, LEGACY + "repodata/p.xml.gz": gzip.compress(primary(*packages)),
-             UPDATES + "repodata/repomd.xml": REPOMD, UPDATES + "repodata/p.xml.gz": gzip.compress(primary(*updates))}
+             RELEASES + "repodata/repomd.xml": REPOMD, RELEASES + "repodata/p.xml.gz": gzip.compress(primary(*releases))}
     return lambda url: files[url]
 
 
@@ -454,9 +462,39 @@ class LegacyFedora45(unittest.TestCase):
         self.assertEqual({b: s["floor"] for b, s in lock.BRANCHES.items()},
                          {"open": False, "legacy": True, "container-toolkit": False})
 
-    def test_the_fedora_45_releases_tree(self):
-        self.assertEqual(lock.BRANCHES["legacy"]["baseurl"],
-                         "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/")
+    def test_the_fedora_45_updates_tree_first_and_the_releases_tree_second(self):
+        self.assertEqual(lock.trees("legacy"), [
+            "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/",
+            "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/"])
+        self.assertEqual(lock.trees("open"), [lock.BRANCHES["open"]["baseurl"]])
+
+    def test_the_newest_of_both_trees_and_updates_at_an_equal_version(self):
+        def settings(release):
+            return package("nvidia-settings-580xx", 3, "580.196.07", f"{release}.fc45", "x86_64", f"n/settings-{release}.rpm", "a" * 64)
+        driver = [package(n, 3, "580.196.07", "2.fc45", "x86_64", f"x/{n}-2.rpm", "b" * 64)
+                  for n in lock.BRANCHES["legacy"]["packages"] if n != "nvidia-settings-580xx"]
+        old_driver = package("xorg-x11-drv-nvidia-580xx", 3, "580.196.07", "1.fc45", "x86_64", "x/old.rpm", "c" * 64)
+        companions = legacy_companions("d" * 64, version="620.73.04")
+        old_companions = legacy_companions("e" * 64)
+        got = {e["name"]: e["base"] + e["href"] for e in lock.resolve(
+            "legacy", "580.196.07", legacy_repo(*driver, *companions, releases=[settings(1), old_driver, *old_companions]))}
+        self.assertEqual(got["nvidia-settings-580xx"], RELEASES + "n/settings-1.rpm")
+        self.assertEqual(got["xorg-x11-drv-nvidia-580xx"], LEGACY + "x/xorg-x11-drv-nvidia-580xx-2.rpm")
+        self.assertTrue(got["nvidia-modprobe"].startswith(LEGACY))
+        # The same release in both trees is not ambiguous: the first tree wins.
+        got = {e["name"]: e["base"] for e in lock.resolve(
+            "legacy", "580.196.07", legacy_repo(settings(1), *driver, *companions, releases=[settings(1)]))}
+        self.assertEqual(got["nvidia-settings-580xx"], LEGACY)
+
+    def test_a_lock_may_name_either_tree_and_no_other(self):
+        for url, refused in ((RELEASES + "a.rpm", False), (LEGACY + "a.rpm", False), ("https://evil.example/a.rpm", True)):
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as d:
+                lock.write_lock(pathlib.Path(d) / "legacy.lock", "legacy", "580.196.07", LEGACY, [("a" * 64, url)])
+                if refused:
+                    with self.assertRaisesRegex(lock.LockError, "URL outside the repository"):
+                        lock.load_lock(pathlib.Path(d), "legacy")
+                else:
+                    lock.load_lock(pathlib.Path(d), "legacy")
 
 
 # The base release, read as system/build-image.sh reads it.
@@ -476,7 +514,7 @@ class FedoraRelease(unittest.TestCase):
         bound = set()
         for branch, spec in lock.BRANCHES.items():
             _, _, locked, entries = lock.read_lock(lock.LOCKS / f"{branch}.lock")
-            for url in filter(None, (locked, *(u for _, u in entries), spec["baseurl"], spec["successor"])):
+            for url in filter(None, (locked, *(u for _, u in entries), *lock.trees(branch))):
                 release = URL_RELEASE.search(url)
                 if release:
                     bound.add(branch)
@@ -670,39 +708,18 @@ class Verify(unittest.TestCase):
         code, _, _ = self.verify(download)
         self.assertEqual(code, 1)
 
-    def test_updates_publishing_the_primary_package_fails_naming_the_move(self):
-        # Even with the lock matching the releases tree: the frozen tree never sees an update.
-        updates = [package("xorg-x11-drv-nvidia-580xx", 3, "580.205.01", "1.fc45", "x86_64", "x/new.rpm", "f" * 64)]
-        code, _, err = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
-        self.assertEqual(code, lock.MOVED)
-        self.assertEqual(lock.MOVED, 6)
-        self.assertIn(f"{UPDATES} publishes xorg-x11-drv-nvidia-580xx: the legacy set must move there from {LEGACY}", err)
-
-    def test_an_unreadable_successor_fails_and_is_not_a_move(self):
-        # The releases tree answers; only the updates tree fails, by 404 or by a network error.
-        releases = legacy_repo(*legacy_family("580.178.04", 1, "a" * 64))
-        for failure in (urllib.error.HTTPError(UPDATES + "repodata/repomd.xml", 404, "Not Found", None, None),
+    def test_an_unreadable__second_tree_fails(self):
+        # The updates tree answers; only the releases tree fails, by 404 or by a network error.
+        updates = legacy_repo(*legacy_family("580.178.04", 1, "a" * 64))
+        for failure in (urllib.error.HTTPError(RELEASES + "repodata/repomd.xml", 404, "Not Found", None, None),
                         OSError("connection reset")):
             def download(url, failure=failure):
-                if url.startswith(UPDATES):
+                if url.startswith(RELEASES):
                     raise failure
-                return releases(url)
+                return updates(url)
             with self.subTest(failure=failure):
                 code, _, err = self.verify(download)
                 self.assertEqual(code, 1)
-                self.assertNotIn("must move there", err)
-
-    def test_updates_with_other_nvidia_packages_only_is_not_a_move(self):
-        updates = [package(n, 3, "615.80.01", "1.fc45", "x86_64", f"x/{n}.rpm", "f" * 64)
-                   for n in ("xorg-x11-drv-nvidia", "nvidia-persistenced", "akmod-nvidia-580xx")]
-        code, _, _ = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
-        self.assertEqual(code, 0)
-
-    def test_the_successor_is_fedora_45_updates_and_only_for_legacy(self):
-        self.assertEqual({b: s["successor"] for b, s in lock.BRANCHES.items()}, {
-            "open": None, "container-toolkit": None,
-            "legacy": UPDATES})
-
 
 
 class MirrorFirst(unittest.TestCase):
