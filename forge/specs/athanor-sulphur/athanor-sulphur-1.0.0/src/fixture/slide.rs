@@ -174,6 +174,61 @@ fn a_right_to_left_language_mirrors_the_slide() {
     run.stop();
 }
 
+/// A popup slides with its window: half way out it is drawn half the output's width from where
+/// it stood, and nothing of it is left there.
+#[test]
+fn a_popup_slides_with_its_window() {
+    let mut run = Running::start(None);
+    let two = two_workspaces(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    let parent = local.another(&mut run, "parent");
+    let window = local.server_window(&run, &parent.surface);
+    run.state.space.relocate_element(&window, (100, 560));
+    run.state.settle(&window);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    // Over the whole window, which is black: only the popup shows green.
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(WIDTH, HEIGHT);
+    positioner.set_anchor_rect(0, 0, WIDTH, HEIGHT);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    xdg.get_popup(Some(&parent.xdg), &positioner, &qh, ());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 255, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+    let root = window.toplevel().expect("a toplevel").wl_surface().clone();
+    let (_, offset) = smithay::desktop::PopupManager::popups_for_surface(&root)
+        .next()
+        .expect("the popup");
+    let placed = run.state.space.element_geometry(&window).expect("shown");
+    let middle = placed.loc + offset + Point::from((WIDTH / 2, HEIGHT / 2));
+    let green = at(&frame(&mut run), middle.x, middle.y);
+    assert!(!background(&green), "the popup is drawn");
+    assert!(run.state.activate_workspace(two.list[0]));
+    advance(DURATION / 2);
+    let shown = frame(&mut run);
+    assert_eq!(
+        at(&shown, middle.x + 640, middle.y),
+        green,
+        "half way out with its window"
+    );
+    assert!(
+        background(&at(&shown, middle.x, middle.y)),
+        "nothing of it where it stood"
+    );
+    run.stop();
+}
+
 /// A third switch during a slide keeps the first workspace left on its way out: it is drawn
 /// where it stood, and the second beside the one activated.
 #[test]
