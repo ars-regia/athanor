@@ -1,0 +1,17 @@
+# What scripts/verify.py refused-names (#1460) does not read in docs/architecture, one line each,
+# and the only place where that is decided: the list only shrinks against the base, so a pull
+# request that adds a line fails.
+#
+# `history HEADING` is a section of a specification that is history or rationale. It matches the
+# whole heading after its number, case-insensitively (so "Context menus" is read). The maintainer
+# named exactly these five: Context, Sources, Spikes, Open doubts and Risks. Every other section
+# binds, whatever its heading says, and so does the text before the first heading.
+#
+# `register DOCUMENT` is a reference register: its rows quote what other shells and desktops do,
+# to be compared with Athanor's own decisions, and say nothing of what Athanor ships.
+history context
+history sources
+history spikes
+history open doubts
+history risks
+register shell-features.md

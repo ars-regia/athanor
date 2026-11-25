@@ -14,9 +14,13 @@
 cosmic[-_](?!(?:ray|scale|specific|defaults|allowed)(?![a-z0-9]))[a-z][a-z0-9]*(?![a-z0-9])
 # A package named by a suffix, which the `cosmic-` prefix rule cannot see.
 xdg-desktop-portal-cosmic
-# The applications of the COSMIC suite, named by their product name with a space.
-cosmic files
-cosmic store
+# The applications of the COSMIC suite on the image, named by their capitalised product name
+# with a space ("COSMIC Settings", "COSMIC Epoch"); case-sensitive, so a lower-case
+# "COSMIC store" or "fixture COSMIC files" (a store or files of COSMIC) is not a product name.
+(?-i:COSMIC (?:Files|Store|Settings|Epoch|Terminal|Edit|Player|Screenshot|Launcher|Panel|Applets|Greeter|Notifications|Workspaces|App Library|Session|Idle|Wallpapers|Initial Setup|Randr|OSD))
+# The iced toolkit and its subcrates (`iced_core`, `iced_widget`), refused by decision 7
+# (OWN_REFUSED_CRATES); reported as `iced`.
+iced(?:_[a-z][a-z0-9_]*)?
 libcosmic
 pop-launcher
 gtk4-layer-shell
