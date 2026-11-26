@@ -813,14 +813,14 @@ impl State {
         true
     }
 
-    /// The place a parked or minimised `window` keeps, its geometry's top left in the space:
-    /// where it comes back.
+    /// Where a parked or minimised `window` comes back, its geometry's top left in the space:
+    /// the place it keeps, through `reachable`.
     pub(crate) fn parked_at(&self, window: &Window) -> Option<Point<i32, Logical>> {
         self.parked
             .iter()
             .chain(self.minimised.iter())
             .find(|(kept, _)| kept == window)
-            .map(|(_, at)| *at)
+            .map(|(_, at)| self.reachable(window, *at))
     }
 
     /// The handle of the workspace `id` that `client`'s workspace manager was sent, if it binds

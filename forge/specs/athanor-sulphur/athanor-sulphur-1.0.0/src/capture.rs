@@ -249,7 +249,10 @@ impl State {
                 .iter()
                 .rev()
                 .filter(|(window, _)| on(window))
-                .map(|(window, at)| (window.clone(), Rectangle::new(*at, window.geometry().size)))
+                .map(|(window, at)| {
+                    let at = self.reachable(window, *at);
+                    (window.clone(), Rectangle::new(at, window.geometry().size))
+                })
                 .collect()
         };
         Some(Target::Workspace { output, windows })

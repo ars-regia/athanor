@@ -196,8 +196,9 @@
       <description summary="the window's place on an output">
         The window's geometry on output, in logical pixels, x and y relative to that output's
         top left. A window shown is sent for each output it overlaps; a window on an inactive
-        workspace, or minimised, is sent the place it keeps, on its workspace's output. A
-        width or a height of zero withdraws the window from that output.
+        workspace, or minimised, is sent the place it comes back to, on its workspace's output:
+        the place it keeps, or centred on that output when the output no longer shows that
+        place. A width or a height of zero withdraws the window from that output.
       </description>
       <arg name="output" type="object" interface="wl_output"/>
       <arg name="x" type="int"/>

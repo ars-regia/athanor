@@ -677,6 +677,66 @@ fn an_inactive_workspace_is_captured() {
     run.stop();
 }
 
+/// A window parked across its output's edge that the output no longer shows once it shrinks is
+/// sent, drawn and brought back in one place: centred on its workspace's output (`reachable`).
+#[test]
+fn a_parked_window_its_output_no_longer_shows_is_sent_where_it_comes_back() {
+    use WindowEvent::{Done, Enter, Geometry};
+    let mut run = Running::start(None);
+    let (mut local, manager) = overview(&mut run);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let first_output = local.output(0);
+    let blue = local.another(&mut run, "blue");
+    local.paint(&mut run, &blue, BLUE);
+    let window = local.server_window(&run, &blue.surface);
+    let first = output_at(&run, 0);
+    let area = run.state.space.output_geometry(&first).expect("placed");
+    // Across the first output's right edge, onto the second.
+    let across = area.loc + Point::from((area.size.w - 100, 200));
+    run.state.space.relocate_element(&window, across);
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.move_window_to(&window, list[1]));
+    assert!(run.state.is_parked(&window));
+
+    first.change_current_state(None, None, Some(smithay::output::Scale::Integer(2)), None);
+    layer_map_for_output(&first).arrange();
+    run.state.arrange_outputs();
+    let home = run.state.home_area(&window).expect("its output's area");
+    let size = window.geometry().size;
+    let back = crate::state::centred(home, size);
+    let shown = run.state.space.output_geometry(&first).expect("placed");
+    assert!(
+        !shown.overlaps(smithay::utils::Rectangle::new(across, size)),
+        "no longer shown"
+    );
+    assert_eq!(run.state.parked_at(&window), Some(back));
+
+    let handle = local.handle(&mut run, "blue");
+    let handles = local.handles(&mut run, 0);
+    let object = manager.get_workspace_window(&handle, &local.queue.handle(), ());
+    let relative = back - shown.loc;
+    assert_eq!(
+        local.window_events(&mut run, &object),
+        [
+            Enter(handles[1].id()),
+            Geometry(first_output.id(), relative.x, relative.y, size.w, size.h),
+            Done
+        ]
+    );
+
+    let frame = captured_workspace(&mut local, &mut run, &manager, &handles[1], 0);
+    let (x, y) = (relative.x + size.w / 2, relative.y + size.h / 2);
+    assert_eq!(
+        pixel(&frame, OUTPUTS[0].width, x * 2, y * 2),
+        BLUE,
+        "drawn where it comes back"
+    );
+
+    assert!(run.state.activate_workspace(list[1]));
+    assert_eq!(run.state.space.element_location(&window), Some(back));
+    run.stop();
+}
+
 /// A workspace's windows keep their places and their marks when another workspace is shown: the
 /// window not focused is drawn as before, divider and corners with it, and the focused one as
 /// before inside its geometry. The focus outline round it goes once its workspace is left, since
