@@ -309,9 +309,10 @@ What the forge does today, read on `iso-v0` at c774a2056:
   and this work adds new images and an artifact, new registry entries and a new input of the
   signing job. The revision covers:
   - `doc_build_system.md` section 3 (`debugedit` and the macros of decision 2 in the builder),
-    section 5 (the split of decision 3, the `-debuginfo` image, its push order and the
-    orchestrator's existence test) and section 6 (the artifact of decision 4 beside the system
-    images);
+    section 5 (the split of decision 3, the `-debuginfo` image, its push order and the two
+    existence tests, `evaluate_dirty_nodes` and `image_exists` of `dag_orchestrator.py` and the
+    `CACHE_HIT` of `check_idempotency.sh`) and section 6 (the artifact of decision 4 beside the
+    system images);
   - `doc_ci.md` section 1.3 (rows for the `-debuginfo` images and `athanor-debuginfo`, their
     tags and signatures), CI4, CI5, CI21 (the janitor) and CI33 `candidate`, `sign-images` and
     `verify-images` (decisions 4 and 5);
