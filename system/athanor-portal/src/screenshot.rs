@@ -192,6 +192,12 @@ pub fn compose(shots: &[Shot]) -> Result<Image, String> {
     let mut scale = 0f64;
     let (mut left, mut top, mut right, mut bottom) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
     for shot in shots {
+        if shot.transform > 7 {
+            return Err(format!(
+                "an output's transform {} is not one of wl_output's eight",
+                shot.transform
+            ));
+        }
         let (width, height) = shot.upright();
         if shot.width <= 0 || shot.height <= 0 || width == 0 || height == 0 {
             return Err(format!(
@@ -709,6 +715,13 @@ mod tests {
         // What no output covers is transparent.
         assert_eq!(image.pixel(0, 3), [0; 4]);
         assert_eq!(image.pixel(5, 0), [0; 4]);
+    }
+
+    #[test]
+    fn a_transform_that_is_not_one_of_the_eight_is_refused() {
+        let mut odd = shot(0, 0, (2, 1), (2, 1), |_, _| [255, 0, 0, 255]);
+        odd.transform = 9;
+        assert!(compose(&[odd]).is_err());
     }
 
     #[test]
