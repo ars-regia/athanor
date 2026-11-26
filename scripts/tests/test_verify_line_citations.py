@@ -247,6 +247,44 @@ class Names(unittest.TestCase):
         self.assertEqual(messages("| `grant` | the `unheld` at `src/x.rs:2` |"), [])
         self.assertEqual(len(messages("| `grant` the `unheld` at `src/x.rs:2` |")), 1)
 
+    def test_a_key_value_setting_is_a_token_held_as_written(self):
+        # #1548: `ProtectSystem=strict` was no token, so a citation of it could not be placed again
+        unit = {"unit/a.service": "[Service]\nProtectSystem=strict\nProtectHome=yes\n# ProtectSystem off\nWantedBy=a.target\n"}
+        cite = "The unit sets `ProtectSystem=strict` (`unit/a.service:{}`)."
+        self.assertEqual(messages(cite.format(2), unit), [])
+        for line in (3, 4):
+            with self.subTest(line=line):
+                out = messages(cite.format(line), unit)
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("does not hold `ProtectSystem=strict`", out[0])
+        self.assertFalse(verify.holds_token("ProtectSystem=strictly", "ProtectSystem=strict"))
+        # a setting whose value names a file is a token all the same
+        wanted = "The unit sets `WantedBy=a.target` (`unit/a.service:{}`)."
+        self.assertEqual(messages(wanted.format(5), unit), [])
+        self.assertEqual(len(messages(wanted.format(2), unit)), 1)
+        # the bare words keep their reading: `strict`, the last of them, is the token
+        bare = "The unit sets `ProtectSystem`=`strict` (`unit/a.service:{}`)."
+        self.assertEqual(messages(bare.format(2), unit), [])
+        self.assertEqual(len(messages(bare.format(3), unit)), 1)
+
+    def test_a_setting_ends_at_whitespace_or_the_end_of_the_text(self):
+        held = verify.holds_token
+        for text, token in (
+            ("Path=/usr/bin/foo", "Path=/usr/bin"),
+            ("WantedBy=a.target.wants", "WantedBy=a.target"),
+            ("Foo=bar,baz", "Foo=bar"),
+            ("Foo=bar:baz", "Foo=bar"),
+            ("Foo=bar=baz", "Foo=bar"),
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(held(text, token))
+        # a space-separated list holds each of its items
+        self.assertTrue(held("CapabilityBoundingSet=CAP_A CAP_B", "CapabilityBoundingSet=CAP_A"))
+        self.assertTrue(held("WantedBy=a.target\n", "WantedBy=a.target"))
+        # known leniency, #1553: a comment that holds the whole setting holds it
+        unit = {"unit/b.service": "[Service]\n# ProtectSystem=strict below\nProtectSystem=strict\n"}
+        self.assertEqual(messages("It sets `ProtectSystem=strict` (`unit/b.service:2`).", unit), [])
+
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
         self.assertEqual(messages("`grant` and `x.rs` at `src/x.rs:1`."), [])

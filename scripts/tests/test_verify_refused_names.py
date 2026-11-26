@@ -578,6 +578,82 @@ class RefusedNames(unittest.TestCase):
         problems = self.problems()
         self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
 
+    CITED = "ADR-0141 removes libadwaita (`athanor-session:{}`) from the shell."
+
+    def placed_again(self, after):
+        """The problems against the base of a kept sentence, entry unchanged, once the document's
+        sentence reads AFTER."""
+        self.write("system/athanor-session", "one\n")
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{self.CITED.format('3-4')}\n")
+        self.kept(text=self.CITED.format("3-4"))
+        self.commit()
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{after}\n")
+        return self.problems("HEAD")
+
+    def test_a_kept_sentence_whose_citation_is_placed_again_keeps_its_entry(self):
+        # #1548: line-citations asks for a citation to be placed again on a changed citing line,
+        # and the only change that places it with the same words is one of its numbers. The
+        # cited file, `system/athanor-session`, is tracked, written by its name alone, and has no
+        # extension.
+        self.assertEqual(self.placed_again(self.CITED.format("5")), [])
+
+    def test_a_kept_fragment_that_starts_at_a_short_citation_keeps_its_entry(self):
+        # the `:N` of the fragment follows the sentence's `athanor-session:3`, which the fragment
+        # leaves out: the fragment is blanked as the rest of that line
+        line = "ADR-0141 cites `athanor-session:3`, and at `:{}` removes libadwaita from the shell."
+        self.write("system/athanor-session", "one\n")
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format(4)}\n")
+        self.kept(text="at `:4` removes libadwaita from the shell.")
+        self.commit()
+        self.assertEqual(self.problems("HEAD"), [])
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format(5)}\n")
+        self.assertEqual(self.problems("HEAD"), [])
+
+    def test_a_line_citation_cited_again_by_symbol_keeps_its_entry(self):
+        # #1133: `src/identity.rs:898` cited again as `src/identity.rs#SHELL_CLIENTS`
+        line = "ADR-0141: its line (`{}`) leaves libadwaita at the retirement step."
+        self.write("crate/src/identity.rs", "one\n")
+        self.write("crate/src/other.rs", "one\n")
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format('src/identity.rs:898')}\n")
+        self.kept(text=line.format("src/identity.rs:898"))
+        self.commit()
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format('src/identity.rs#SHELL_CLIENTS')}\n")
+        self.assertEqual(self.problems("HEAD"), [])
+        # a symbol of another file is another citation: the entry is unused and the sentence a hit
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format('src/other.rs#SHELL_CLIENTS')}\n")
+        problems = self.problems("HEAD")
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("no longer appears" in p for p in problems), problems)
+        self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
+
+    def test_a_refused_name_in_a_symbol_citation_is_a_hit(self):
+        self.write("src/x.rs", "one\n")
+        problems = self.under("2. Decisions", "The dialog is `src/x.rs#adw::Dialog`.")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("names `adw`", problems[0])
+
+    def test_a_span_that_cites_no_tracked_file_is_text(self):
+        # an image tag, a port and a socket address are not citations: a change of one is a
+        # change of the sentence
+        for span in ("quay.io/fedora/fedora-bootc:{}", "quay.io:{}", "unix:/run/athanor/osd.sock:{}"):
+            with self.subTest(span=span):
+                before = self.CITED.format("3-4").replace("`)", f"`, `{span.format(43)}`)")
+                self.write("system/athanor-session", "one\n")
+                self.write(DOC, APPROVED + f"## 2. Decisions\n\n{before}\n")
+                self.kept(text=before)
+                self.commit()
+                after = before.replace(span.format(43), span.format(44))
+                self.write(DOC, APPROVED + f"## 2. Decisions\n\n{after}\n")
+                problems = self.problems("HEAD")
+                self.assertEqual(len(problems), 2, problems)
+                self.assertTrue(any("no longer appears" in p for p in problems), problems)
+
+    def test_a_reworded_kept_sentence_with_a_citation_still_fails(self):
+        problems = self.placed_again(self.CITED.format("3, 4").replace("shell", "bar"))
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("no longer appears" in p for p in problems), problems)
+        self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
+
     def test_a_malformed_entry_fails(self):
         for text in (
             "doc_x.md libadwaita\n",
