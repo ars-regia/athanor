@@ -1,0 +1,38 @@
+# The names ADR-0141 refuses to Athanor's own stack (scripts/verify.py refused-names, #1460), one
+# regular expression per line, read case-insensitively: a match is a name only when no letter,
+# digit, `_` or `-` precedes it and no letter or digit follows. Decision 3 refuses every COSMIC
+# package, cosmic-comp included, and decision 7 the GTK layer-shell libraries,
+# `xdg-user-dirs-gtk`, GTK4, libadwaita and libcosmic. Every line has a positive test in
+# scripts/tests/test_verify_refused_names.py, which fails when a line is added or deleted
+# without one.
+#
+# A `cosmic-NAME` (or a `cosmic_name` crate) is reported by its first word only
+# (`cosmic-settings-daemon` reads `cosmic-settings`). The wildcard keeps decision 3's "every
+# COSMIC package", so a package no document names yet is caught; it excludes the three English
+# compounds `cosmic-ray`, `cosmic-scale` and `cosmic-specific`, which name no package, and
+# `cosmic-defaults` and `cosmic-allowed`, which are Athanor's own paths, not COSMIC packages.
+cosmic[-_](?!(?:ray|scale|specific|defaults|allowed)(?![a-z0-9]))[a-z][a-z0-9]*(?![a-z0-9])
+# A package named by a suffix, which the `cosmic-` prefix rule cannot see.
+xdg-desktop-portal-cosmic
+# The applications of the COSMIC suite on the image, named by their capitalised product name
+# with a space ("COSMIC Settings", "COSMIC Epoch"); case-sensitive, so a lower-case
+# "COSMIC store" or "fixture COSMIC files" (a store or files of COSMIC) is not a product name.
+(?-i:COSMIC (?:Files|Store|Settings|Epoch|Terminal|Edit|Player|Screenshot|Launcher|Panel|Applets|Greeter|Notifications|Workspaces|App Library|Session|Idle|Wallpapers|Initial Setup|Randr|OSD))
+# The iced toolkit and its subcrates (`iced_core`, `iced_widget`), refused by decision 7
+# (OWN_REFUSED_CRATES); reported as `iced`.
+iced(?:_[a-z][a-z0-9_]*)?
+libcosmic
+pop-launcher
+gtk4-layer-shell
+gtk-layer-shell
+xdg-user-dirs-gtk
+# GTK4, with a space ("GTK 4") or a hyphen (`gtk-4`). `org.gtk.gtk4.` is the D-Bus namespace of the file
+# chooser's settings, a third party's name for an interface, not the toolkit. `gtk4-rs`, the Rust
+# bindings, is the toolkit and stays a hit.
+(?<!org\.gtk\.)gtk[ -]?4
+libadwaita
+# An libadwaita type (`AdwDialog`, `AdwToastOverlay`) without the word libadwaita; reported as
+# `adw`. Case-sensitive, so `adware` is no name; `Adwaita`, the theme, has no type prefix.
+(?-i:Adw[A-Z][A-Za-z]+)
+# A libadwaita path (`adw::Dialog`); reported as `adw`.
+(?-i:adw::[A-Za-z_]+)
