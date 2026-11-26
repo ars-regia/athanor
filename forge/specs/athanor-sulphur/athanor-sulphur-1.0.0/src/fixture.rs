@@ -13789,3 +13789,7 @@ mod window_grab;
 // VL9 and AX9: the workspace slide, and reduced motion.
 #[cfg(test)]
 mod slide;
+
+// Decision 38: `input.toml` and `windows.toml`.
+#[cfg(test)]
+mod settings;

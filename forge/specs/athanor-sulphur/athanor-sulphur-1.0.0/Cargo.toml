@@ -34,6 +34,9 @@ libc = { workspace = true }
 calloop = { workspace = true, features = ["signals"] }
 # The watch of `xkb_config` (`xkb_config.rs`).
 nix = { workspace = true, features = ["inotify"] }
+# The user's `input.toml` and `windows.toml` (`input_settings.rs`, `window_settings.rs`;
+# doc_own_stack.md decision 38).
+toml = { workspace = true }
 # The lock request to logind (`lock.rs`), a blocking call on its own thread, and
 # WAYLAND_DISPLAY to the user manager (`ready.rs`), each in a `zbus::block_on` call: the
 # multi-threaded runtime keeps serving the keyboard monitor's connection between those calls.

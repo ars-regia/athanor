@@ -2056,7 +2056,7 @@ compositor and that the own compositor did not yet offer:
       - `windows.toml`: the workspace and window keys of SE14 (the workspaces' mode, layout
         and wraparound, the action on typing, automatic tiling and its behaviour, the active window's
         hint, focus follows the pointer and its delay, the pointer follows focus, and the edge
-        snap threshold).
+        snap threshold). *Amended on 2026-11-26 (maintainer decision, 2026-11-26), #1417:* the edge snap threshold is not a key of `windows.toml` until #1417, which snaps a floating window to the edges of the screen, has approved text: the compositor snaps no window to an edge, so the file refuses `edge_snap_threshold` as an unknown key and Settings shows no row for it.
       A key that is absent takes the compositor's default, compiled into it: for the touchpad the
       values cosmic-comp shipped (click method by finger count, two-finger scrolling, tap and drag
       on; SE16), which leave the image with cosmic-comp. The files are written only through
@@ -2073,7 +2073,7 @@ compositor and that the own compositor did not yet offer:
       `xkb_config`'s; that choice is open to the maintainer at the approval. Fixture tests: each
       key reaches the libinput device or the window rule it names in the fixture of OS6, an absent
       key gives the default, a refused file and a refused key leave the rest, and a change is
-      followed without a restart.
+      followed without a restart. *Amended on 2026-11-26 (maintainer decisions, 2026-11-26):* a key that is absent takes libinput's default for the device, and the touchpad the values listed above for it, in place of a default compiled into the compositor for every key; the keys and their values are snake_case names after COSMIC's fields, flattened from its nested settings, `scroll_factor` from 0.1 to 10 and `speed` from -1 to 1, and the README of `athanor-sulphur` lists the values each key accepts, the single list that `athanor_sulphur_client::input` and `window_management` match; Num Lock is on or off at the start of the session and is never restored from the session before, which would be state on disk; while the touchpad key of D16 holds the touchpads off it wins over their `state`, and with `state = "disabled"` it cannot turn them on; the compositor keeps the input settings it read in the seat's user data; until a follow-up of #1133 moves the active window's hint to `windows.toml` alone and amends decision 31 and SH2, the compositor draws the outline only while both COSMIC's `active_hint` and that of `windows.toml` are on, so `windows.toml` cannot turn it on over COSMIC's `false`; the keys the overview alone applies take a file of their own, decided with the overview's specification; and, the fixture of OS6 having no libinput device, the fixture tests are the unit tests of each key's resolution for a device (`resolve()`) and the fixture tests of a file followed live: an absent key gives the default, a refused file and a refused key leave the rest, and a change is followed without a restart.
 
     Not taken:
     - for the bindings, a bindings file of Athanor's own in release 1.0 (SE-Q6, option 2), which

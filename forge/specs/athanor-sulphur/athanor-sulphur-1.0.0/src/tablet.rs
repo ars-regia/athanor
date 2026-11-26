@@ -328,18 +328,28 @@ impl State {
         }
     }
 
-    /// Where `event` is in the space: its position spans the first output, as a touchpad's
-    /// absolute position does (`process_input_event`).
+    /// Where `event` is in the space: its position spans the output `input.toml` maps the
+    /// tablet to when that output is shown, else the first output, as a touchpad's absolute
+    /// position does (`process_input_event`).
     fn tablet_location<I: InputBackend>(
         &self,
         event: &impl AbsolutePositionEvent<I>,
-    ) -> Option<Point<f64, Logical>> {
-        self.on_first_panel(|panel| event.position_transformed(panel))
+    ) -> Option<Point<f64, Logical>>
+    where
+        I::Device: 'static,
+    {
+        match self.mapped_output(&event.device()) {
+            Some(output) => self.on_output(&output, |size| event.position_transformed(size)),
+            None => self.on_first_panel(|panel| event.position_transformed(panel)),
+        }
     }
 
     /// Reads a device or tablet event of the backend. Other events are not a tablet's and are
     /// left alone.
-    pub(crate) fn tablet_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+    pub(crate) fn tablet_event<I: InputBackend>(&mut self, event: InputEvent<I>)
+    where
+        I::Device: 'static,
+    {
         match event {
             InputEvent::DeviceAdded { device } => {
                 if device.has_capability(DeviceCapability::TabletTool) {

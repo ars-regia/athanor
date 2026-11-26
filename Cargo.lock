@@ -820,6 +820,7 @@ dependencies = [
  "nix 0.32.0",
  "smithay",
  "smithay-drm-extras",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "wayland-client",
