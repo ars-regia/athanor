@@ -111,14 +111,16 @@ those links is #1380, not yet decided. The store must not depend on it.
 
 3. **Schema versioning** (Q14, option 1). Per file. A reader reads `schema` first. An added key
    does not change the schema: a reader skips a key it does not know and logs it, as decision 38
-   already says, and a writer that rewrites a file keeps every key and table it does not know as
-   it found them, so a writer of an older image after a rollback never drops a key that a newer
+   already says, and a writer that rewrites a file keeps every key and table it does not know,
+   with their values, apart from comments and order, so a writer of an older image after a rollback never drops a key that a newer
    image added. This is a new duty of decision 38's `input` and `window_management` writers,
    whose files keep their format: every writer merges its change into the file as an untyped
    `toml::Table`, not through a typed round trip that drops what its type does not name. Such a
    rewrite drops the user's comments and the order of the keys, which is accepted: the files are
    written by Settings, not by hand. Decision 38's branch in progress (#1557,
-   `feat/sulphur-input-windows-toml`) adopts this rule before it merges. A removed key, or a key whose
+   `feat/sulphur-input-windows-toml`) builds only Sulphur's readers; the duty binds the client's
+   `input` and `window_management` writer modules when they are built (P1), as their acceptance
+   criterion. A removed key, or a key whose
    meaning or type changes, raises the file's schema by one. A reader that finds a newer schema
    than its own refuses the file whole, keeps its defaults and logs, as `favorites.toml` does; a
    writer that finds a newer schema refuses to write and returns an error. A value refused alone
@@ -202,8 +204,9 @@ those links is #1380, not yet decided. The store must not depend on it.
      `athanor-idle` grants its store, and `athanor-sulphur-client` a parser of that RON file.
    - **shelld's keyboard seed** from localed (LN9) waits for the record. shelld opens the file
      monitor of point 5 on the store's directory first, or, while that directory does not exist,
-     on its parent until it appears, and reads the record after, so a record written in between is
-     not missed. Once the record exists and lists the keyboard as `absent` or `refused`, it writes
+     on its nearest existing ancestor, moving down as each level appears, and reads the record
+     after, so a record written in between is not missed. While no record appears, shelld keeps
+     following until the session ends: that is the failed import below. Once the record exists and lists the keyboard as `absent` or `refused`, it writes
      `keyboard.toml` through the `keyboard` writer module as a creation only, the file's absence
      checked under the store's lock (point 4), so a file written meanwhile by Settings or the
      import is kept. Once it has seeded or found the file, shelld stops following. `After=`
@@ -279,8 +282,8 @@ those links is #1380, not yet decided. The store must not depend on it.
   `doc_accessibility.md` AX10, with the bar's grant on the colour filter's file;
   `doc_visual_language.md` VL4; `doc_own_stack.md` decisions 27, 28, 31 and 38, including decision
   38's sentence that the bindings move "after release 1.0", and its `input` and
-  `window_management` writers, which gain the duty of point 3 to keep unknown keys, adopted by
-  #1557 before it merges; `doc_shell.md` SH2's exceptions and
+  `window_management` writers, which gain the duty of point 3 to keep unknown keys as their
+  acceptance criterion when P1 builds them (#1557 builds only Sulphur's readers); `doc_shell.md` SH2's exceptions and
   `system/AGENTS.md`; `doc_threat_model.md` TM3 and `doc_tetragon.md` TG3;
   `doc_session_daemons.md` SD3, SD16 and the table that gives shelld the seed of `xkb_config`;
   `doc_session.md` SN3 and SN4, for the import unit and shelld's order after it, and SN15;

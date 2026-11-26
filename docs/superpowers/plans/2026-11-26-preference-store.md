@@ -137,14 +137,16 @@ starts. Checks: a new `verify.py preference-store`, which fails when code outsid
 `athanor-sulphur-client` names the store's directory, when a file of decision 38's table has no
 writer module or two, or when a writer module writes another file; `session-units`, `services`
 and `shipped` cover the new unit and binary, `coverage` its two entries, and `panic-hook` its
-`main`. Decision 38's `input` and `window_management` writers merge into an untyped
-`toml::Table` from this pull request on, whichever lands first.
+`main`. Decision 38's `input` and `window_management` writer modules of the client are built
+here, and merging into an untyped `toml::Table`, keeping unknown keys, is their acceptance
+criterion; #1557 builds only Sulphur's readers.
 
 **P2. The keyboard.** `keyboard.toml`, `keyboard`'s writer, the keyboard family of the import,
 Sulphur's reader on `keyboard.toml` with `xkb_config.rs`'s parser replaced by `toml`, keeping the
 first four of more layouts in place of refusing the file. shelld's seed from localed into
-`keyboard.toml` (LN9): shelld opens its monitor on the store's directory, or on the parent until
-the directory appears, then reads the record; once the record lists the keyboard as `absent` or
+`keyboard.toml` (LN9): shelld opens its monitor on the store's directory, or on its nearest
+existing ancestor, moving down as each level appears, then reads the record, and with no record
+keeps following until the session ends; once the record lists the keyboard as `absent` or
 `refused`, it creates the file through the `keyboard` writer only if it is absent under the
 store's lock, and then stops following. It lands with Settings' Keyboard page (SE15) or after
 it, never before (ADR-0150 point 9). Tests: fixtures of real `xkb_config` files written by
