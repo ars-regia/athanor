@@ -4566,13 +4566,19 @@ STORE_TABLE_DOC = "docs/architecture/doc_own_stack.md"
 STORE_TABLE_HEADER = re.compile(r"^\|\s*File\s*\|\s*Family\s*\|\s*Writer module\s*\|")
 # The store's directory, named as the path components athanor/sulphur after anything but a
 # system root (format!("{xdg}/athanor/sulphur"), %h/.config/athanor/sulphur), or as the string
-# literals "athanor" and "sulphur" a few characters apart, across lines (a .join chain).
+# literals "athanor" and "sulphur" a few characters apart, across lines, with a slash at their
+# ends or a "/" literal between them or neither (a .join chain, concat!).
 STORE_PATH = re.compile(r"(?<![\w.-])athanor/sulphur(?![\w.-])")
-STORE_JOINED = re.compile(r"[\"']athanor[\"'][^\"']{0,60}?[\"']sulphur[\"']")
-# The token before a STORE_PATH match that makes it a system path, /usr/share/athanor/sulphur.
-STORE_SYSTEM_ROOT = re.compile(r"(?:^|[\s\"'=(,])/(?:usr|etc|run|var|opt|srv)/(?:[\w.-]+/)*$")
-# Rust source and the files of systemd that can name a directory (a drop-in is a .conf).
-STORE_SUFFIXES = (".rs", ".service", ".socket", ".timer", ".path", ".mount", ".conf")
+STORE_JOINED = re.compile(r"[\"']athanor/?[\"'](?:[^\"']|[\"']/[\"']){0,60}?[\"']/?sulphur/?[\"']")
+# The token before a STORE_PATH match that makes it a system path, /usr/share/athanor/sulphur:
+# the image's roots and /var's system directories, never /var/home, where Athanor's homes are.
+STORE_SYSTEM_ROOT = re.compile(
+    r"(?:^|[\s\"'=(,])/(?:usr|etc|run|opt|srv|var/(?:lib|cache|log|spool))/(?:[\w.-]+/)*$")
+# The trees whose files the rule reads: the code's, and the rig's scripts under forge/test.
+STORE_DIRS = (*BOUNDARY_DIRS, "forge/test")
+# Systemd's files that can name a directory (a drop-in is a .conf), and shell scripts.
+STORE_UNIT_SUFFIXES = (".service", ".socket", ".timer", ".path", ".mount", ".conf", ".sh")
+STORE_SHEBANG = re.compile(rb"#![^\n]*\b(?:ba|da|k|z)?sh\b")
 # Code outside the client that may name the store, and why.
 STORE_NAMERS = {
     "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/input_settings.rs":
@@ -4625,19 +4631,35 @@ def store_namings(text, marker):
     return sorted(found)
 
 
+def store_comment_marker(path):
+    """The comment marker of a file the store's rule reads: Rust source, a systemd unit or
+    drop-in, a shell script by its suffix or its shebang; None for any other file."""
+    if path.name.endswith(".rs"):
+        return "//"
+    if path.name.endswith(STORE_UNIT_SUFFIXES):
+        return "#"
+    try:
+        with open(path, "rb") as f:
+            return "#" if STORE_SHEBANG.match(f.readline(256)) else None
+    except OSError:
+        return None
+
+
 def preference_store_problems(root):
     """(problems, notes) of the store's rules under root (ADR-0150 point 2)."""
     root = Path(root)
     problems, notes = [], []
-    for base in BOUNDARY_DIRS:
-        for suffix in STORE_SUFFIXES:
-            for path in walk(root / base, suffix):
-                relative = path.relative_to(root).as_posix()
-                if relative.startswith(STORE_CLIENT) or relative in STORE_NAMERS:
-                    continue
-                for i in store_namings(read(path), "//" if suffix == ".rs" else "#"):
-                    problems.append(f"{relative}:{i} names the preference store's directory: "
-                                    f"read and write it through athanor-sulphur-client (ADR-0150)")
+    for base in STORE_DIRS:
+        for path in walk(root / base, ""):
+            relative = path.relative_to(root).as_posix()
+            if relative.startswith(STORE_CLIENT) or relative in STORE_NAMERS:
+                continue
+            marker = store_comment_marker(path)
+            if marker is None:
+                continue
+            for i in store_namings(read(path), marker):
+                problems.append(f"{relative}:{i} names the preference store's directory: "
+                                f"read and write it through athanor-sulphur-client (ADR-0150)")
     doc = root / STORE_TABLE_DOC
     rows, unread = store_table(read(doc) if doc.is_file() else "")
     problems += unread

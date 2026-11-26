@@ -81,6 +81,11 @@ class PreferenceStoreTest(unittest.TestCase):
             "forge/specs/f/data/f.service": "[Service]\nReadWritePaths=%h/.config/athanor/sulphur\n",
             "forge/specs/g/data/g.service.d/10-x.conf": "[Service]\nReadWritePaths=%h/.config/athanor/sulphur/\n",
             "forge/specs/h/data/h.path": "[Path]\nPathChanged=%h/.config/athanor/sulphur/input.toml\n",
+            "system/i/src/home.rs": 'const P: &str = "/var/home/me/.config/athanor/sulphur";\n',
+            "system/j/src/concat.rs": 'const P: &str = concat!("athanor", "/", "sulphur");\n',
+            "system/k/src/slash.rs": 'let p = home.join("athanor/").join("sulphur");\n',
+            "system/l/store-namer.sh": 'install -d "$XDG_CONFIG_HOME/athanor/sulphur"\n',
+            "forge/test/m/run": '#!/usr/bin/env bash\ncp input.toml ~/.config/athanor/sulphur/\n',
         }
         for name, text in holes.items():
             with self.subTest(name):
@@ -97,6 +102,8 @@ class PreferenceStoreTest(unittest.TestCase):
                 'const M: &str = "other-athanor/sulphur";\n',
                 "forge/specs/b/data/b.service": "[Service]\n# ~/.config/athanor/sulphur\n"
                 "ReadOnlyPaths=/etc/xdg/athanor/sulphur\n",
+                "system/c/store-reader.sh": "ls /var/lib/athanor/sulphur\n# ls ~/.config/athanor/sulphur\n",
+                "forge/test/d/notes.txt": "~/.config/athanor/sulphur is not a script\n",
             }
         )
         self.assertEqual(found, [])
