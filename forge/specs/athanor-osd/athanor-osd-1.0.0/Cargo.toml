@@ -3,7 +3,7 @@ name = "athanor-osd"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "The Athanor on-screen display: the volume, mute and microphone keys, carried out and shown on a Sal layer surface"
+description = "The Athanor on-screen display: the volume, mute, microphone and brightness keys, carried out and shown on a Sal layer surface"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 # doc_osd.md OD2: Sal, the models, the compositor client without GTK, the style without GTK,

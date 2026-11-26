@@ -12,9 +12,10 @@ Requires:       athanor-calmo adwaita-icon-theme
 %description
 The transient overlay that confirms what a hardware key did, drawn with Athanor's own
 toolkit, Sal, on one layer surface per output (doc_osd.md). This release serves the volume,
-mute and microphone-mute keys on os.athanor.Osd1, carries each out through the audio model
-and shows the level at the bottom of the output of the active workspace. It is confined with
-Landlock at start. The user unit is installed and started by nothing: its D-Bus activation
+mute, microphone-mute and screen and keyboard brightness keys on os.athanor.Osd1, carries
+each out through the audio or the battery model and shows the level at the bottom of the
+output of the active workspace, as it shows a backlight change the hardware made. It is
+confined with Landlock at start. The user unit is installed and started by nothing: its D-Bus activation
 comes with the step that retires cosmic-osd.
 
 %prep
