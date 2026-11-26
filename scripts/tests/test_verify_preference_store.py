@@ -86,6 +86,11 @@ class PreferenceStoreTest(unittest.TestCase):
             "system/k/src/slash.rs": 'let p = home.join("athanor/").join("sulphur");\n',
             "system/l/store-namer.sh": 'install -d "$XDG_CONFIG_HOME/athanor/sulphur"\n',
             "forge/test/m/run": '#!/usr/bin/env bash\ncp input.toml ~/.config/athanor/sulphur/\n',
+            "system/n/src/tail.rs": 'let p = home.join("athanor").join("sulphur/input.toml");\n',
+            "system/o/src/lead.rs": 'let p = home.join(".config/athanor").join("sulphur");\n',
+            "system/p/src/double.rs": 'const P: &str = "athanor//sulphur";\n',
+            "system/q/src/dot.rs": 'const P: &str = "athanor/./sulphur";\n',
+            "forge/specs/r/data/r.service": "[Service]\nExecStart=cp x /etc/skel/.config/athanor/sulphur/\n",
         }
         for name, text in holes.items():
             with self.subTest(name):
@@ -159,10 +164,38 @@ class PreferenceStoreTest(unittest.TestCase):
         source = INPUT.replace(
             "#[cfg(test)]",
             "fn set(store: &Store) {\n    store.update(FILE, |_, _| Ok(()))\n}\n"
-            "fn hash(h: &mut Hasher) {\n    h.update(b\"x\");\n}\n#[cfg(test)]",
-        ) + 'fn t(store: &Store) {\n    store.update("x.toml", |_, _| Ok(()));\n}\n'
+            "fn hash(h: &mut Hasher) {\n    h.update(b\"x\");\n}\n"
+            'const DOC: &str = "store.update(OTHER, |_, _| Ok(()))";\n#[cfg(test)]',
+        ) + (
+            "#[cfg(test)]\nmod tests {\n    fn t(store: &Store) {\n"
+            '        store.update("x.toml", |_, _| Ok(()));\n    }\n}\n'
+        )
         found, _ = problems({CLIENT + "input.rs": source})
         self.assertEqual(found, [])
+
+    def test_a_write_after_a_test_item_a_comment_or_a_string_that_names_cfg_test_fails(self):
+        stray = 'fn set(store: &Store) {\n    store.update("other.toml", |_, _| Ok(()))\n}\n'
+        before = {
+            "helper": "#[cfg(test)]\nfn helper() {}\n",
+            "comment": "// #[cfg(test)]\n",
+            "string": 'const S: &str = "#[cfg(test)] mod tests {";\n',
+        }
+        for case, text in before.items():
+            with self.subTest(case):
+                found, _ = problems({CLIENT + "settings.rs": text + stray})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("writes the store with `\"other.toml\"`", found[0])
+
+    def test_a_file_of_a_row_whose_module_is_not_built_fails_in_another_module(self):
+        found, _ = problems(
+            {
+                CLIENT + "settings.rs": 'pub const X: &str = "keyboard.toml";\n'
+                "fn set(store: &Store) {\n    store.update(X, |_, _| Ok(()))\n}\n"
+            }
+        )
+        self.assertEqual(
+            found, ["keyboard.toml has writer modules besides keyboard: settings"]
+        )
 
     def test_a_file_the_table_does_not_list_fails(self):
         found, _ = problems(

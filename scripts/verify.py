@@ -4565,15 +4565,19 @@ STORE_CLIENT = "system/athanor-sulphur-client/"
 STORE_TABLE_DOC = "docs/architecture/doc_own_stack.md"
 STORE_TABLE_HEADER = re.compile(r"^\|\s*File\s*\|\s*Family\s*\|\s*Writer module\s*\|")
 # The store's directory, named as the path components athanor/sulphur after anything but a
-# system root (format!("{xdg}/athanor/sulphur"), %h/.config/athanor/sulphur), or as the string
-# literals "athanor" and "sulphur" a few characters apart, across lines, with a slash at their
-# ends or a "/" literal between them or neither (a .join chain, concat!).
-STORE_PATH = re.compile(r"(?<![\w.-])athanor/sulphur(?![\w.-])")
-STORE_JOINED = re.compile(r"[\"']athanor/?[\"'](?:[^\"']|[\"']/[\"']){0,60}?[\"']/?sulphur/?[\"']")
+# system root (format!("{xdg}/athanor/sulphur"), %h/.config/athanor/sulphur, athanor//sulphur,
+# athanor/./sulphur), or as the string literals "athanor" and "sulphur" a few characters apart,
+# across lines, with a slash at their ends or a "/" literal between them or neither (a .join
+# chain, concat!), the first after leading components (".config/athanor") and the second before
+# trailing ones ("sulphur/input.toml").
+STORE_PATH = re.compile(r"(?<![\w.-])athanor/(?:\.?/)*sulphur(?![\w.-])")
+STORE_JOINED = re.compile(r"[\"'](?:[^\"'\n]*/)?athanor/?[\"'](?:[^\"']|[\"']/[\"']){0,60}?"
+                          r"[\"'](?:\.?/)*sulphur(?:/[^\"'\n]*)?[\"']")
 # The token before a STORE_PATH match that makes it a system path, /usr/share/athanor/sulphur:
-# the image's roots and /var's system directories, never /var/home, where Athanor's homes are.
+# the image's roots and /var's system directories, never /var/home, where Athanor's homes are,
+# nor /etc/skel, whose seed would be a second writer of a home's store.
 STORE_SYSTEM_ROOT = re.compile(
-    r"(?:^|[\s\"'=(,])/(?:usr|etc|run|opt|srv|var/(?:lib|cache|log|spool))/(?:[\w.-]+/)*$")
+    r"(?:^|[\s\"'=(,])/(?:usr|etc(?!/skel/)|run|opt|srv|var/(?:lib|cache|log|spool))/(?:[\w.-]+/)*$")
 # The trees whose files the rule reads: the code's, and the rig's scripts under forge/test.
 STORE_DIRS = (*BOUNDARY_DIRS, "forge/test")
 # Systemd's files that can name a directory (a drop-in is a .conf), and shell scripts.
@@ -4685,9 +4689,14 @@ def preference_store_problems(root):
         tabled[file] = names[0].group(1)
     written = {}
     for path in sorted(walk(root / STORE_CLIENT / "src", ".rs")):
-        source = read(path).split("#[cfg(test)]")[0]
+        # Comments and `#[cfg(test)]` items blanked; a match that starts inside a string, where
+        # the masked text is blank, is not code.
+        source, masked = rust_code(read(path))
         consts = set()
-        for const, file in STORE_WRITER_FILE.findall(source):
+        for m in STORE_WRITER_FILE.finditer(source):
+            if masked[m.start()] != source[m.start()]:
+                continue
+            const, file = m.groups()
             written.setdefault(file, []).append(path.stem)
             consts.add(const)
         if path.name == STORE_TYPE_MODULE:
@@ -4695,6 +4704,8 @@ def preference_store_problems(root):
         # Each write names its file through a `pub const` of its own module, so the consts above
         # are every file a module writes, and a second writer of a file is seen (decision 38).
         for call in STORE_UPDATE_CALL.finditer(source):
+            if masked[call.start()] != source[call.start()]:
+                continue
             name = call.group(1) if call.group(1) is not None else call.group(2)
             if name not in consts:
                 line = source.count("\n", 0, call.start()) + 1
@@ -4702,11 +4713,13 @@ def preference_store_problems(root):
                                 f"`{name}`, not a `pub const` of this module that names its file "
                                 f"(decision 38)")
     for file, module in sorted(tabled.items()):
+        others = sorted(set(written.get(file, [])) - {module})
+        if others:
+            problems.append(f"{file} has writer modules besides {module}: {', '.join(others)}")
         source = root / STORE_CLIENT / "src" / f"{module}.rs"
         if not source.is_file():
             notes.append(f"{file}: its writer module {module} is not built yet")
             continue
-        others = sorted(set(written.get(file, [])) - {module})
         writes = {f for f, ms in written.items() if module in ms}
         if not writes:
             # A module that predates its family's step, such as `shortcuts`, names no file yet.
@@ -4714,8 +4727,6 @@ def preference_store_problems(root):
         elif file not in writes:
             problems.append(f"{STORE_CLIENT}src/{module}.rs: the writer of {file} in decision 38's "
                             f"table does not name it")
-        if others:
-            problems.append(f"{file} has writer modules besides {module}: {', '.join(others)}")
     for file, modules in sorted(written.items()):
         for module in sorted(set(modules)):
             if tabled.get(file) not in (None, module):
