@@ -171,7 +171,7 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 - **`identity`** (toolkit-free). It chooses among the offered `unix-user` identities, preselecting the session's uid when offered, and resolves each uid to a name through NSS. The name is the helper's first line.
 - **`subject`** (pure functions, plus one thin reader). It reads `polkit.subject-pid` from the details: `readlink /proc/<pid>/exe`, and for `/usr/bin/bwrap` the `[Application] name` of `/proc/<pid>/root/.flatpak-info`.
   - It never follows a path from the subject's root other than that file.
-  - The read of that file is bounded. It opens it with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`, so a symbolic link there is refused and a FIFO cannot block the bus thread; `fstat` on the open descriptor must show a regular file; and it reads at most 16 KiB, a file that does not fit being refused. A refusal is a failure, below.
+  - The read of that file is bounded. It opens it with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`, so a symbolic link there is refused and a FIFO cannot block the bus thread; `fstat` on the open descriptor must show a regular file; and this plan proposes a bound of 16 KiB; a file that does not fit is refused. A refusal is a failure, below.
   - The text is escaped for display with `athanor_unit::text::line`.
   - Any failure, including a dead pid, gives "Unknown program". It is descriptive, never a decision (section 4, T1).
 - **`bus`.** The system-bus thread, with three duties:
