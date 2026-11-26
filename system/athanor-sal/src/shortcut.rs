@@ -417,6 +417,27 @@ mod tests {
         assert_eq!(ui.shortcut(capture).cloned(), before);
     }
 
+    /// The seat losing its keyboard, or the window losing the keyboard, stops the recording
+    /// and lets the key that ended a combination repeat again.
+    #[test]
+    fn losing_the_keyboard_frees_the_key_held_back() {
+        let (mut ui, capture) = recording();
+        let taken = ui.record_press(28, Keysym::F5, KeyModifiers::default());
+        assert_eq!(taken, Some(Some(Event::Recorded(capture))));
+        assert!(
+            ui.record_repeat(28),
+            "the key that ended the combination does not repeat"
+        );
+        assert!(!ui.keyboard_left(), "nothing recorded any more");
+        assert!(
+            !ui.record_repeat(28),
+            "nor is it held back after the keyboard is lost"
+        );
+        ui.activate(capture);
+        assert!(ui.keyboard_left());
+        assert!(!ui.is_recording(capture));
+    }
+
     #[test]
     fn it_reads_as_a_button_named_by_its_label() {
         let (ui, capture) = recording();

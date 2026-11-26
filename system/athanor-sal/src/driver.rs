@@ -2989,17 +2989,21 @@ impl App {
         let Some(id) = self.shell.find(wl).map(|surface| surface.id) else {
             return;
         };
-        // A shortcut capture that records stops as its window, or the dialog over it, loses the
-        // keyboard, as when the focus leaves it.
         if !focused {
-            for s in [id, self.shell.dialogs.topmost(id)] {
-                if let Some(surface) = self.shell.get_mut(s) {
-                    surface.dirty |= surface.ui.keyboard_left();
-                }
-            }
+            self.keyboard_lost(id);
         }
         self.application.keyboard(&mut self.shell, id, focused);
         self.draw_dirty();
+    }
+
+    /// A shortcut capture that records stops as its window `id`, or the dialog over it, loses
+    /// the keyboard, as when the focus leaves it, and a key held back from repeating is let go.
+    fn keyboard_lost(&mut self, id: SurfaceId) {
+        for s in [id, self.shell.dialogs.topmost(id)] {
+            if let Some(surface) = self.shell.get_mut(s) {
+                surface.dirty |= surface.ui.keyboard_left();
+            }
+        }
     }
 
     /// The surface that takes the keys the compositor sends: the one it focused, or the topmost
@@ -3500,6 +3504,11 @@ impl SeatHandler for App {
             Capability::Keyboard => {
                 if let Some(keyboard) = self.keyboard.take() {
                     keyboard.release();
+                }
+                // No leave follows a released keyboard: the surface that had it loses it here.
+                if let Some(id) = self.keyboard_focus {
+                    self.keyboard_lost(id);
+                    self.draw_dirty();
                 }
                 if self.shell.layouts.clear() {
                     self.application.layout_changed(&mut self.shell);
