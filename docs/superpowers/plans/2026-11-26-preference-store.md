@@ -112,36 +112,46 @@ before the build, and ADR-0150 puts them after its approval. Check:
 `schema` rule of ADR-0150 point 3 for readers and writers, writers that keep unknown keys and
 tables, the lock of point 4 with `LOCK_NB` and its one-second bound, the atomic write through
 `athanor_layout::atomic`, the record `import.toml`, and the import with an empty list of families,
-opening each source with `O_NONBLOCK | O_NOFOLLOW` and refusing what is not a regular file. The
-crate `system/athanor-preferences-import`, whose binary only calls that import and which links
+opening each source with `O_NONBLOCK`, refusing what is not a regular file and reading at most
+the reader's bound. The crate `system/athanor-preferences-import`, whose `main` calls
+`athanor_unit::panic::install()` first, logs through `athanor_unit::journal`, then only calls
+that import, and which links
 `athanor-sulphur-client` with `default-features = false`, as `system/athanor-idle/Cargo.toml:11`
 does, and its package `forge/specs/athanor-preferences-import`, built as `athanor-idle`'s is
 (`glib2-devel`, no GTK), listed in `forge/config/packages.json` and required by `athanor-sulphur`;
 it installs the user unit `athanor-preferences-import.service`: `PartOf=graphical-session.target`,
-`Before=` and wanted by `athanor-sulphur.service`, `TimeoutStartSec=5s`, `NoNewPrivileges=yes`,
-`ProtectSystem=strict`, `ProtectHome=read-only`, `ConfigurationDirectory=athanor/sulphur`, and
-its preset; SN4's row. Tests:
-a newer schema refused by a reader and by a writer; an unknown key and table kept by a rewrite;
+`Before=` and wanted by `athanor-sulphur.service`, `TimeoutStartSec=5s`, `TimeoutStopSec=5s`,
+`NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=read-only`,
+`ConfigurationDirectory=athanor/sulphur`, and its preset; SN4's row. Two entries of
+`docs/architecture/components.toml`, `system/athanor-preferences-import` (kind `crate`) and
+`forge/specs/athanor-preferences-import` (kind `rpm spec`), each with its `spec` and `item`, as
+`athanor-idle`'s two entries have. Tests:
+a newer schema refused by a reader and by a writer; an unknown key and table kept by a rewrite,
+in decision 38's two files too;
 two writers in two processes keep both changes; a lock held by a stopped process makes the second
-writer fail within the bound; a FIFO and a symbolic link in place of a COSMIC source, each refused
-without blocking; a record written with no family, and a second start that changes nothing, byte
+writer fail within the bound; a FIFO in place of a COSMIC source refused without blocking; a
+symbolic link to a regular file followed; a file larger than the bound read only to the bound and
+refused; a record written with no family, and a second start that changes nothing, byte
 for byte and by modification time; the unit killed at its timeout leaves no record and Sulphur
 starts. Checks: a new `verify.py preference-store`, which fails when code outside
 `athanor-sulphur-client` names the store's directory, when a file of decision 38's table has no
 writer module or two, or when a writer module writes another file; `session-units`, `services`
-and `shipped` cover the new unit and binary.
+and `shipped` cover the new unit and binary, `coverage` its two entries, and `panic-hook` its
+`main`. Decision 38's `input` and `window_management` writers merge into an untyped
+`toml::Table` from this pull request on, whichever lands first.
 
 **P2. The keyboard.** `keyboard.toml`, `keyboard`'s writer, the keyboard family of the import,
 Sulphur's reader on `keyboard.toml` with `xkb_config.rs`'s parser replaced by `toml`, keeping the
 first four of more layouts in place of refusing the file. shelld's seed from localed into
-`keyboard.toml` (LN9), ordered `After=` the import unit and written only when the file is absent and
-the record lists the keyboard as `absent` or `refused`. It lands with Settings' Keyboard page (SE15) or after
+`keyboard.toml` (LN9), which follows the store's directory and writes the file once the record
+exists and lists the keyboard as `absent` or `refused`, and the file is absent. It lands with Settings' Keyboard page (SE15) or after
 it, never before (ADR-0150 point 9). Tests: fixtures of real `xkb_config` files written by
 cosmic-settings in the dev VM, one, two and four layouts, with variants and options, a malformed
 file and one of five layouts, imported as four; an import stopped after the file is written and
 before the record, completed at the next start; a second start changing nothing; shelld's seed
-skipped with no record, with the keyboard `imported` or `kept`, and written with it `absent` or
-`refused`; a
+waiting while there is no record and written when it appears, skipped with the keyboard
+`imported` or `kept`, and written with it `absent` or `refused`; shelld activated before the
+import; a
 change followed by the compositor without a restart. The compositor e2e and the rig seeds,
 `rig.sh:457-461` and `:1298`, move to `keyboard.toml`.
 
@@ -149,7 +159,8 @@ change followed by the compositor without a restart. The compositor e2e and the 
 family with `show_overlay`, Sulphur's magnifier reader moved out of `screen_filter.rs`. The colour
 filter's one-time import into AX10's keys by the bar's accessibility module, with its `migrated`
 key: a parser of `a11y_screen_filter.ron` in `athanor-sulphur-client` and the bar's Landlock read
-grant on `$XDG_STATE_HOME/cosmic-comp/a11y_screen_filter.ron`. It lands with Settings'
+grant on `$XDG_STATE_HOME/cosmic-comp/a11y_screen_filter.ron` or its nearest existing parent, as
+`system/athanor-idle/src/confine.rs:95` grants its store. It lands with Settings'
 Accessibility page or after it. Tests: fixtures of `accessibility_zoom` with each `view_moves`,
 `show_overlay` false, and an increment of 0; the zoom step of AX10 unchanged; fixtures of the
 filter file for inversion, each filter and a malformed file; the import run once.
@@ -158,11 +169,14 @@ filter file for inversion, each filter and a malformed file; the import run once
 bindings yet, and nothing under Sulphur reads them today. It is what releases the bindings half of
 decision 38. `bindings.toml`, `shortcuts` rewritten as its writer, a parser of COSMIC's action
 grammar in the RON of `custom`, which no code has today (`shortcuts.rs:211` reads only the map's
-shape), the bindings family of the import, which drops each entry equal to an OS13 default and
-each action Sulphur does not carry out, and decision 38's `src/user_bindings.rs` on the store.
+shape), the bindings family of the import, which imports every entry that parses and drops only those
+equal to an OS13 default, against one copy of the defaults, a data file of
+`athanor-sulphur-client` that a test of Sulphur parses and compares with `src/bindings.rs`, and
+decision 38's `src/user_bindings.rs` on the store, which skips an action it does not carry out.
 Tests: fixtures of `custom` and `system_actions` from cosmic-settings, covering each action form
 of the grammar, including the launcher's `Launcher` entry and the control center's Super+C, which
-are not imported, and an action Sulphur does not carry out, skipped alone; the fixtures of
+are not imported, and an action Sulphur does not carry out, imported and then skipped alone by
+Sulphur's reader; the copy of the defaults changed without `src/bindings.rs`, failing the test; the fixtures of
 decision 38 (a custom command bound and run, a default's key taken, a protected key refused, a
 system action replaced, a malformed file, a change followed, nothing while locked). TM3, SD8 and
 TG3 gain the directory in the same pull request.

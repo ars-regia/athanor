@@ -21,8 +21,9 @@ workspace keys are not imported (Q6), and "identity" is the hearth wallpaper (Q8
 below names the questions it answers and keeps the option not taken in one line. Points 5 and 8,
 which no question covers, are proposals of this record, and so are the details that settle the
 audit of its first version: the import's time bound and file checks, its binary, package and
-confinement, and the order of shelld's keyboard seed after it (point 6); writers that keep
-unknown keys, and entries refused alone (point 3); the bounded wait on the lock (point 4);
+confinement, the bindings imported whole with one copy of Sulphur's defaults, and shelld's
+keyboard seed waiting for the record (point 6); writers that keep unknown keys, a new duty of
+decision 38's two writers, and entries refused alone (point 3); the bounded wait on the lock (point 4);
 `show_overlay` in `accessibility.toml` (point 2); the bar's grant and parser for the colour
 filter (point 6); what a reset of the configuration does (point 8). Three points depart from
 #1455 and say so where they are made (points 2 and 7, and the first consequence). The record
@@ -112,7 +113,9 @@ those links is #1380, not yet decided. The store must not depend on it.
    does not change the schema: a reader skips a key it does not know and logs it, as decision 38
    already says, and a writer that rewrites a file keeps every key and table it does not know as
    it found them, so a writer of an older image after a rollback never drops a key that a newer
-   image added, and decision 38's two files keep their rule. A removed key, or a key whose
+   image added. This is a new duty of decision 38's `input` and `window_management` writers,
+   whose files keep their format: every writer merges its change into the file as an untyped
+   `toml::Table`, not through a typed round trip that drops what its type does not name. A removed key, or a key whose
    meaning or type changes, raises the file's schema by one. A reader that finds a newer schema
    than its own refuses the file whole, keeps its defaults and logs, as `favorites.toml` does; a
    writer that finds a newer schema refuses to write and returns an error. A value refused alone
@@ -148,42 +151,53 @@ those links is #1380, not yet decided. The store must not depend on it.
    files, never the system defaults under `XDG_DATA_DIRS`, which are vendor choices. It runs once
    per user at the start of a session, in a oneshot user unit, `athanor-preferences-import.service`:
    - **The unit.** It runs `/usr/bin/athanor-preferences-import`, the binary of a crate of its
-     own, `system/athanor-preferences-import`, that only calls the import in the library of
+     own, `system/athanor-preferences-import`, whose `main` installs `athanor_unit::panic` first,
+     logs through `athanor_unit::journal` and only calls the import in the library of
      `athanor-sulphur-client`, so COSMIC code stays inside that crate (SH2); it links the client
      with `default-features = false`, without GTK, as `athanor-idle` does, and its package of the
      same name, required by `athanor-sulphur`, ships the binary and the unit. The unit is `PartOf=graphical-session.target` (SN3), ordered `Before=` and wanted
      by `athanor-sulphur.service`, so the compositor's first keymap and bindings are the imported
      ones, and `doc_session.md` SN4's table gains its row. It sets `TimeoutStartSec=5s`,
+     `TimeoutStopSec=5s`,
      `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ProtectHome=read-only`, with
      `ConfigurationDirectory=athanor/sulphur` as its one writable path, as the launcher's unit
      grants its one write, which also makes the directory exist before any confined
      application starts; it reads `$XDG_CONFIG_HOME/cosmic`.
-   - **It never hangs the sign-in.** Each source is opened with
-     `O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC` and refused unless `fstat` reports a regular
-     file within its reader's size bound, so a FIFO or a symbolic link planted in place of a source
-     file under `~/.config/cosmic` neither blocks nor redirects it; the store's lock is taken as in point 4. A timeout is a
+   - **It never hangs the sign-in.** Each source is opened with `O_RDONLY | O_NONBLOCK |
+     O_CLOEXEC` and refused unless `fstat` reports a regular file, and its read stops at the
+     reader's size bound whatever `st_size` says, so a FIFO or a device under
+     `~/.config/cosmic` neither blocks nor feeds the import. A symbolic link is followed, as a
+     user's dotfiles managed by links need, and what it leads to is parsed and bounded like any
+     other file; the store's lock is taken as in point 4. A timeout is a
      failure (point 8). `Wants=` does not make Sulphur depend on the unit's success: a failed or
      timed-out import leaves the compositor to start on the store as it finds it, or on its
      defaults, after at most the five seconds, and the import runs at the next start.
    - **Each family.** A target file that already exists is kept, whoever wrote it; an absent
      COSMIC source writes nothing; a source refused whole (point 3, or a value the COSMIC reader
      cannot read at all) writes nothing for that family and is logged by path; an entry refused
-     alone is dropped and logged, and the rest is imported; otherwise the family's file is written
+     alone is dropped and logged, and the rest is imported; every binding that parses is
+     imported, including an action Sulphur does not carry out today, which Sulphur's reader skips
+     (point 3), so that no binding is lost at the import; otherwise the family's file is written
      through its writer module, keeping only the entries that differ from Athanor's defaults: a
      binding that Athanor itself set in COSMIC's files, the launcher's `Launcher` action or Super+C
-     for the control center, is a default of OS13 and is not imported.
+     for the control center, is a default of OS13 and is not imported. The client compares
+     against one copy of the OS13 defaults, a data file of `athanor-sulphur-client` that a test of
+     Sulphur parses and compares with the defaults of `src/bindings.rs`, so the copy never drifts.
    - **The families imported** are the keyboard, the magnifier and the bindings. cosmic-comp's
      input and workspace keys are not imported, so decision 38's two modules gain no COSMIC reader
      and the compositor's defaults apply. The theme is not imported: its file is derived from the
      VL4 keys by its writer (point 2). The colour filter is imported once into AX10's keys by the
      bar's accessibility module, which holds them, with a `migrated` key, as the wallpaper and
      idle imports do; for it the bar gains a read grant on
-     `$XDG_STATE_HOME/cosmic-comp/a11y_screen_filter.ron` and `athanor-sulphur-client` a parser of
-     that RON file.
-   - **shelld's keyboard seed** from localed (LN9) is ordered `After=` the import unit and writes
-     `keyboard.toml` only when the file is absent and the record exists and lists the keyboard as
-     `absent` or `refused`; without a record it writes nothing, and the next start tries again. The import never
-     has to tell a seeded file from a user's.
+     `$XDG_STATE_HOME/cosmic-comp/a11y_screen_filter.ron`, or on its nearest existing parent, as
+     `athanor-idle` grants its store, and `athanor-sulphur-client` a parser of that RON file.
+   - **shelld's keyboard seed** from localed (LN9) waits for the record: shelld follows the
+     store's directory with the file monitor of point 5 and writes `keyboard.toml` once the record
+     exists and lists the keyboard as `absent` or `refused`, and the file is absent. `After=`
+     alone would not do, because it does not pull the import in, and a D-Bus activation of shelld
+     can come first. An import that fails writes no record, so shelld seeds nothing in that
+     session, and the next start imports. The import never has to tell a seeded file from a
+     user's.
    Not taken: the import run by shelld, or by the compositor (Q4, options 2 and 3); cosmic-comp's
    input and workspace keys imported into decision 38's files when absent (Q6, option 1); the
    colour filter not imported (Q7, option 2); the import telling a seeded `keyboard.toml` from a
@@ -251,7 +265,8 @@ those links is #1380, not yet decided. The store must not depend on it.
   approved here. They are `doc_settings.md` SE-Q2 and SE6; `doc_languages.md` LN9;
   `doc_accessibility.md` AX10, with the bar's grant on the colour filter's file;
   `doc_visual_language.md` VL4; `doc_own_stack.md` decisions 27, 28, 31 and 38, including decision
-  38's sentence that the bindings move "after release 1.0"; `doc_shell.md` SH2's exceptions and
+  38's sentence that the bindings move "after release 1.0", and its `input` and
+  `window_management` writers, which gain the duty of point 3 to keep unknown keys; `doc_shell.md` SH2's exceptions and
   `system/AGENTS.md`; `doc_threat_model.md` TM3 and `doc_tetragon.md` TG3;
   `doc_session_daemons.md` SD3, SD16 and the table that gives shelld the seed of `xkb_config`;
   `doc_session.md` SN3 and SN4, for the import unit and shelld's order after it, and SN15;
