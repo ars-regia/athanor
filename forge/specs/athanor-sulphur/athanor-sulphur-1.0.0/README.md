@@ -296,10 +296,39 @@ takes libinput's default for the device and, for a touchpad, the values cosmic-c
 method by finger count, two-finger scrolling, tap and tap-and-drag on, drag lock off). A file that
 is not TOML, has another schema, or is not a regular file of at most 64 KiB leaves the settings as
 they were, and a key that is unknown, of the wrong type or out of range is skipped alone; both
-are logged. While the touchpad key holds the touchpads off, it wins over their `state`.
+are logged. While the touchpad key holds the touchpads off, it wins over their `state`; with
+`state = "disabled"`, the key cannot turn them on.
 `athanor/sulphur/windows.toml` (`src/window_settings.rs`) is read and followed the same way. Of
 SE14's keys it holds only `active_hint`, on by default, which turns decision 31's focus outline
-off; every other key of SE14 is refused as unknown until the compositor applies it.
+off; every other key of SE14 is refused as unknown until the compositor applies it. Until a
+follow-up of #1133 moves the hint to `windows.toml` alone, cosmic-comp's `active_hint` is read
+too and the outline is drawn only while both are on: `windows.toml` cannot turn it on over
+cosmic-comp's `false`.
+
+The keys and the values the two files accept, cosmic-comp's field names in snake_case
+(`doc_own_stack.md` decision 38). This table is the single list `athanor_sulphur_client::input`
+and `window_management` match.
+
+| Key | Where | Accepted values |
+| --- | --- | --- |
+| `schema` | top level of both files | `1` |
+| `speed` | `[mouse]`, `[touchpad]`, `[[device]]` | a number from -1 to 1 |
+| `acceleration_profile` | `[mouse]`, `[[device]]` | `"flat"`, `"adaptive"` |
+| `left_handed` | `[mouse]`, `[[device]]` (a tablet's orientation) | `true`, `false` |
+| `natural_scroll` | `[mouse]`, `[touchpad]`, `[[device]]` | `true`, `false` |
+| `scroll_factor` | `[mouse]`, `[[device]]` | a number from 0.1 to 10 |
+| `middle_button_emulation` | `[mouse]`, `[[device]]` | `true`, `false` |
+| `state` | `[touchpad]`, `[[device]]` | `"enabled"`, `"disabled"`, `"disabled_on_external_mouse"` |
+| `tap_to_click`, `tap_drag`, `tap_drag_lock` | `[touchpad]`, `[[device]]` | `true`, `false` |
+| `tap_button_map` | `[touchpad]`, `[[device]]` | `"left_right_middle"`, `"left_middle_right"` |
+| `click_method` | `[touchpad]`, `[[device]]` | `"button_areas"`, `"clickfinger"` |
+| `scroll_method` | `[touchpad]`, `[[device]]` | `"no_scroll"`, `"two_finger"`, `"edge"`, `"on_button_down"` |
+| `disable_while_typing` | `[touchpad]`, `[[device]]` | `true`, `false` |
+| `name` | `[[device]]`, required | the libinput device's name |
+| `map_to_output` | `[[device]]` | the name of an output, such as `"eDP-1"` |
+| `numlock_state` | `[keyboard]` | `"boot_on"`, `"boot_off"` |
+| `active_hint` | top level of `windows.toml` | `true`, `false` |
+
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
 granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
@@ -580,7 +609,7 @@ does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power di
 forks nothing: the same thread asks the user manager to run each fixed argument
 vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
 `app.slice` with `NoNewPrivileges` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
-the touchpads' events off and on for the session. The volume and brightness keys and Super+Alt+S
+the touchpads' events off for the session, and back to the `state` that `input.toml` gives them. The volume and brightness keys and Super+Alt+S
 call cosmic-settings-daemon's `VolumeUp`, `VolumeDown`, `IncreaseDisplayBrightness`,
 `DecreaseDisplayBrightness` and `ScreenReader`, as cosmic-comp's session does, from one file,
 `src/bindings/cosmic.rs` (`doc_own_stack.md` decision 29), until athanor-osd and athanor-a11y
