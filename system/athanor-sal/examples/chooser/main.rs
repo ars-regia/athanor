@@ -22,7 +22,9 @@ fn main() -> ExitCode {
         );
         Catalog::empty()
     });
-    let chooser = tree::build(&catalog, catalog.is_rtl());
+    // The load above reported an unreadable catalogue; the direction is then left to right.
+    let rtl = athanor_i18n::is_rtl(DOMAIN).unwrap_or(false);
+    let chooser = tree::build(&catalog, rtl);
     let choices = chooser.choices;
     let on_event = move |_: &mut athanor_sal::Ui, event: Event| {
         if let Event::Selected(id) = event {
