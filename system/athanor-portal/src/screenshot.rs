@@ -28,8 +28,11 @@ use zbus::{ObjectPath, OwnedVariant as OwnedValue, Str};
 pub const VERSION: u32 = 2;
 /// How long a file in flight is kept: the frontend and the recorder read it within that time.
 pub const MAX_AGE: Duration = Duration::from_secs(3600);
-/// How many files in flight, and how many bytes of them, are kept at most (maintainer decision,
-/// 2026-11-26): before each new file, the oldest go until the others fit with room for it.
+/// How many files in flight, and how many bytes of them, are kept at most (the cap is the
+/// maintainer's decision of 2026-11-26; its figures are the proposal of #1559): before each new
+/// file the oldest go until the others fit with room for it, and once it is written the oldest
+/// others go again until all fit. The new file is never removed, so one larger than
+/// [`MAX_KEPT_BYTES`] is kept alone.
 pub const MAX_KEPT: usize = 32;
 pub const MAX_KEPT_BYTES: u64 = 256 * 1024 * 1024;
 /// How long a request waits for its turn and its outputs' pictures before it answers 2: the
@@ -414,14 +417,15 @@ pub fn sweep(dir: &Path, now: SystemTime) -> usize {
 
 /// Removes the oldest files in flight beneath `dir` until at most `files` of them, of at most
 /// `bytes` together, remain. Returns how many it removed; a file it cannot remove is logged,
-/// still counts, and the next oldest goes in its place.
-pub fn cap(dir: &Path, files: usize, bytes: u64) -> usize {
-    let mut kept = in_flight(dir);
-    kept.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
-    let mut count = kept.len();
-    let mut total = kept.iter().fold(0u64, |sum, file| sum.saturating_add(file.1));
+/// still counts, and the next oldest goes in its place. `kept`, the file just written, is never
+/// removed and still counts, so alone it may exceed `bytes`.
+pub fn cap(dir: &Path, files: usize, bytes: u64, kept: Option<&Path>) -> usize {
+    let mut found = in_flight(dir);
+    found.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+    let mut count = found.len();
+    let mut total = found.iter().fold(0u64, |sum, file| sum.saturating_add(file.1));
     let mut removed = 0usize;
-    for (path, len, _) in kept {
+    for (path, len, _) in found {
         if count <= files && total <= bytes {
             break;
         }
@@ -433,6 +437,9 @@ pub fn cap(dir: &Path, files: usize, bytes: u64) -> usize {
     }
     removed
 }
+        if Some(path.as_path()) == kept {
+            continue;
+        }
 
 /// `path` as a `file://` URI, every byte outside RFC 3986's unreserved set and `/`
 /// percent-encoded.
@@ -509,10 +516,12 @@ impl<H: Host> Screenshot<H> {
         tokio::task::spawn_blocking(move || {
             let now = SystemTime::now();
             sweep(&dir, now);
-            cap(&dir, MAX_KEPT.saturating_sub(1), MAX_KEPT_BYTES);
+            cap(&dir, MAX_KEPT.saturating_sub(1), MAX_KEPT_BYTES, None);
             let image = compose(&shots)?;
-            write(&dir, &image, now)
-                .map_err(|error| format!("the screenshot was not written: {error}"))
+            let path = write(&dir, &image, now)
+                .map_err(|error| format!("the screenshot was not written: {error}"))?;
+            cap(&dir, MAX_KEPT, MAX_KEPT_BYTES, Some(&path));
+            Ok(path)
         })
         .await
         .map_err(|error| format!("the screenshot's task ended: {error}"))?
@@ -1006,10 +1015,10 @@ mod tests {
         symlink(&target, dir.join("screenshot-link.png")).expect("symlink");
         fs::write(dir.join("notes.png"), b"kept").expect("write");
         // Room for one more of MAX_KEPT: the four oldest of 35 go.
-        assert_eq!(cap(&dir, MAX_KEPT - 1, MAX_KEPT_BYTES), 4);
+        assert_eq!(cap(&dir, MAX_KEPT - 1, MAX_KEPT_BYTES, None), 4);
         assert!(files[..31].iter().all(|file| file.exists()));
         assert!(files[31..].iter().all(|file| !file.exists()));
-        assert_eq!(cap(&dir, MAX_KEPT - 1, MAX_KEPT_BYTES), 0);
+        assert_eq!(cap(&dir, MAX_KEPT - 1, MAX_KEPT_BYTES, None), 0);
         assert_eq!(fs::read_dir(&dir).expect("dir").count(), 34);
         fs::remove_dir_all(&dir).ok();
     }
@@ -1018,10 +1027,28 @@ mod tests {
     fn the_cap_removes_the_oldest_files_beyond_the_bytes() {
         let dir = dir("cap-bytes");
         let files: Vec<_> = (0..5).map(|age| aged(&dir, age, 10)).collect();
-        assert_eq!(cap(&dir, usize::MAX, 25), 3);
+        assert_eq!(cap(&dir, usize::MAX, 25, None), 3);
         assert!(files[..2].iter().all(|file| file.exists()));
         assert!(files[2..].iter().all(|file| !file.exists()));
-        assert_eq!(cap(&dir.join("absent"), 0, 0), 0);
+        assert_eq!(cap(&dir.join("absent"), 0, 0, None), 0);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_cap_after_a_write_keeps_the_new_file_within_the_bytes() {
+        let dir = dir("cap-new");
+        let old: Vec<_> = (1..=31).map(|age| aged(&dir, age, 10)).collect();
+        let new = aged(&dir, 0, 100);
+        let total = |dir: &Path| in_flight(dir).iter().map(|file| file.1).sum::<u64>();
+        // 31 × 10 + 100 bytes against 320: the nine oldest go, the new file stays.
+        assert_eq!(cap(&dir, MAX_KEPT, 320, Some(&new)), 9);
+        assert!(old[..22].iter().all(|file| file.exists()));
+        assert!(old[22..].iter().all(|file| !file.exists()));
+        assert!(new.exists() && total(&dir) <= 320);
+        // A new file larger than the bytes is kept alone.
+        assert_eq!(cap(&dir, MAX_KEPT, 50, Some(&new)), 22);
+        assert_eq!(in_flight(&dir).len(), 1);
+        assert!(new.exists());
         fs::remove_dir_all(&dir).ok();
     }
 
