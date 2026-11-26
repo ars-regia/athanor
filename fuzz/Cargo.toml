@@ -12,6 +12,15 @@ cargo-fuzz = true
 # root workspace, whose `cargo test` runs on stable.
 [workspace]
 
+# The root's [workspace.lints] (ADR-0075 decision 3), which a workspace root of its own does not
+# inherit; `verify.py build-policy` holds the copy to the root's.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+
 [features]
 default = ["update", "shelld", "layout", "gtk", "sulphur", "auth"]
 update = ["athanor-fuzz-entries/update"]

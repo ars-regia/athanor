@@ -23,3 +23,6 @@ tracing-subscriber = { workspace = true }
 p256 = { version = "0.14", features = ["ecdsa", "pem"] }
 base64 = "0.23"
 jiff = { workspace = true }
+
+[lints]
+workspace = true

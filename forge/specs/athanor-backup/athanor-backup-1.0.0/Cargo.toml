@@ -17,8 +17,5 @@ athanor-unit = { path = "../../../../system/athanor-unit" }
 jiff = { workspace = true }
 nix = { workspace = true, features = ["fs", "user"] }
 
-[profile.release]
-lto = "thin"
-opt-level = 3
-codegen-units = 1
-panic = "abort"
+[lints]
+workspace = true

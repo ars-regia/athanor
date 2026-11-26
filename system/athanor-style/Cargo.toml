@@ -34,3 +34,6 @@ tracing = { workspace = true }
 [[test]]
 name = "apply"
 required-features = ["gtk"]
+
+[lints]
+workspace = true

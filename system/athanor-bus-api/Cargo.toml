@@ -10,8 +10,5 @@ authors = ["athanor-architect"]
 serde = { workspace = true, features = ["derive"] }
 zbus = { workspace = true }
 
-[profile.release]
-lto = "thin"
-opt-level = 3
-codegen-units = 1
-panic = "abort"
+[lints]
+workspace = true

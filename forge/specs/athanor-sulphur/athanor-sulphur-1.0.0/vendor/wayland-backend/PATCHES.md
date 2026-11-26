@@ -112,9 +112,11 @@ fails without either change.
 
 ### Why
 
-Cargo caps the lints of a registry dependency, not those of a path dependency, so the
-workspace's `-D unsafe_code` (`.cargo/config.toml`) reaches this copy and denies the unsafe
-code every release of the crate carries.
+Cargo caps the lints of a registry dependency, not those of a path dependency. The workspace
+denies `unsafe_code` in the root `Cargo.toml`'s `[workspace.lints]`, which reaches only the
+crates that set `lints.workspace = true`, and this copy does not; the attribute keeps the crate
+as published should a rustflags `-D unsafe_code` ever reach a path dependency again
+(`verify.py build-policy` keeps lint flags out of `.cargo/config.toml`).
 
 ### The change
 

@@ -8473,6 +8473,173 @@ def check_lock_versions():
     return r
 
 
+# The variables that, in the environment of a cargo build, replace the rustflags of
+# .cargo/config.toml or a [profile] setting of Cargo.toml (#1350, ADR-0143 decision 2): RUSTFLAGS
+# and every name that ends in it (CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS,
+# CARGO_TARGET_<triple>_RUSTFLAGS), and CARGO_PROFILE_*. `\b` does not split a name at `_`, so
+# the prefix is matched as part of the name.
+BUILD_POLICY_ENV = re.compile(r"\b(\w*RUSTFLAGS|CARGO_PROFILE_\w+)(?!\w)")
+# The profile settings of ADR-0075 decision 3 and the panic rule of AGENTS.md. Cargo reads
+# profiles only from the root manifest of a workspace and ignores a member's.
+BUILD_POLICY_PROFILES = {
+    "dev": {"panic": "abort"},
+    "release": {"lto": True, "codegen-units": 1, "panic": "abort"},
+}
+# The manifests of the repository's own crates that are workspace roots of their own: they do not
+# inherit [workspace.lints], so each carries a copy as [lints]. The vendored crates of [patch] are
+# not here: they are upstream's code with upstream's unsafe, and take no workspace lints.
+SEPARATE_WORKSPACES = (
+    GALLERY_MANIFEST,
+    "fuzz/Cargo.toml",
+    "forge/tools/calmo-cosmic-theme/Cargo.toml",
+)
+# Files whose every line runs or sets up an RPM build of the workspace; a spec counts only when it
+# builds in place, and flake.nix only in the Env list of builderImage.
+BUILD_POLICY_SCRIPTS = (
+    "forge/config/rpmmacros",
+    "forge/scripts/build_spec.sh",
+    "forge/scripts/run_spec_build.sh",
+)
+# The lints of ADR-0075 decision 3, with their level, in the root's [workspace.lints].
+BUILD_POLICY_LINTS = {
+    "rust": {"unsafe_code": "deny"},
+    "clippy": {"undocumented_unsafe_blocks": "warn", "multiple_unsafe_ops_per_block": "warn"},
+}
+# A rustc flag that sets a lint level, which belongs in [workspace.lints], not in rustflags.
+LINT_FLAG = re.compile(r"-[DWAF]|--(deny|warn|allow|forbid|force-warn|cap-lints)\b")
+
+
+def policy_env_lines(text):
+    """[(line number, variable)] of every line of `text`, comments aside, that names a variable
+    of BUILD_POLICY_ENV."""
+    return [(n, m.group(1)) for n, line in enumerate(text.splitlines(), 1)
+            if not line.lstrip().startswith("#") for m in BUILD_POLICY_ENV.finditer(line)]
+
+
+def spec_builds_in_place(text):
+    """Whether a spec has no Source, so build_spec.sh builds it in the checkout, where cargo
+    reads the root's Cargo.toml and .cargo/config.toml (`in_place` of build_spec.sh)."""
+    return not re.search(r"(?mi)^\s*Source\d*\s*:", text)
+
+
+def builder_env(text):
+    """flake.nix's text with every line outside the Env list of builderImage blanked, so the line
+    numbers stay the file's; None when there is no such list."""
+    m = re.search(r"\bbuilderImage\s*=.*?\bEnv\s*=\s*\[(.*?)\];", text, re.S)
+    return None if m is None else "\n" * text[: m.start(1)].count("\n") + m.group(1)
+
+
+def workspace_members(load):
+    """The manifests of the root workspace's members, relative to the root: its `members` and,
+    as cargo does, every crate a member reaches by a path dependency inside the root and outside
+    `exclude`, its [workspace.dependencies] included. A [patch] is not a dependency: the vendored
+    crates are not members. `load(name)` is the parsed manifest, or None when there is none."""
+    workspace = load("Cargo.toml").get("workspace", {})
+    excluded = [Path(p) for p in workspace.get("exclude", [])]
+    shared = {"workspace": {"dependencies": workspace.get("dependencies", {})}}
+    todo = [Path(m) for m in workspace.get("members", [])]
+    todo += [Path(os.path.normpath(p)) for p in dependency_paths(shared)]
+    seen, out = set(), []
+    while todo:
+        crate = todo.pop()
+        if crate in seen or crate.parts[:1] == ("..",) or any(crate.is_relative_to(e) for e in excluded):
+            continue
+        seen.add(crate)
+        manifest = str(crate / "Cargo.toml")
+        out.append(manifest)
+        data = load(manifest)
+        if data is None:
+            continue
+        own = {k: v for k, v in data.items() if k != "patch"}
+        todo += [Path(os.path.normpath(crate / p)) for p in dependency_paths(own)]
+    return sorted(out)
+
+
+def build_policy_problems(load, texts):
+    """The findings of the build-policy check. `load(name)` is a parsed TOML file of the
+    repository, or None; `texts` maps every forge spec, flake.nix and the files of
+    BUILD_POLICY_SCRIPTS to their text."""
+    out = []
+    root = load("Cargo.toml")
+    lints = root.get("workspace", {}).get("lints", {})
+    for profile, wanted in BUILD_POLICY_PROFILES.items():
+        for key, value in wanted.items():
+            have = root.get("profile", {}).get(profile, {}).get(key)
+            # True == 1 in Python, and neither `lto = 1` nor `codegen-units = true` is the policy.
+            if type(have) is not type(value) or have != value:
+                out.append(f"Cargo.toml: [profile.{profile}] does not set {key} = "
+                           f"{json.dumps(value)} (ADR-0075 decision 3)")
+    for tool, wanted in BUILD_POLICY_LINTS.items():
+        for lint, level in wanted.items():
+            if lints.get(tool, {}).get(lint) != level:
+                out.append(f"Cargo.toml: [workspace.lints.{tool}] does not set {lint} = \"{level}\" "
+                           "(ADR-0075 decision 3)")
+    for manifest in workspace_members(load):
+        data = load(manifest)
+        if data is None:
+            out.append(f"{manifest}: a workspace member without a manifest")
+            continue
+        if data.get("lints", {}).get("workspace") is not True:
+            out.append(f"{manifest}: a workspace member without `lints.workspace = true`: it "
+                       "builds without the workspace's lint policy")
+        for profile in sorted(data.get("profile", {})):
+            out.append(f"{manifest}: [profile.{profile}] in a workspace member, which cargo "
+                       "ignores: the profiles are the root Cargo.toml's")
+    for manifest in SEPARATE_WORKSPACES:
+        data = load(manifest)
+        if data is None:
+            out.append(f"{manifest}: missing")
+        elif data.get("lints") != lints:
+            out.append(f"{manifest}: [lints] is not the root's [workspace.lints]: a workspace "
+                       "root of its own does not inherit them, so it carries a copy")
+    config = load(".cargo/config.toml") or {}
+    tables = {"[build]": config.get("build", {}).get("rustflags")}
+    tables |= {f"[target.'{name}']": table.get("rustflags")
+               for name, table in config.get("target", {}).items() if isinstance(table, dict)}
+    if tables["[build]"] is None:
+        out.append(".cargo/config.toml: [build] has no rustflags")
+    for name, flags in tables.items():
+        if flags != tables["[build]"]:
+            out.append(f".cargo/config.toml: {name} rustflags differ from [build]'s: on Linux the "
+                       "target table shadows [build], so both carry the same list")
+        for flag in flags or ():
+            if isinstance(flag, str) and LINT_FLAG.match(flag):
+                out.append(f".cargo/config.toml: {name} sets the lint flag {flag}: lints belong in "
+                           "Cargo.toml's [workspace.lints]")
+    for name, text in sorted(texts.items()):
+        if name == "flake.nix":
+            text = builder_env(text)
+            if text is None:
+                out.append("flake.nix: no Env list in builderImage, the builder's environment")
+                continue
+        elif name not in BUILD_POLICY_SCRIPTS and not spec_builds_in_place(text):
+            continue
+        for number, variable in policy_env_lines(text):
+            out.append(f"{name}:{number}: sets {variable}, which replaces the build policy of "
+                       "Cargo.toml and .cargo/config.toml for the workspace's crates (ADR-0143 "
+                       "decision 2)")
+    return out
+
+
+@check("build-policy", "The RPM builds take the workspace's Rust build policy from Cargo.toml and .cargo/config.toml, and every member takes the workspace's lints (#1350)")
+def check_build_policy():
+    r = Result()
+
+    def load(name):
+        path = ROOT / name
+        return load_toml(name, read(path)) if path.is_file() else None
+
+    try:
+        texts = {rel(p): read(p) for p in sorted((ROOT / "forge/specs").glob("*/*.spec"))}
+        for name in (*BUILD_POLICY_SCRIPTS, "flake.nix"):
+            texts[name] = read(ROOT / name)
+        for problem in build_policy_problems(load, texts):
+            r.fail(problem)
+    except (OSError, ValueError) as e:
+        r.fail(f"a manifest, .cargo/config.toml, a spec or a build script could not be read: {e}")
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #

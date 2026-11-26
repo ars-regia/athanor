@@ -21,3 +21,6 @@ tracker-rs = { workspace = true }
 [package.metadata.cargo-machete]
 # Renamed crate: the code uses it as `tracker`.
 ignored = ["tracker-rs"]
+
+[lints]
+workspace = true

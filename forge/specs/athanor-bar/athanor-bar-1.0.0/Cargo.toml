@@ -26,3 +26,6 @@ wayland-client = { workspace = true }
 # O_NONBLOCK for picture files a peer names: a FIFO must not hang the bar.
 libc = { workspace = true }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

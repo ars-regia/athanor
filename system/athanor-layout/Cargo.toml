@@ -9,3 +9,6 @@ description = "The Athanor layout document: schema, layers and presets"
 [dependencies]
 toml = { workspace = true }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

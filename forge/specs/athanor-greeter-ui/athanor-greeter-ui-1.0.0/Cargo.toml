@@ -30,3 +30,6 @@ libc = { workspace = true }
 rusqlite = { workspace = true }
 # /etc/athanor/greeter.toml, the switch that hides the account list (LP19, D23).
 toml = { workspace = true }
+
+[lints]
+workspace = true

@@ -44,6 +44,8 @@ linked document's header before its body.
 | Python tests of an area | `python3 -B -m unittest discover -s <area>/tests` |
 | A crate | `cargo test -p <crate>`; there is no single suite |
 
+A `cargo` build on the host needs the mold linker and an x86-64-v3 CPU (`.cargo/config.toml`); the rig image brings mold, not the CPU.
+
 A new `verify.py` check is registered with `@check` like the others and has a test under
 `scripts/tests/`. Compare the full `verify.py` run with the product branch: no new failure.
 

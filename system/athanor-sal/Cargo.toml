@@ -45,3 +45,6 @@ all-features = true
 # wayland-backend: no code names it; the `gpu` feature turns on its client_system backend for wgpu.
 # yeslogic-fontconfig-sys: the code uses it as `fontconfig_sys`.
 ignored = ["wayland-backend", "yeslogic-fontconfig-sys"]
+
+[lints]
+workspace = true

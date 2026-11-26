@@ -11,7 +11,7 @@
 
 Name:           cosmic-comp
 Version:        1.11.0
-Release:        %{fedora_release}.athanor2
+Release:        %{fedora_release}.athanor3
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
@@ -61,9 +61,9 @@ tar -xzf %{SOURCE1} -C vendor
 %set_build_flags
 # Patch1 makes build.rs record this commit instead of asking git, which a source archive lacks.
 export GIT_HASH=%{commit}
-# The release profile of Cargo.toml (fat LTO), not Fedora's rpm profile: the builder has no
-# cargo-rpm-macros (%cargo_build), and rpmbuild runs with --nodeps.
-cargo build --release --locked
+# Upstream's release profile (no cargo-rpm-macros; rpmbuild runs with --nodeps), with the flags
+# forge/config/rpmmacros exported for every %build until #1350, unchanged (ADR-0143 decision 2).
+RUSTFLAGS="-C target-cpu=x86-64-v3 -C opt-level=3 -C codegen-units=16 -C strip=symbols -C link-arg=-fuse-ld=mold" CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_RELEASE_STRIP=symbols cargo build --release --locked
 
 %install
 # What the `install` recipe of upstream's justfile installs.
@@ -80,6 +80,10 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Wed Nov 25 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor3
+- State in the spec the Rust flags that the forge's RPM macros exported for every build
+  (#1350): the same flags, the same payload.
+
 * Mon Nov 16 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor2
 - Build against wayland-backend 0.3.15 with a wire parser that rejects a null its signature
   forbids, as libwayland does, and answers a malformed request with a protocol error.

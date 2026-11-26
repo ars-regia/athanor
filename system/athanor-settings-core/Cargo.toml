@@ -8,3 +8,6 @@ description = "The logic of Athanor's Settings with no toolkit type: the page re
 
 [dependencies]
 athanor-i18n = { path = "../athanor-i18n" }
+
+[lints]
+workspace = true

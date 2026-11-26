@@ -19,6 +19,14 @@ athanor-sal = { path = ".." }
 [patch.crates-io]
 accesskit_atspi_common = { path = "../vendor/accesskit_atspi_common" }
 
+# The repository root's lint policy, which a workspace root of its own does not inherit.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+
 # The repository root's profiles, which a workspace root of its own does not inherit.
 [profile.dev]
 panic = "abort"

@@ -9,3 +9,6 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 [dependencies]
 thiserror = { workspace = true }
 zeroize = { workspace = true }
+
+[lints]
+workspace = true

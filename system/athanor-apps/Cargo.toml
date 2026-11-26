@@ -26,3 +26,6 @@ gio-unix = { workspace = true }
 gtk4 = { workspace = true, optional = true }
 gtk4-layer-shell = { workspace = true, optional = true }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

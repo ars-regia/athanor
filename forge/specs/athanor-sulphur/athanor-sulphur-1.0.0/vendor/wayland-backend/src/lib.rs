@@ -50,8 +50,8 @@
 #![cfg_attr(unstable_coverage, feature(coverage_attribute))]
 // Doc feature labels can be tested locally by running RUSTDOCFLAGS="--cfg=docsrs" cargo +nightly doc -p <crate>
 #![cfg_attr(docsrs, feature(doc_cfg))]
-// A path dependency is not capped like a registry one: the workspace's `-D unsafe_code`
-// would deny this crate's FFI and wire code (PATCHES.md, change 3).
+// A path dependency is not capped like a registry one: a rustflags `-D unsafe_code` would
+// deny this crate's FFI and wire code (PATCHES.md, change 3).
 #![allow(unsafe_code)]
 
 /// Reexport of the `smallvec` crate, which is part of `wayland-backend`'s public API.

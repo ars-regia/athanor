@@ -9,3 +9,6 @@ license = "GPL-3.0-or-later"
 serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
+
+[lints]
+workspace = true

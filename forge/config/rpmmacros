@@ -57,27 +57,17 @@
 %__global_ldflags %{_ldflags} %{?_lto_cflags}
 
 # =========================================================================
-# RUST & CARGO EXTREME MACROS
+# RUST
 # =========================================================================
-# opt-level=3: Ottimizzazione aggressiva massima
-# lto=thin: ThinLTO per bilanciare tempi di link e performance
-# codegen-units=1: Piattaforma singola per max LTO puro (lento ma potente)
-# link-arg=-fuse-ld=mold: Linker mold anche su Rust
-%rustflags -C target-cpu=x86-64-v3 -C opt-level=3 -C codegen-units=16 -C strip=symbols -C link-arg=-fuse-ld=mold
+# Nothing here (ADR-0143 decision 2). The workspace's packages build in place, so cargo reads
+# the root Cargo.toml ([profile.release], [workspace.lints]) and .cargo/config.toml (hardening,
+# target-cpu=x86-64-v3, mold); a RUSTFLAGS exported here would replace that configuration's
+# rustflags. An upstream Rust package states its own flags in its spec. `verify.py build-policy`
+# keeps RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS and CARGO_PROFILE_* out of this file and out of the
+# workspace's specs.
 
 # =========================================================================
 # MULTITHREADING
 # =========================================================================
 %_smp_mflags -j%{_smp_build_ncpus}
-
-# =========================================================================
-# BEDROCK LTO INJECTION (Protezione Globale Rust)
-# =========================================================================
-# Inietta LTO nativo di Cargo su ogni singolo pacchetto Rust upstream,
-# evitando il crash globale sulle macro procedurali che avremmo con RUSTFLAGS.
-%__spec_build_pre %{___build_pre}\
-  export RUSTFLAGS="%{rustflags}"\
-  export CARGO_PROFILE_RELEASE_LTO="thin"\
-  export CARGO_PROFILE_RELEASE_PANIC="abort"\
-  export CARGO_PROFILE_RELEASE_STRIP="symbols"
 
