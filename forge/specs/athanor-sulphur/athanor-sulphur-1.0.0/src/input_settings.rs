@@ -335,7 +335,11 @@ pub fn parse(text: &str) -> Result<(InputSettings, Vec<String>), String> {
                     device(&mut settings.devices, entry, at, &mut skipped);
                 }
             }
-            (section @ ("mouse" | "touchpad" | "keyboard" | "device"), other) => {
+            ("device", other) => skipped.push(format!(
+                "device: a {}, not an array of tables",
+                other.type_str()
+            )),
+            (section @ ("mouse" | "touchpad" | "keyboard"), other) => {
                 skipped.push(format!("{section}: a {}, not a table", other.type_str()))
             }
             (other, _) => skipped.push(format!("{other}: unknown key")),
@@ -821,5 +825,13 @@ mod tests {
         let (settings, skipped) = parsed("schema = 1\n[keyboard]\nnumlock_state = \"last_boot\"\n");
         assert_eq!(settings.num_lock, None);
         assert_eq!(skipped.len(), 1);
+    }
+
+    /// `[device]` in place of `[[device]]` is refused with the form it needs.
+    #[test]
+    fn a_device_table_is_refused_as_not_an_array() {
+        let (settings, skipped) = parsed("schema = 1\n[device]\nname = \"Pad\"\nspeed = 1\n");
+        assert_eq!(skipped, ["device: a table, not an array of tables"]);
+        assert!(settings.devices.is_empty());
     }
 }
