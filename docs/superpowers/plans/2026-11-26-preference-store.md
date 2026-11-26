@@ -143,8 +143,10 @@ and `shipped` cover the new unit and binary, `coverage` its two entries, and `pa
 **P2. The keyboard.** `keyboard.toml`, `keyboard`'s writer, the keyboard family of the import,
 Sulphur's reader on `keyboard.toml` with `xkb_config.rs`'s parser replaced by `toml`, keeping the
 first four of more layouts in place of refusing the file. shelld's seed from localed into
-`keyboard.toml` (LN9), which follows the store's directory and writes the file once the record
-exists and lists the keyboard as `absent` or `refused`, and the file is absent. It lands with Settings' Keyboard page (SE15) or after
+`keyboard.toml` (LN9): shelld opens its monitor on the store's directory, or on the parent until
+the directory appears, then reads the record; once the record lists the keyboard as `absent` or
+`refused`, it creates the file through the `keyboard` writer only if it is absent under the
+store's lock, and then stops following. It lands with Settings' Keyboard page (SE15) or after
 it, never before (ADR-0150 point 9). Tests: fixtures of real `xkb_config` files written by
 cosmic-settings in the dev VM, one, two and four layouts, with variants and options, a malformed
 file and one of five layouts, imported as four; an import stopped after the file is written and
@@ -171,7 +173,10 @@ decision 38. `bindings.toml`, `shortcuts` rewritten as its writer, a parser of C
 grammar in the RON of `custom`, which no code has today (`shortcuts.rs:211` reads only the map's
 shape), the bindings family of the import, which imports every entry that parses and drops only those
 equal to an OS13 default, against one copy of the defaults, a data file of
-`athanor-sulphur-client` that a test of Sulphur parses and compares with `src/bindings.rs`, and
+`athanor-sulphur-client` embedded with `include_str!`, which a test of Sulphur reads at the same
+path through `../../../../system/athanor-sulphur-client/` and compares with `DEFAULTS` both ways,
+by trigger and action; an entry on a terminal-switch trigger (`terminal_switch`, not in
+`DEFAULTS`) is imported and refused by Sulphur's reader as a protected key; and
 decision 38's `src/user_bindings.rs` on the store, which skips an action it does not carry out.
 Tests: fixtures of `custom` and `system_actions` from cosmic-settings, covering each action form
 of the grammar, including the launcher's `Launcher` entry and the control center's Super+C, which
