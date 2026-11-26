@@ -151,8 +151,8 @@ impl TextContext {
         )));
         builder.set_base_direction(base_direction(rtl));
         let mut layout = builder.build(text);
+        layout.set_alignment(Alignment::Start, AlignmentOptions::default());
         layout.break_all_lines(width);
-        layout.align(Alignment::Start, AlignmentOptions::default());
         layout
     }
 }
