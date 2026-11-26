@@ -1,9 +1,11 @@
 //! ext-image-copy-capture-v1 of a window, named through ext-foreign-toplevel-list-v1 and the
 //! toplevel capture source (doc_own_stack.md, C1 task 4), or of an output, named by its
-//! wl_output through the output capture source (OS9 task 2). A window is drawn off screen at
-//! scale 1, an output as it draws itself, with the pointer when the session asks for cursors
-//! (`paint_cursors`), and either is copied into the client's wl_shm buffer at the next frame of
-//! the outputs. Nothing is captured while the session is locked (spike Q7).
+//! wl_output through the output capture source (OS9 task 2), or of a workspace, named through
+//! athanor-workspace-v1 (decision 32). A window is drawn off screen at scale 1, an output as it
+//! draws itself, with the pointer when the session asks for cursors (`paint_cursors`), a
+//! workspace as its output draws its windows, with their marks and nothing else, and each is
+//! copied into the client's wl_shm buffer at the next frame of the outputs. Nothing is captured
+//! while the session is locked (spike Q7).
 
 use crate::background_effect::Blurs;
 use crate::a11y::Look;
@@ -11,6 +13,7 @@ use crate::cursor::{pointer_on, Cursor};
 use crate::look::{FilterElement, Filters};
 use crate::marks::{Marks, Stacked};
 use crate::state::{draw_view, Backend, State, View};
+use crate::workspace::WorkspaceId;
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
@@ -51,6 +54,19 @@ enum Captured {
     Window(String),
     /// An output, which the source does not keep alive.
     Output(WeakOutput),
+    /// A workspace, active or not.
+    Workspace(WorkspaceId),
+}
+
+/// The capture source of the workspace `id`; of none, a source whose every session is refused.
+pub(crate) fn workspace_source(id: Option<WorkspaceId>) -> ImageCaptureSource {
+    let source = ImageCaptureSource::new();
+    if let Some(id) = id {
+        source
+            .user_data()
+            .insert_if_missing_threadsafe(|| Captured::Workspace(id));
+    }
+    source
 }
 
 /// The pointer a capture of an output draws: the cursor theme, the cursor the pointer shows and
@@ -65,6 +81,12 @@ pub struct Pointer<'a> {
 pub enum Target {
     Window(Window),
     Output(Output),
+    /// A workspace of `output`: its windows, front to back, each with its geometry in the
+    /// space, where it is shown or where it comes back.
+    Workspace {
+        output: Output,
+        windows: Vec<(Window, Rectangle<i32, Logical>)>,
+    },
 }
 
 impl Target {
@@ -76,7 +98,7 @@ impl Target {
                 let size = window.geometry().size;
                 (size.w, size.h)
             }
-            Target::Output(output) => {
+            Target::Output(output) | Target::Workspace { output, .. } => {
                 let size = output.current_mode()?.size;
                 (size.w, size.h)
             }
@@ -89,7 +111,9 @@ impl Target {
     fn transform(&self) -> Transform {
         match self {
             Target::Window(_) => Transform::Normal,
-            Target::Output(output) => output.current_transform(),
+            Target::Output(output) | Target::Workspace { output, .. } => {
+                output.current_transform()
+            }
         }
     }
 }
@@ -201,9 +225,34 @@ impl State {
                 .upgrade()
                 .filter(|output| self.space.outputs().any(|mapped| mapped == output))
                 .map(Target::Output)?,
+            Captured::Workspace(id) => self.workspace_target(*id)?,
         };
         let size = target.size()?;
         Some((target, size))
+    }
+
+    /// The workspace `id` as its output draws it, if it is still on one: the windows of the
+    /// active workspace from the space, those of an inactive one where they come back. A
+    /// minimised window, which the output does not show, is not among them.
+    fn workspace_target(&self, id: WorkspaceId) -> Option<Target> {
+        let output = self.output_of_workspace(id)?;
+        let on = |window: &Window| self.workspace_of(window) == Some(id);
+        let windows = if self.active_workspace(&output) == Some(id) {
+            self.space
+                .elements()
+                .rev()
+                .filter(|window| on(window))
+                .filter_map(|window| Some((window.clone(), self.space.element_geometry(window)?)))
+                .collect()
+        } else {
+            self.parked
+                .iter()
+                .rev()
+                .filter(|(window, _)| on(window))
+                .map(|(window, at)| (window.clone(), Rectangle::new(*at, window.geometry().size)))
+                .collect()
+        };
+        Some(Target::Workspace { output, windows })
     }
 
     /// Answers the queued frames: each window or output is drawn and copied into its client's
@@ -225,15 +274,16 @@ impl State {
             };
             let mut marks = self.marks();
             // The pointer, and the drag icons with it, only when the session asks for cursors,
-            // `paint_cursors`.
-            if !session.draw_cursor() {
+            // `paint_cursors`; never in a workspace's frame (decision 32).
+            let cursor = session.draw_cursor() && !matches!(target, Target::Workspace { .. });
+            if !cursor {
                 marks.drag.clear();
             }
             let status = self.shown_cursor();
             let pointer = self
                 .seat
                 .get_pointer()
-                .filter(|_| session.draw_cursor())
+                .filter(|_| cursor)
                 .map(|pointer| Pointer {
                     cursor: &mut self.cursor,
                     status,
@@ -261,7 +311,7 @@ impl State {
                     frame.fail(CaptureFailureReason::BufferConstraints);
                 }
                 Err(error) => {
-                    tracing::warn!(%error, "a window or an output could not be captured");
+                    tracing::warn!(%error, "a window, an output or a workspace could not be captured");
                     frame.fail(CaptureFailureReason::Unknown);
                 }
             }
@@ -272,7 +322,8 @@ impl State {
 /// Draws `what` off screen and reads its pixels back, `READ_FORMAT`, row by row from the top: a
 /// window at scale 1, an output as it draws `space`, whole, with `pointer` when it is on that
 /// output, and without the magnifier and the colour filters, which are the user's view and not
-/// the screen's contents (AX10).
+/// the screen's contents (AX10); a workspace as its output draws its windows and their marks,
+/// over transparency.
 pub fn read_back<R, T>(
     renderer: &mut R,
     what: &Target,
@@ -315,6 +366,14 @@ where
             let result =
                 draw_view(renderer, &mut target, output, 0, view, pointer, &mut tracker, look)
                     .map_err(|error| format!("{error:?}"))?;
+            result.sync.wait()?;
+        }
+        Target::Workspace { output, windows } => {
+            let elements = crate::marks::workspace(renderer, windows, space, output, marks);
+            let mut tracker = OutputDamageTracker::from_output(output);
+            let result = tracker
+                .render_output(renderer, &mut target, 0, &elements, [0.0; 4])
+                .map_err(|error| format!("{error:?}"))?;
             result.sync.wait()?;
         }
     }

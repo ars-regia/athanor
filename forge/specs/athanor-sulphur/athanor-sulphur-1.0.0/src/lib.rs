@@ -64,6 +64,7 @@ mod window_settings;
 mod winit;
 mod wl_drm;
 mod workspace;
+mod workspace_manager;
 mod workspace_tiling;
 mod xwayland;
 

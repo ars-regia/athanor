@@ -1062,7 +1062,7 @@ compositor-globals)
         zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1
         athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 ext_data_control_manager_v1
         zwlr_data_control_manager_v1 athanor_workspace_tiling_manager_v1 athanor_dock_overlap_manager_v1
-        athanor_material_manager_v1)
+        athanor_material_manager_v1 athanor_workspace_manager_v1)
     for interface in "${privileged[@]}"; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
