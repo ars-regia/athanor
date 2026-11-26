@@ -78,14 +78,17 @@ What the forge does today, read on `iso-v0` at c774a2056:
      image's `org.opencontainers.image.revision` label names the commit that holds the sources).
      `%_optflags` gains `-g1`, the line tables of gcc and clang alike, and `%_ldflags` gains
      `-Wl,--build-id=sha1`.
-   - Of the 37 packages of the DAG (`custom_packages` in `forge/config/packages.json`), the 31
-     whose specs set `%global debug_package %{nil}` themselves drop it, but for
-     `athanor-dart-sass` of the exempt list below. The 32nd spec file that sets it,
-     `forge/specs/azoth/microvm/azoth-microvm.spec`, is outside the DAG and released by hand, and
-     keeps it. The other six rely on the global of `forge/config/rpmmacros` line 9 alone:
-     `athanor-tetragon` and `athanor-semantic-db` gain the line and join the exempt list;
-     `athanor-keylime` is `noarch` and gets no debuginfo package; `athanor-matugen`, `cosmic-comp`
-     and `greenboot-rs` gain debuginfo once their own stripping goes.
+   - `custom_packages` in `forge/config/packages.json` names 37 packages. One, `kernel-forge`, is
+     built by the kernel's own workflows (`EXTERNAL_PACKAGES` of
+     `forge/scripts/dag_orchestrator.py`) and has `azoth-debuginfo`. Of the 36 specs the DAG
+     builds, the 31 that set `%global debug_package %{nil}` themselves drop it, but for
+     `athanor-dart-sass` of the exempt list below. The other five rely on the global of
+     `forge/config/rpmmacros` line 9 alone: `athanor-tetragon` gains the line and joins the exempt
+     list; `athanor-keylime` is `noarch` and gets no debuginfo package; `athanor-matugen`,
+     `cosmic-comp` and `greenboot-rs` gain debuginfo once their own stripping goes. Two spec files
+     are outside the DAG and do not change: `forge/specs/azoth/microvm/azoth-microvm.spec`, the
+     32nd that sets the line, released by hand, and `athanor-semantic-db.spec`, which relies on
+     the global.
    - Five specs strip on their own today, which would leave `find-debuginfo` nothing to split:
      `cosmic-comp.spec` line 66, `greenboot-rs.spec` lines 83–84 and `athanor-matugen.spec`
      lines 27–28 pass `-C strip=symbols` and `CARGO_PROFILE_RELEASE_STRIP=symbols`, `polkit.spec`
@@ -103,14 +106,12 @@ What the forge does today, read on `iso-v0` at c774a2056:
    - `flake.nix`: `debugedit` joins the builder's build tools.
    - A spec of the DAG whose package has no debug data to split carries
      `%global debug_package %{nil}` and is named in `forge/config/debuginfo-exempt.txt`; no other
-     spec of the DAG may, and the list only
-     shrinks. Three are today: `athanor-dart-sass`, which repackages the prebuilt Dart runtime and
-     snapshot of an upstream release, with no build ID, and whose spec says they are never
-     stripped or rewritten; `athanor-tetragon`, whose Go executables come stripped from the
-     upstream tarball (read on the desktop: `tetragon` has a GNU build ID and no symbol table);
-     and `athanor-semantic-db`, which ships a shell script and no ELF file. Relocatable objects,
-     such as the eBPF objects of `athanor-tetragon`, are not executables or shared objects and
-     take nothing.
+     spec of the DAG may, and the list only shrinks. Two are today: `athanor-dart-sass`, which
+     repackages the prebuilt Dart runtime and snapshot of an upstream release, with no build ID,
+     and whose spec says they are never stripped or rewritten; `athanor-tetragon`, whose Go
+     executables come stripped from the upstream tarball (read on the desktop: `tetragon` has a
+     GNU build ID and no symbol table). Relocatable objects, such as the eBPF objects of
+     `athanor-tetragon`, are not executables or shared objects and take nothing.
    - `forge/config/rpmmacros` defines `%_enable_debug_packages`, the `%install` wrapper and
      `%_missing_build_ids_terminate_build` itself: the first two come from Fedora's
      `redhat-rpm-config`, which the builder lacks, and the rpm 4.20.1 of nixpkgs carries the third
@@ -140,13 +141,15 @@ What the forge does today, read on `iso-v0` at c774a2056:
      its `hash-<hash>` tag, all before the `tag` step gives the package image its own
      `hash-<hash>` tag (`tag_signed_image.sh`). A package image with a hash tag therefore always
      has its debuginfo.
-   - `forge/scripts/dag_orchestrator.py` decides what a run builds: `evaluate_dirty_nodes` counts
-     a package as dirty when `image_exists` finds no image for its hash that a trusted run signed.
-     That existence test also requires, for a spec off the exempt list, a signed
+   - Two existence tests decide whether a package is built: `evaluate_dirty_nodes` of
+     `forge/scripts/dag_orchestrator.py`, which schedules a package when `image_exists` finds no
+     image for its hash that a trusted run signed, and the `CACHE_HIT` of
+     `forge/scripts/check_idempotency.sh`, by which a scheduled job skips its build
+     (`dag_package.sh`, `step_check`). Both also require, for a spec off the exempt list, a signed
      `-debuginfo:hash-<hash>` image, so a package whose package image is signed and whose
-     debuginfo is missing is built again; without it the package would never be scheduled, and
+     debuginfo is missing is built again; without that the package would never be built, and
      decision 4, finding no debuginfo for it, would stop every system-image job. An exempt spec
-     pushes none. The first rollout rebuilds everything without that test:
+     pushes none. The first rollout rebuilds everything without those tests:
      `forge/config/rpmmacros` is an input of every content hash (`check_idempotency.sh`), so
      decision 2's change of it gives every package a new hash.
    - The registry host is `REGISTRY_HOST` and the owner is the repository's, as for the package
@@ -257,10 +260,9 @@ What the forge does today, read on `iso-v0` at c774a2056:
    and no `.gnu_debugdata`, and the binaries stay stripped. A shipped ELF file changes in three
    ways, none of them debug data: it gains the GNU build-ID note of decision 2, a 20-byte SHA-1
    with its note header (computed, not measured), which ties it to its debug data; it is expected
-   to gain a `.gnu_debuglink` section naming its `.debug` file and that file's CRC-32, and to
-   lose its `.comment` section, both from the strip that `find-debuginfo` runs
-   (`eu-strip --remove-comment -f`). These two were not checked against debugedit's source; the
-   first build confirms them, and `check_elf_hardening.py` reports what it finds.
+   to gain a `.gnu_debuglink` section naming its `.debug` file, and to lose its `.comment`
+   section, both from the strip that `find-debuginfo` runs. These two are expected behaviour, not
+   checked against debugedit's source, and the first build confirms them.
 
 ## Consequences
 
@@ -286,7 +288,8 @@ What the forge does today, read on `iso-v0` at c774a2056:
     missing, is unsigned, or lacks in `build-ids.txt` the build ID of a shipped ELF executable or
     shared object outside the exempt specs.
 - Beyond the files decisions 2 to 6 name, among them `forge/scripts/dag_orchestrator.py`,
-  `system/build-image.sh` and `system/Containerfile`, the implementing work edits
+  `forge/scripts/check_idempotency.sh`, `system/build-image.sh` and `system/Containerfile`, the
+  implementing work edits
   `system/sign-images.sh`, `system/image-digests.sh` (its allow-list
   of repositories), the registries.d entries that `sign-images.sh` renders, today
   `system/kernel-registries.d.yaml.in`, so that skopeo writes the sigstore attachment of
