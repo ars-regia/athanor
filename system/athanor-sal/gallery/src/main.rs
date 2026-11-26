@@ -148,6 +148,7 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<Wid
             ui.check(group, t("check1")?, true);
             ui.check(group, t("check2")?, false);
             ui.switch_row(group, t("switch")?, t("switch.detail")?, true);
+            ui.shortcut_capture(group, t("shortcut")?, t("shortcut.prompt")?, None);
         }
         "values" => {
             ui.slider(group, t("slider")?, 0.0, 100.0, 1.0, 50.0)
