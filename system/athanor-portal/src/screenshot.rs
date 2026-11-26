@@ -28,6 +28,9 @@ use zbus::{ObjectPath, OwnedVariant as OwnedValue, Str};
 pub const VERSION: u32 = 2;
 /// How long a file in flight is kept: the frontend and the recorder read it within that time.
 pub const MAX_AGE: Duration = Duration::from_secs(3600);
+/// How long a request waits for its turn and its outputs' pictures before it answers 2: the
+/// client waits two seconds for every output at once, and the rest is its connection.
+pub const CAPTURE_DEADLINE: Duration = Duration::from_secs(5);
 const PREFIX: &str = "screenshot-";
 const SUFFIX: &str = ".png";
 /// The largest image composed: a side, and its RGBA bytes, so that a layout of absurd
@@ -407,6 +410,8 @@ struct Shared<H: Host> {
     host: H,
     /// The unit's runtime directory, where the files in flight are written.
     dir: PathBuf,
+    /// [`CAPTURE_DEADLINE`], shorter in the tests.
+    deadline: Duration,
     /// Held from a screenshot's capture to its file: each holds every output's picture, the
     /// composed image and its PNG in memory, and a caller that asks again and again waits for
     /// its turn instead of multiplying them. The capture's task owns it, so a request closed
@@ -434,9 +439,14 @@ pub struct Screenshot<H: Host>(Arc<Shared<H>>);
 
 impl<H: Host> Screenshot<H> {
     pub fn new(host: H, dir: PathBuf) -> Screenshot<H> {
+        Screenshot::within(host, dir, CAPTURE_DEADLINE)
+    }
+
+    fn within(host: H, dir: PathBuf, deadline: Duration) -> Screenshot<H> {
         Screenshot(Arc::new(Shared {
             host,
             dir,
+            deadline,
             turn: Arc::new(Mutex::new(())),
         }))
     }
@@ -489,25 +499,30 @@ impl<H: Host> Screenshot<H> {
             tracing::warn!(%handle, "Screenshot refused: the request's object path is taken");
             return Ok(answer(2));
         }
-        let shared = self.0.clone();
-        // Waiting for the turn ends with the request; the capture, once begun, runs in a task
-        // of its own that holds the turn until the capture ends.
+        let (shared, deadline) = (self.0.clone(), self.0.deadline);
+        // Waiting for the turn ends with the request or the deadline; the capture, once begun,
+        // runs in a task of its own that holds the turn until the capture ends.
         let taken = tokio::select! {
             biased;
             () = closed.notified() => None,
-            taken = async move {
+            taken = tokio::time::timeout(deadline, async move {
                 let turn = shared.turn.clone().lock_owned().await;
                 tokio::spawn(async move { (shared.host.capture().await, turn) }).await
-            } => Some(taken),
+            }) => Some(taken),
         };
         if let Err(error) = server.remove::<Request<H>, _>(&handle).await {
             tracing::error!(%error, %handle, "the request's object was not removed");
         }
         let kept = match taken {
             None => return Ok(answer(1)),
-            Some(Err(error)) => Err(format!("the capture's task ended: {error}")),
-            Some(Ok((Err(why), _turn))) => Err(format!("the outputs were not captured: {why}")),
-            Some(Ok((Ok(shots), turn))) => {
+            Some(Err(_)) => Err(format!(
+                "the outputs were not captured within {deadline:?}"
+            )),
+            Some(Ok(Err(error))) => Err(format!("the capture's task ended: {error}")),
+            Some(Ok(Ok((Err(why), _turn)))) => {
+                Err(format!("the outputs were not captured: {why}"))
+            }
+            Some(Ok(Ok((Ok(shots), turn)))) => {
                 let kept = self.keep(shots).await;
                 drop(turn);
                 kept
@@ -920,6 +935,10 @@ mod tests {
     }
 
     async fn portal(name: &str, answers: bool) -> Portal {
+        portal_within(name, answers, CAPTURE_DEADLINE).await
+    }
+
+    async fn portal_within(name: &str, answers: bool, deadline: Duration) -> Portal {
         let bus = Bus::start(name);
         let frontend = bus.builder().build().await.expect("frontend");
         let stranger = bus.builder().build().await.expect("stranger");
@@ -937,7 +956,7 @@ mod tests {
         };
         let serving = bus
             .builder()
-            .serve_at(DESKTOP, Screenshot::new(host, dir.clone()))
+            .serve_at(DESKTOP, Screenshot::within(host, dir.clone(), deadline))
             .build()
             .await
             .expect("backend");
@@ -1138,6 +1157,34 @@ mod tests {
         assert_eq!(*portal.captures.lock().expect("lock"), 1);
         portal.gate.add_permits(1);
         let (response, _) = second.await.expect("task").expect("Screenshot");
+        assert_eq!(response, 0);
+        assert_eq!(*portal.captures.lock().expect("lock"), 2);
+        fs::remove_dir_all(&portal.dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_capture_past_the_deadline_answers_2_and_keeps_its_turn() {
+        let portal = portal_within("deadline", false, Duration::from_millis(100)).await;
+        for handle in ["d1", "d2"] {
+            let handle = format!("/org/freedesktop/portal/desktop/request/1_1/{handle}");
+            let (response, results) = portal
+                .call(&portal.frontend, "Screenshot", &handle, &checked())
+                .await
+                .expect("Screenshot");
+            assert_eq!((response, results.len()), (2, 0));
+        }
+        // The second request timed out waiting for the first capture, which it never joined.
+        assert_eq!(*portal.captures.lock().expect("lock"), 1);
+        portal.gate.add_permits(1);
+        let (response, _) = portal
+            .call(
+                &portal.frontend,
+                "Screenshot",
+                "/org/freedesktop/portal/desktop/request/1_1/d3",
+                &checked(),
+            )
+            .await
+            .expect("Screenshot");
         assert_eq!(response, 0);
         assert_eq!(*portal.captures.lock().expect("lock"), 2);
         fs::remove_dir_all(&portal.dir).ok();
