@@ -2,14 +2,16 @@
 //! its directories, count its failures and give up after five in ten minutes, log at journal priorities, tell
 //! systemd it is ready, log a panic with its backtrace, confine itself with Landlock, check who is at the other end of a
 //! socket, make other processes' text safe to show, and, with the `bus-caller` feature, tell
-//! which unit a D-Bus caller runs in, and, with the `watchdog` feature, ping the manager's watchdog
-//! after a roundtrip on the bus.
+//! which unit a D-Bus caller runs in, with the `logind` feature, find this process's session,
+//! and, with the `watchdog` feature, ping the manager's watchdog after a roundtrip on the bus.
 
 #[cfg(feature = "bus-caller")]
 pub mod bus_caller;
 pub mod crash_loop;
 pub mod dirs;
 pub mod journal;
+#[cfg(feature = "logind")]
+pub mod logind;
 pub mod notify;
 pub mod panic;
 pub mod peer;
