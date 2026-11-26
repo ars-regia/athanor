@@ -113,11 +113,14 @@ before the build, and ADR-0150 puts them after its approval. Check:
 tables, the lock of point 4 with `LOCK_NB` and its one-second bound, the atomic write through
 `athanor_layout::atomic`, the record `import.toml`, and the import with an empty list of families,
 opening each source with `O_NONBLOCK | O_NOFOLLOW` and refusing what is not a regular file. The
-bin target `athanor-preferences-import` of `athanor-sulphur-client`, installed with the user unit
-`athanor-preferences-import.service` by `forge/specs/athanor-sulphur/athanor-sulphur.spec`, which
-builds the bin target beside the compositor: `PartOf=graphical-session.target`, `Before=` and
-wanted by `athanor-sulphur.service`, `TimeoutStartSec=5s`, `NoNewPrivileges=yes`,
-`ProtectSystem=strict`, `ConfigurationDirectory=athanor/sulphur`, and its preset; SN4's row. Tests:
+crate `system/athanor-preferences-import`, whose binary only calls that import and which links
+`athanor-sulphur-client` with `default-features = false`, as `system/athanor-idle/Cargo.toml:11`
+does, and its package `forge/specs/athanor-preferences-import`, built as `athanor-idle`'s is
+(`glib2-devel`, no GTK), listed in `forge/config/packages.json` and required by `athanor-sulphur`;
+it installs the user unit `athanor-preferences-import.service`: `PartOf=graphical-session.target`,
+`Before=` and wanted by `athanor-sulphur.service`, `TimeoutStartSec=5s`, `NoNewPrivileges=yes`,
+`ProtectSystem=strict`, `ProtectHome=read-only`, `ConfigurationDirectory=athanor/sulphur`, and
+its preset; SN4's row. Tests:
 a newer schema refused by a reader and by a writer; an unknown key and table kept by a rewrite;
 two writers in two processes keep both changes; a lock held by a stopped process makes the second
 writer fail within the bound; a FIFO and a symbolic link in place of a COSMIC source, each refused
@@ -132,12 +135,13 @@ and `shipped` cover the new unit and binary.
 Sulphur's reader on `keyboard.toml` with `xkb_config.rs`'s parser replaced by `toml`, keeping the
 first four of more layouts in place of refusing the file. shelld's seed from localed into
 `keyboard.toml` (LN9), ordered `After=` the import unit and written only when the file is absent and
-the record lists the keyboard as `absent`. It lands with Settings' Keyboard page (SE15) or after
+the record lists the keyboard as `absent` or `refused`. It lands with Settings' Keyboard page (SE15) or after
 it, never before (ADR-0150 point 9). Tests: fixtures of real `xkb_config` files written by
 cosmic-settings in the dev VM, one, two and four layouts, with variants and options, a malformed
 file and one of five layouts, imported as four; an import stopped after the file is written and
 before the record, completed at the next start; a second start changing nothing; shelld's seed
-skipped with no record, with the keyboard `imported` or `kept`, and written with it `absent`; a
+skipped with no record, with the keyboard `imported` or `kept`, and written with it `absent` or
+`refused`; a
 change followed by the compositor without a restart. The compositor e2e and the rig seeds,
 `rig.sh:457-461` and `:1298`, move to `keyboard.toml`.
 

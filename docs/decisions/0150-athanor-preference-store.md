@@ -147,19 +147,21 @@ those links is #1380, not yet decided. The store must not depend on it.
 6. **The import** (Q4, option 1; Q6, option 2; Q7, option 1). It reads the user's own COSMIC
    files, never the system defaults under `XDG_DATA_DIRS`, which are vendor choices. It runs once
    per user at the start of a session, in a oneshot user unit, `athanor-preferences-import.service`:
-   - **The unit.** It runs `/usr/bin/athanor-preferences-import`, a bin target of
-     `athanor-sulphur-client`, whose library holds the import, so COSMIC code stays inside that
-     crate (SH2); the `athanor-sulphur` package ships the binary and the unit beside the compositor
-     they serve. The unit is `PartOf=graphical-session.target` (SN3), ordered `Before=` and wanted
+   - **The unit.** It runs `/usr/bin/athanor-preferences-import`, the binary of a crate of its
+     own, `system/athanor-preferences-import`, that only calls the import in the library of
+     `athanor-sulphur-client`, so COSMIC code stays inside that crate (SH2); it links the client
+     with `default-features = false`, without GTK, as `athanor-idle` does, and its package of the
+     same name, required by `athanor-sulphur`, ships the binary and the unit. The unit is `PartOf=graphical-session.target` (SN3), ordered `Before=` and wanted
      by `athanor-sulphur.service`, so the compositor's first keymap and bindings are the imported
      ones, and `doc_session.md` SN4's table gains its row. It sets `TimeoutStartSec=5s`,
-     `NoNewPrivileges=yes` and `ProtectSystem=strict`, with `ConfigurationDirectory=athanor/sulphur`
-     as its one writable path, which also makes the directory exist before any confined
+     `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ProtectHome=read-only`, with
+     `ConfigurationDirectory=athanor/sulphur` as its one writable path, as the launcher's unit
+     grants its one write, which also makes the directory exist before any confined
      application starts; it reads `$XDG_CONFIG_HOME/cosmic`.
    - **It never hangs the sign-in.** Each source is opened with
      `O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC` and refused unless `fstat` reports a regular
-     file within its reader's size bound, so a FIFO or a link planted under `~/.config/cosmic`
-     neither blocks nor redirects it; the store's lock is taken as in point 4. A timeout is a
+     file within its reader's size bound, so a FIFO or a symbolic link planted in place of a source
+     file under `~/.config/cosmic` neither blocks nor redirects it; the store's lock is taken as in point 4. A timeout is a
      failure (point 8). `Wants=` does not make Sulphur depend on the unit's success: a failed or
      timed-out import leaves the compositor to start on the store as it finds it, or on its
      defaults, after at most the five seconds, and the import runs at the next start.
@@ -180,7 +182,7 @@ those links is #1380, not yet decided. The store must not depend on it.
      that RON file.
    - **shelld's keyboard seed** from localed (LN9) is ordered `After=` the import unit and writes
      `keyboard.toml` only when the file is absent and the record exists and lists the keyboard as
-     `absent`; without a record it writes nothing, and the next start tries again. The import never
+     `absent` or `refused`; without a record it writes nothing, and the next start tries again. The import never
      has to tell a seeded file from a user's.
    Not taken: the import run by shelld, or by the compositor (Q4, options 2 and 3); cosmic-comp's
    input and workspace keys imported into decision 38's files when absent (Q6, option 1); the
@@ -257,8 +259,9 @@ those links is #1380, not yet decided. The store must not depend on it.
   `system_actions` leave with cosmic-comp; `doc_control_center.md` CC2, whose grant on the COSMIC
   theme's directories becomes one on `appearance.toml`; `doc_osd.md` OD2; `doc_portal.md` PT13;
   `doc_bar.md` BR7 (`doc_bar.md:149`), whose favourites import leaves in release 1.1; and
-  `doc_lock_and_prompts.md:92`, whose idle factory values name the CosmicIdle store that the idle
-  import reads, leaving in release 1.1.
+  `doc_lock_and_prompts.md:92`, whose factory values of the idle timers still describe the
+  `com.system76.CosmicIdle` defaults, the store whose import by `athanor-idle` leaves in release
+  1.1.
 - `doc_own_stack.md` decision 38's bindings half is rewritten for `bindings.toml`: Sulphur's
   `src/user_bindings.rs` reads the store and is no exception to SH2. It can be built right after
   the store's foundation, since no Athanor page writes bindings yet and nothing under Sulphur reads
