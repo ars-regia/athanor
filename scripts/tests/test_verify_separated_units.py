@@ -13,6 +13,8 @@ spec.loader.exec_module(verify)
 
 LOCK = "athanor-lock.service"
 SHIPPED = SCRIPT.parents[1] / "forge/specs/athanor-lock/athanor-lock-1.0.0/data" / LOCK
+SPEC = "athanor-lock/athanor-lock.spec"
+DATA = "athanor-lock/athanor-lock-1.0.0/data"
 KEPT = "NoNewPrivileges=yes\nSystemCallArchitectures=native\nSystemCallFilter=@system-service\nRestrictRealtime=yes\nRestrictSUIDSGID=yes\nLockPersonality=yes\nRestrictAddressFamilies=AF_UNIX\n"
 
 
@@ -24,7 +26,8 @@ def unit(lines):
 
 def problems(units, dropins=None):
     """`dropins` maps `<spec>/<directory>/<file>` to the text of a user drop-in installed
-    under usr/lib/systemd/user/, or a longer path under forge/specs to a file put there."""
+    under usr/lib/systemd/user/, or a longer path under forge/specs to a file put there,
+    such as a spec."""
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         for name, text in (dropins or {}).items():
@@ -36,8 +39,8 @@ def problems(units, dropins=None):
             path = root / "forge/specs" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
-        texts, found = verify.separated_unit_texts(root, units)
-        return found + verify.separated_unit_problems({**units, **texts})
+        found, dropin_problems = verify.separated_unit_dropins(root, units)
+        return dropin_problems + verify.separated_unit_problems(units, found)
 
 
 class SeparatedUnitsTest(unittest.TestCase):
@@ -199,6 +202,67 @@ class SeparatedUnitsTest(unittest.TestCase):
             with self.subTest(path=path):
                 found = problems(
                     {LOCK: unit(KEPT)}, {path: "[Service]\nRestrictRealtime=yes\n"}
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("cannot merge it", found[0])
+
+    def test_a_drop_in_a_spec_installs_is_read_from_its_source(self):
+        # The lock's spec installs its unit with install -D from data/; a drop-in installed
+        # the same way sits in no `<unit>.d` directory of the tree.
+        for directory in (f"{LOCK}.d", "athanor-.service.d", "service.d"):
+            for install in (
+                f"install -D -m 0644 data/20-extra.conf %{{buildroot}}/usr/lib/systemd/user/{directory}/20-extra.conf",
+                f"install -m 0644 -t %{{buildroot}}%{{_userunitdir}}/{directory} data/20-extra.conf",
+                f"cp data/20-extra.conf $RPM_BUILD_ROOT/usr/lib/systemd/user/{directory}/",
+            ):
+                with self.subTest(directory=directory, install=install):
+                    found = problems(
+                        {LOCK: unit(KEPT)},
+                        {
+                            SPEC: f"%install\n{install}\n\n%files\n%dir /usr/lib/systemd/user/{directory}\n/usr/lib/systemd/user/{directory}/20-extra.conf\n",
+                            f"{DATA}/20-extra.conf": "[Service]\nPrivateTmp=yes\n",
+                        },
+                    )
+                    self.assertEqual(len(found), 1, found)
+                    self.assertIn("PrivateTmp=yes", found[0])
+        # The negative control: the same spec with a drop-in of measured lines passes.
+        self.assertEqual(
+            problems(
+                {LOCK: unit(KEPT)},
+                {
+                    SPEC: f"%install\ninstall -D data/20-extra.conf %{{buildroot}}/usr/lib/systemd/user/{LOCK}.d/20-extra.conf\n\n%files\n/usr/lib/systemd/user/{LOCK}.d/20-extra.conf\n",
+                    f"{DATA}/20-extra.conf": "[Service]\nRestrictRealtime=yes\n",
+                },
+            ),
+            [],
+        )
+
+    def test_a_drop_in_the_check_cannot_read_fails(self):
+        for text in (
+            # Its source holds a variable, or names no file of the repository.
+            f"%install\ninstall -D $SRC %{{buildroot}}/usr/lib/systemd/user/{LOCK}.d/20-x.conf\n%files\n/usr/lib/systemd/user/{LOCK}.d/20-x.conf\n",
+            f"%install\ninstall -D data/missing.conf %{{buildroot}}/usr/lib/systemd/user/{LOCK}.d/20-x.conf\n%files\n/usr/lib/systemd/user/{LOCK}.d/20-x.conf\n",
+            # Listed in %files, and neither installed nor in the tree.
+            "%files\n/usr/lib/systemd/user/service.d/20-x.conf\n",
+            # Its destination holds a macro the check does not know.
+            "%install\ninstall -D data/a.conf %{buildroot}%{_mydir}/athanor-.service.d/a.conf\n",
+            # The whole directory listed, which ships whatever lands in it.
+            f"%files\n/usr/lib/systemd/user/{LOCK}.d\n",
+        ):
+            with self.subTest(spec=text):
+                found = problems(
+                    {LOCK: unit(KEPT)},
+                    {SPEC: text, f"{DATA}/a.conf": "[Service]\n"},
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("separated", found[0])
+
+    def test_a_drop_in_outside_systemd_user_that_no_spec_installs_fails(self):
+        for directory in (f"{LOCK}.d", "athanor-.service.d", "service.d"):
+            with self.subTest(directory=directory):
+                found = problems(
+                    {LOCK: unit(KEPT)},
+                    {f"{DATA}/{directory}/50-x.conf": "[Service]\nRestrictRealtime=yes\n"},
                 )
                 self.assertEqual(len(found), 1, found)
                 self.assertIn("cannot merge it", found[0])

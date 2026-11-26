@@ -3391,11 +3391,11 @@ def top_layer(files):
     return None
 
 
-def spec_installs(spec):
-    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
-    /usr/sbin or /usr/libexec: continued lines joined, a command after `do`, `then` or `else`,
-    quoted words, a target directory given by -t or as the last argument, a destination
-    directory given with or without its trailing slash."""
+def spec_copies(spec):
+    """(sources, destination, target) of each install or cp of a spec: continued lines joined,
+    a command after `do`, `then` or `else`, quoted words; `target` when -t names the
+    destination directory, else the destination is the last argument, a directory or, for one
+    source, maybe the file's new path. An install -d makes directories and is left out."""
     for command in re.split(r"&&|\|\||;|\n", spec.replace("\\\n", " ")):
         words = [w.strip("\"'") for w in command.split()]
         if words[:1] in (["do"], ["then"], ["else"]):
@@ -3429,17 +3429,22 @@ def spec_installs(spec):
             i += 1
         if not args:
             continue  # install -d makes directories
-        if directory is None:
-            if len(args) < 2:
-                continue
-            *sources, directory = args
-            if len(sources) == 1 and not directory.endswith("/") and \
-                    executable_path(directory) not in EXEC_DIRS.values():
-                if executable_path(directory).startswith(EXEC_ROOTS):
-                    yield sources[0], executable_path(directory)
-                continue
-        else:
-            sources = args
+        if directory is not None:
+            yield args, directory, True
+        elif len(args) >= 2:
+            yield args[:-1], args[-1], False
+
+
+def spec_installs(spec):
+    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
+    /usr/sbin or /usr/libexec (spec_copies), a destination directory given with or without its
+    trailing slash."""
+    for sources, directory, target in spec_copies(spec):
+        if not target and len(sources) == 1 and not directory.endswith("/") and \
+                executable_path(directory) not in EXEC_DIRS.values():
+            if executable_path(directory).startswith(EXEC_ROOTS):
+                yield sources[0], executable_path(directory)
+            continue
         for source in sources:
             executable = executable_path(f"{directory}/{source.rsplit('/', 1)[-1]}")
             if executable.startswith(EXEC_ROOTS):
@@ -5722,6 +5727,8 @@ USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|targe
 # A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
 USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
 USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir|systemd_user")
+# A drop-in directory of the user unit directory, or a file in one, on the installed system.
+USER_DROPIN_FILE = re.compile(r"/usr/lib/systemd/user/([^/]+\.d)(?:/([^/]+))?")
 
 
 def spec_user_units(text):
@@ -5746,6 +5753,35 @@ def spec_user_units(text):
         elif not USER_DROPIN_PATH.fullmatch(path):
             problems.append(line)
     return names, problems
+
+
+def installed_path(destination):
+    """`destination` of a spec's %install or %files as the path it has on the installed
+    system, the user unit directory's macro and /etc's included (executable_path)."""
+    destination = re.sub(r"%(_\w+)", r"%{\1}", destination)
+    destination = destination.replace("%{_userunitdir}", "/usr/lib/systemd/user")
+    return executable_path(destination.replace("%{_sysconfdir}", "/etc"))
+
+
+def spec_user_dropins(text):
+    """(path, with %dir) of each drop-in directory or file of the user unit directory that a
+    spec's %files lists, as installed_path gives it."""
+    found, in_files = [], False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%files"):
+            in_files = True
+            continue
+        if FILES_END.match(line):
+            in_files = False
+        if not in_files or line.startswith("#"):
+            continue
+        path = FILES_DIRECTIVES.sub("", line)
+        listed_dir = bool(re.match(r"%dir\s", path))
+        path = re.sub(r"^%dir\s+", "", path)
+        if USER_DROPIN_PATH.fullmatch(path):
+            found.append((installed_path(path), listed_dir))
+    return found
 
 
 def shipped_user_units(root):
@@ -6062,43 +6098,108 @@ SEPARATED_UNIT_KEYS = {
 SECCOMP_FILTER_KEYS = ("RestrictAddressFamilies", "SystemCallFilter")
 
 
-def separated_unit_texts(root, units, separated=SEPARATED_USER_UNITS):
-    """({unit: text}, problems): each separated unit with every user drop-in that applies to it
-    appended in systemd's order, by file name (systemd.unit(5)): `<unit>.d`, each
-    `<prefix>-.service.d` of its name and the type-wide `service.d`, a file of the more specific
-    directory replacing one of the same name. A `<unit>.d` drop-in outside a `systemd/user/`
-    directory of a spec, such as one next to the unit under `data/`, is a problem: the check does
-    not know where it installs, so it cannot merge it."""
-    texts, problems = {}, []
-    for unit in separated:
-        if unit not in units:
+def separated_unit_dirs(unit):
+    """The user drop-in directories that apply to `unit`, the most specific first
+    (systemd.unit(5)): `<unit>.d`, each `<prefix>-.service.d` of its name, then `service.d`."""
+    stem, kind = unit.rsplit(".", 1)
+    parts = stem.split("-")
+    return [f"{unit}.d"] + [f"{'-'.join(parts[:n])}-.{kind}.d" for n in range(len(parts) - 1, 0, -1)] + [f"{kind}.d"]
+
+
+def copied_source(root, spec, word):
+    """The one file of the repository that a source word of `spec`'s %install names, read from
+    the root, the spec's directory or a directory in it, as rpmbuild may run there; None when
+    the word is absolute, holds a macro, a variable or a glob, or names no file or more
+    than one."""
+    if not word or word.startswith("/") or any(c in word for c in "%$*?[`"):
+        return None
+    paths = [root / word, spec.parent / word, *(d / word for d in spec.parent.iterdir() if d.is_dir())]
+    found = {p.resolve() for p in paths if p.is_file()}
+    return found.pop() if len(found) == 1 else None
+
+
+def separated_unit_dropins(root, units, separated=SEPARATED_USER_UNITS):
+    """({unit: [(where, text)]}, problems): the user drop-ins of each separated unit, in
+    systemd's order, by file name (systemd.unit(5)), a file of a more specific directory
+    (separated_unit_dirs) replacing one of the same name. A drop-in is each file that a spec
+    under forge/specs installs or lists in %files in one of those directories, read from the
+    source its install or cp copies there, else from the file at that path under the spec's
+    directory; and each file at such a path under a spec's `systemd/user/`. A problem, so that
+    no drop-in passes unread: a drop-in whose source the check cannot find, a destination in
+    one of those directories it cannot place, such a directory listed in %files without %dir,
+    which ships whatever lands in it, two sources for one drop-in, and a file in one of those
+    directories elsewhere under forge/specs that no install copies."""
+    dirs = {unit: separated_unit_dirs(unit) for unit in separated if unit in units}
+    every = {d for ds in dirs.values() for d in ds}
+    shipped, problems = {}, []
+
+    def ship(directory, name, source, where):
+        if shipped.setdefault((directory, name), source) != source:
+            problems.append(f"{where}: ships /usr/lib/systemd/user/{directory}/{name} from {source.relative_to(root)}, and another spec or file ships it from {shipped[(directory, name)].relative_to(root)}")
+
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        spec_text, where = read(spec), spec.relative_to(root).as_posix()
+        copies = {}
+        for sources, destination, target in spec_copies(spec_text):
+            path = installed_path(destination)
+            into = target or len(sources) > 1 or destination.endswith("/") or path.endswith(".d")
+            for word in sources:
+                placed = installed_path(f"{destination}/{word.rsplit('/', 1)[-1]}") if into else path
+                m = USER_DROPIN_FILE.fullmatch(placed)
+                if m and m.group(1) in every and m.group(2):
+                    copies[placed] = word
+                elif any(c in placed for c in "%$") and every & set(destination.split("/")):
+                    problems.append(f"{where}: installs {word} to {destination}, which separated-units cannot place; name the drop-in's path under %{{buildroot}}/usr/lib/systemd/user/ plainly")
+        dropins = spec_user_dropins(spec_text)
+        listed = {path for path, _ in dropins}
+        for path, listed_dir in dropins:
+            m = USER_DROPIN_FILE.fullmatch(path)
+            if m and m.group(1) in every and not m.group(2) and not listed_dir:
+                problems.append(f"{where}: lists {path} in %files without %dir, which ships whatever lands in it; list each drop-in of a separated unit as its own file")
+        for path in sorted(set(copies) | listed):
+            m = USER_DROPIN_FILE.fullmatch(path)
+            if not m or m.group(1) not in every or not m.group(2):
+                continue
+            directory, name = m.groups()
+            if path in copies:
+                source = copied_source(root, spec, copies[path])
+            else:
+                at = [p for p in walk(spec.parent, name) if p.parts[-4:] == ("systemd", "user", directory, name) and "skel" not in p.parts]
+                source = at[0].resolve() if len(at) == 1 else None
+            if source is None:
+                problems.append(f"{where}: ships {path}, and separated-units cannot find the file of the repository that its %install copies there; copy it with install or cp from a file named plainly")
+            else:
+                ship(directory, name, source, where)
+    for conf in walk(root / "forge" / "specs", ".conf"):
+        if conf.parent.name not in every or conf.parts[-4:-2] == ("systemd", "system"):
             continue
-        stem, kind = unit.rsplit(".", 1)
-        parts = stem.split("-")
-        dirs = [f"{unit}.d"] + [f"{'-'.join(parts[:n])}-.{kind}.d" for n in range(len(parts) - 1, 0, -1)] + [f"{kind}.d"]
-        found = {}
-        for conf in walk(root / "forge" / "specs", ".conf"):
-            placed = conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts
-            if conf.parent.name == f"{unit}.d" and not placed:
-                problems.append(f"{unit}: drop-in {conf.relative_to(root)} is not under a spec's systemd/user/ directory, so separated-units cannot merge it; ship it as usr/lib/systemd/user/{unit}.d/{conf.name} or move its lines into the unit")
-            elif conf.parent.name in dirs and placed:
-                rank = dirs.index(conf.parent.name)
-                if conf.name not in found or rank < found[conf.name][0]:
-                    found[conf.name] = (rank, conf)
-        texts[unit] = units[unit] + "".join("\n" + read(conf) for _, (_, conf) in sorted(found.items()))
-    return texts, problems
+        where = conf.relative_to(root).as_posix()
+        if conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
+            ship(conf.parent.name, conf.name, conf.resolve(), where)
+        elif conf.resolve() not in shipped.values():
+            problems.append(f"{where}: a drop-in of a separated unit's directory that no spec's %install copies into /usr/lib/systemd/user/{conf.parent.name}/, so separated-units cannot merge it; install it there from the spec, or move its lines into the unit")
+    found = {}
+    for unit, ds in dirs.items():
+        chosen = {}
+        for (directory, name), source in shipped.items():
+            if directory in ds and (name not in chosen or ds.index(directory) < chosen[name][0]):
+                chosen[name] = (ds.index(directory), source)
+        found[unit] = [(source.relative_to(root).as_posix(), read(source)) for _, (_, source) in sorted(chosen.items())]
+    return found, problems
 
 
-def separated_unit_problems(units, separated=SEPARATED_USER_UNITS):
-    """A separated unit that no spec ships; or that, its drop-ins merged, sets a key outside
-    SEPARATED_UNIT_KEYS, or a seccomp filter without SystemCallArchitectures=native alone."""
+def separated_unit_problems(units, dropins=None, separated=SEPARATED_USER_UNITS):
+    """A separated unit that no spec ships; or that, its drop-ins (separated_unit_dropins)
+    merged, sets a key outside SEPARATED_UNIT_KEYS, or a seccomp filter without
+    SystemCallArchitectures=native alone."""
     problems = []
     for unit in separated:
         if unit not in units:
             problems.append(f"{unit}: listed in SEPARATED_USER_UNITS and shipped by no spec under forge/specs")
             continue
+        merged = units[unit] + "".join("\n" + dropin for _, dropin in (dropins or {}).get(unit, ()))
         architectures, filters = set(), set()
-        for section, key, value in unit_assignments(units[unit]):
+        for section, key, value in unit_assignments(merged):
             if key not in SEPARATED_UNIT_KEYS.get(section, ()):
                 problems.append(f"{unit}: [{section}] {key}={value} is not measured for separated units: measure that it keeps the host's user namespace under the user manager, where a namespace of the user's lets a process of the same uid attach, and add it to SEPARATED_UNIT_KEYS (doc_lock_and_prompts.md D43)")
             # Both are lists that accumulate, and an empty assignment resets (systemd.exec(5)).
@@ -6115,8 +6216,8 @@ def separated_unit_problems(units, separated=SEPARATED_USER_UNITS):
 def check_separated_units():
     r = Result()
     units, problems = shipped_user_units(ROOT)
-    texts, dropin_problems = separated_unit_texts(ROOT, units)
-    for problem in problems + dropin_problems + separated_unit_problems({**units, **texts}):
+    dropins, dropin_problems = separated_unit_dropins(ROOT, units)
+    for problem in problems + dropin_problems + separated_unit_problems(units, dropins):
         r.fail(problem)
     for unit in SEPARATED_USER_UNITS:
         r.note(f"separated: {unit}")
