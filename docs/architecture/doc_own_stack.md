@@ -1675,7 +1675,12 @@ compositor and that the own compositor did not yet offer:
           `identity.rs`: the peer's pidfd from `SO_PEERPIDFD`, then, through its pid, the
           executable `/usr/libexec/xdg-desktop-portal-athanor` and the unit of its cgroup,
           `xdg-desktop-portal-athanor.service`; amended on 2026-11-17), the privileged-clients
-          list having no line for it. A client outside a security context whose identity cannot
+          list having no line for it. *Amended on 2026-11-26 (maintainer decision, 2026-11-26;
+          `doc_portal.md` PT15):* the privileged-clients list has a line for the backend,
+          which grants `ext_output_image_capture_source_manager_v1` and
+          `ext_image_copy_capture_manager_v1` for the screenshots of `doc_portal.md` PT8, and
+          no line marks it a trusted prompt; the identity above is unchanged. A client
+          outside a security context whose identity cannot
           be read, and a surface whose client is gone, count as the backend's and receive no
           injected input; a client in a security context never counts as the backend's. An
           injected key is dropped, its release included, while the keyboard focus is such a
