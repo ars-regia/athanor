@@ -87,7 +87,7 @@ pub enum Error {
     InvalidArgument(&'static str),
     #[error("the display was closed")]
     Closed,
-    #[error("the window's picture was not taken: {0}")]
+    #[error("the picture was not taken: {0}")]
     Capture(&'static str),
 }
 
@@ -935,6 +935,14 @@ impl State {
         self.outputs.insert(name, output);
     }
 
+    /// The `wl_output` objects, in the order of their registry names.
+    #[cfg(feature = "capture")]
+    pub(crate) fn wl_outputs(&self) -> Vec<wl_output::WlOutput> {
+        let mut names: Vec<_> = self.outputs.keys().copied().collect();
+        names.sort_unstable();
+        names.iter().filter_map(|name| self.outputs.get(name)).cloned().collect()
+    }
+
     fn outputs(&self) -> Vec<Output> {
         let mut names: Vec<_> = self.outputs.keys().copied().collect();
         names.sort_unstable();
@@ -1257,7 +1265,7 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
                 // A capture ends before the handle it was made from does.
                 #[cfg(feature = "capture")]
                 state.captures.retain(|_, capture| {
-                    if capture.window != *id {
+                    if capture.window != Some(*id) {
                         return true;
                     }
                     capture.wake();
