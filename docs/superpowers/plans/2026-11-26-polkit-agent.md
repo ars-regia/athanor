@@ -2,6 +2,10 @@
 
 **Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The design was approved by the maintainer on 2026-11-26. The agent carries the user's password from Sal's field to polkit's helper, an authentication path (`AGENTS.md`, "Stop and ask before editing"), and LP8 requires the plan of "the agent's password path" to be approved before any code is written (`docs/architecture/doc_lock_and_prompts.md:118`). No code is written until then.
 
+**Decided on 2026-11-26.** The maintainer decided questions A1 and A2 (section 6) and the confinement rule of #1558, written below as decided.
+
+**Depends on #1558.** #1558 confines the lock in process and removes from its unit the directives that create a user namespace under a per-user manager. It amends the approved text first (ADR-0074), the lock's confinement and the rule for this class of unit in `doc_lock_and_prompts.md`, LP11's unit lines (`:179`) among them. This plan follows that rule (section 3.2) and writes no code before the amendment is approved.
+
 **Goal:** `athanor-polkit-agent`, a Sal client, is the session's polkit authentication agent on the forge's polkit 128. It is built, tested and judged on the reference laptop with cosmic-osd's unit masked there. It is enabled by preset only in cosmic-osd's retirement change, together with `athanor-osd` and the end-of-session dialogs. That change retires the own-allow entry `rpm cosmic-osd` (`forge/config/own-allow.txt`).
 
 **Architecture:** a new crate, `forge/specs/athanor-polkit-agent`, with one binary. A toolkit-free core holds the request queue, identity choice, lock gating and subject description; it is tested without a display (SH4) or a bus. Around it are three thin edges:
@@ -9,7 +13,7 @@
 - the helper client, on the main thread: the user and cookie lines, then the `athanor-auth` parser over `/run/polkit/agent-helper.socket`;
 - the screen: a Sal layer surface on the overlay layer, with Sal's trusted password field.
 
-**Tech stack:** Rust; `athanor-sal` without its `gpu` feature (LP15); `athanor-auth` (`system/athanor-auth`); `athanor-unit`; `zbus` and `nix` from the workspace; calloop through Sal. No new crate in `Cargo.lock`.
+**Tech stack:** Rust; `athanor-sal` without its `gpu` feature (LP15); `athanor-auth` (`system/athanor-auth`); `athanor-unit`; `zbus` and `nix` from the workspace; calloop through Sal. No new crate in `Cargo.lock`, except one that #1558 may add for the in-process seccomp filter, which the agent then uses as the lock does.
 
 **Spec:** `docs/architecture/doc_lock_and_prompts.md`, revision 4 with its amendments of 2026-11-19, 2026-11-20 and 2026-11-21:
 - LP1, LP2, LP8 (the wire protocol), LP10, LP11, LP13, LP14, LP15, LP17 and LP18 step 5;
@@ -22,8 +26,11 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 - **Sulphur alone.** The agent is built and tested on Sulphur only. D39 dropped cosmic-comp's session from the lock and the prompts (`doc_lock_and_prompts.md:427`).
 - **The password's path.** The password leaves the field only as a borrow (`system/athanor-sal/src/widget.rs#Ui::password_text`). It is copied once into an `athanor-auth` buffer (`system/athanor-auth/src/buffer.rs#Secret`), written to the helper's socket, and both are cleared at once (LP1). Nothing logs it, and no `Debug` shows it.
 - **No panics and least privilege.** No new `unwrap`, `expect` or `panic!` outside tests (`verify.py panics`). The unit sets `NoNewPrivileges=yes` (TM8, `verify.py services`).
+- **Confinement in process (#1558, maintainer decision, 2026-11-26).** The agent confines itself with Landlock and seccomp, as the lock does after #1558. Its unit carries no directive that creates a user namespace under a per-user manager.
+  - *Why.* In a user unit such a directive puts the service in a user namespace owned by the user (`uid_map 1000 1000 1`). A same-uid process then holds `CAP_SYS_PTRACE` there, and `PTRACE_ATTACH` succeeds against a non-dumpable process under Yama scope 1. `PrivateUsers=no` changes nothing (reproduced by the maintainer on 2026-11-26 with `ProtectSystem=strict`, `PrivateTmp=yes` and `NoNewPrivileges=yes`).
+  - *The check.* The `verify.py` rule of #1558, which fails on such a directive in a unit of this class, covers this unit. A rig probe checks that a same-uid attach to the running agent is refused (P5).
 - **Review.** Every pull request of this plan touches an authentication path. It takes the two-person review of CT6 (`docs/operations/contributing.md`, CT6). Its reviewer checks it against a concrete failure scenario from section 4 below.
-- **What this plan does not edit.** `system/athanor-bus-api/src/polkit.rs` is stop-and-ask (`system/AGENTS.md`) and is not edited by this plan (section 6, question A1).
+- **What this plan does not edit.** `system/athanor-bus-api/src/polkit.rs` is stop-and-ask (`system/AGENTS.md`) and is not edited by this plan (section 6, A1, decided).
 
 ## 1. The approved text, and what it leaves unsaid
 
@@ -39,12 +46,12 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 **The agent itself** (LP11, `:174-184`), item by item:
 - *Registration* (`:176`). One agent per session, registered with `RegisterAuthenticationAgentWithOptions` for the session's `unix-session` subject. The locale comes from `LANG`, fallback is off, and a failed registration exits non-zero. The agent never runs unregistered.
 - *Replacement* (`:177`, D7). The agent replaces cosmic-osd's in the retirement change. No patch to cosmic-osd is carried.
-- *The helper* (`:178`). It is polkit's own, reached at `/run/polkit/agent-helper.socket`. Each answer is capped at 510 bytes (D33, `:421`).
+- *The helper* (`:178`). It is polkit's own, reached at `/run/polkit/agent-helper.socket`. Each answer is capped at 510 bytes (D33, `:421`). That the cap fits the helper's `PAM_MAX_RESP_SIZE` is unverified until P3 checks it against the forge's PAM headers.
 - *Confinement* (`:179`, D42 `:430`):
   - Landlock and `RLIMIT_CORE` 0 come before `sal::run`;
   - `PR_SET_DUMPABLE` 0 comes after Sal's connection;
   - registration comes only once the process is non-dumpable;
-  - the unit lines are `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateNetwork=yes`, `NoNewPrivileges=yes` and `MemoryMax=96M`.
+  - the unit lines are `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateNetwork=yes`, `NoNewPrivileges=yes` and `MemoryMax=96M`. The first three create a user namespace under a per-user manager, so #1558's amendment replaces them (section 3.2).
 - *The dialog's content* (`:180`). It shows:
   - the action's message and icon;
   - the requesting program, from `polkit.subject-pid`, through `/proc/<pid>/exe` and, for a Flatpak, `/proc/<pid>/root/.flatpak-info`;
@@ -85,10 +92,12 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
    - *The client side.* The agent writes the user name and a newline, then the cookie and a newline. Each is one line, with no selector (polkit 128, `src/polkitagent/polkitagentsession.c`, `polkit_agent_session_initiate`).
    - *The helper side.* `--socket-activated` reads the user, then takes `SO_PEERPIDFD` and `SO_PEERCRED` and refuses a peer without a pidfd. It reads the cookie, runs `pam_authenticate` and `pam_acct_mgmt`, sends `AuthenticationAgentResponse2` with the cookie, the user, the pidfd and the uid to polkitd itself, and only then prints `SUCCESS` (polkit 128, `src/polkitagent/polkitagenthelper-pam.c`, `main`).
    - *The answer line.* It is read raw with `fgets` into 512 bytes; it is not escaped. A newline or a NUL in an answer would truncate or split it.
-   - *The settlement.* The agent refuses such an answer before writing anything. The 510-byte cap of D33 covers the length.
+   - *The settlement.* The agent refuses such an answer before writing anything. The 510-byte cap of D33 covers the length; whether 510 fits `PAM_MAX_RESP_SIZE` is unverified until P3.
 2. **The agent never reports the result.** The helper reports to polkitd (item 1), and polkitd grants on that report alone. polkitd accepts `AuthenticationAgentResponse2` only from uid 0. It matches the cookie to the session and the identity to those offered (polkit 128, `src/polkitbackend/polkitbackendinteractiveauthority.c`, `polkit_backend_interactive_authority_authentication_agent_response`).
    - The agent's reply to `BeginAuthentication` carries no grant. polkitd reads it only to tell a dismissal (`org.freedesktop.PolicyKit1.Error.Cancelled`) from a completion (same file, `authentication_agent_begin_cb`).
    - The agent therefore has no `AuthenticationAgentResponse2` call. It replies to `BeginAuthentication` after the helper's verdict line, or with `Cancelled` when the user dismisses the dialog.
+   - *A `SUCCESS` with no prompt.* A `SUCCESS` before any answer is a valid end: a fingerprint, a smart card or a `sufficient` PAM module can succeed with no password asked. The helper has already reported to polkitd when it prints the line (item 1). The agent closes the dialog and replies to `BeginAuthentication` as a completion. It never treats the line as the grant, and never reports a failure for it.
+   - *Why the lock differs.* The lock's `Attempt` ends a `SUCCESS` before the answer as a failure (`forge/specs/athanor-lock/athanor-lock-1.0.0/src/unlock.rs#Attempt`), because for the lock the line is the verdict it acts on: it unlocks on it, and its PAM stack always asks for the password first (`PAM_DISALLOW_NULL_AUTHTOK`, no `nullok`, A2-23). For the agent the line decides nothing: polkitd grants on the root helper's report alone, so a premature `SUCCESS` from a forged helper grants nothing either.
 3. **`athanor-auth`'s client entry point does not fit polkit's helper.** `system/athanor-auth/src/lib.rs#transact`:
    - writes `athanor-unlockd`'s selector first (`#write_selector`, D28);
    - accepts `UNAVAILABLE`, a verdict polkit's helper never sends;
@@ -96,7 +105,7 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 
    The lock does not use `transact` either. It builds its non-blocking attempt on the parser and the line reader (`forge/specs/athanor-lock/athanor-lock-1.0.0/src/unlock.rs#Attempt`; `system/athanor-auth/src/protocol.rs#parse`; `system/athanor-auth/src/buffer.rs#LineReader`). LP8 asks for one shared parser (`doc_lock_and_prompts.md:129`), and that already holds.
 
-   The agent's helper client is new code on an authentication path. Where it lives is question A2.
+   The agent's helper client is new code on an authentication path. It lives in the agent's crate (A2, decided).
 4. **Who may call the agent's object.** polkit 128's bus policy, as installed at `/usr/share/dbus-1/system.d/org.freedesktop.PolicyKit1.conf`, allows the `AuthenticationAgent` interface to be sent only by the user `polkitd`. The agent also checks, on every call, that the sender is the current owner of `org.freedesktop.PolicyKit1`, so that a change to the bus policy cannot give a forged request the trusted surface. A call from any other sender gets `AccessDenied` and draws nothing.
 5. **polkitd restarting.** When polkitd restarts, the registration is lost, and no request reaches the agent. The agent watches `NameOwnerChanged` for `org.freedesktop.PolicyKit1` and exits non-zero when the owner changes or goes. The guard's restart then registers it again, which keeps LP11's "never runs unregistered" (`:176`).
 6. **`LockedHint` today.**
@@ -109,7 +118,7 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
    - the `program` and `command_line` details carry it, and only a trusted caller may pass details.
 
    "Details" shows the action id and `command_line` (`:180`). No change to the approved text is needed.
-9. **Reading `/proc/<pid>/exe` from inside the unit.** `readlink` of another process's `exe` and `root` needs `PTRACE_MODE_READ` access. It fails for a root-owned or non-dumpable subject, and the dialog then says "Unknown program", as LP11 asks. Whether `ProtectSystem=strict` and the other unit lines leave `/proc` readable as needed is checked on the rig (section 7); it is not assumed.
+9. **Reading `/proc/<pid>/exe` from inside the unit.** `readlink` of another process's `exe` and `root` needs `PTRACE_MODE_READ` access. It fails for a root-owned or non-dumpable subject, and the dialog then says "Unknown program", as LP11 asks. With no namespace directive in the unit (#1558), the agent sees the host's `/proc`, and Landlock limits writes only, so reads stay open. That a same-user subject's `exe` and `.flatpak-info` are readable from the confined agent is checked on the rig (section 7); it is not assumed.
 10. **The keyring prompter.** LP18 step 6 puts the prompter into this same program later (`:267`). This plan builds nothing for it, and the core's types do not presuppose it.
 
 ## 2. What exists and what is missing
@@ -175,20 +184,20 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
   - `PAM_PROMPT_ECHO_OFF` is answered from the trusted field;
   - `PAM_PROMPT_ECHO_ON` is answered from a visible field;
   - `PAM_ERROR_MSG` and `PAM_TEXT_INFO` are shown, the latter as the fingerprint state;
-  - only an exact `SUCCESS` line after an answer counts as the verdict line;
+  - an exact `SUCCESS` line, before or after an answer, ends the attempt as a completion: the dialog closes and the request completes (section 1, item 2); `FAILURE` ends it as a failed attempt;
   - a malformed or over-long line, more lines than a bound, or an end of stream ends the attempt as a failure. The dialog says to try again, as the lock does (LP10).
 - **`ui`.** The Sal surface (section 3.5).
 - **`main`.** The start order of section 3.2.
 
-The session lookup is the lock's `our_session`. The first pull request moves it into `athanor-unit` behind its `zbus` feature, and both programs call that one copy (LP2 says "found as in LP2").
+The session lookup is the lock's `our_session`. The first pull request moves it into `athanor-unit` behind a new feature, `logind` (`dep:zbus` only), and both programs call that one copy (LP2 says "found as in LP2"). `athanor-unit` has two features today, and neither fits: `bus-caller` is the admission of a D-Bus peer by its unit and also enables `nix`'s `poll` and `user`; `watchdog` brings `tokio`. The lock calls logind with `zbus` directly and uses neither.
 
 ### 3.2 Process and privilege
 
 **Start order** (LP11, D42, LP15):
 1. `athanor_unit::panic::install()` (`system/athanor-unit/src/panic.rs#install`).
 2. The locale from `LANG`, for registration and PAM's messages (D32).
-3. `confine`:
-   - `athanor_unit::sandbox::ensure_single_threaded`, then `restrict_writes` limited to `$XDG_RUNTIME_DIR`, then `RLIMIT_CORE` 0;
+3. `confine`, as the lock's `confine.rs` after #1558:
+   - `athanor_unit::sandbox::ensure_single_threaded`, then `restrict_writes` limited to `$XDG_RUNTIME_DIR`, then `deny_tcp`, then the seccomp filter that #1558 adds to `athanor-unit`'s sandbox, then `RLIMIT_CORE` 0. The sandbox has no seccomp today (`system/athanor-unit/src/sandbox.rs`: `ensure_single_threaded`, `restrict`, `restrict_writes`, `deny_tcp`), so this step waits for #1558;
    - a failure is fatal: the agent never runs unconfined.
 4. Sal's event source; the bus thread is spawned after the confinement, so it inherits it.
 5. `athanor_sal::run_with`. In `Application::start`, after the connection, `set_dumpable(false)`, then a message to the bus thread to register. A failure of either is `Shell::fail`, which exits non-zero.
@@ -216,24 +225,23 @@ RestartSteps=5
 RestartMaxDelaySec=30s
 Slice=session.slice
 MemoryMax=96M
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateNetwork=yes
-PrivateTmp=yes
+# No directive that creates a user namespace under a per-user manager (#1558): the
+# confinement is in process.
 NoNewPrivileges=yes
 SystemCallFilter=@system-service
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
 RestrictRealtime=yes
-RestrictSUIDSGID=yes
 LockPersonality=yes
 RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=athanor-session.target
 ```
+
+The block is provisional. Its sandbox lines are ones systemd applies through `prctl`, seccomp or the cgroup; which directives create a user namespace is decided by #1558's `verify.py` rule, not by this plan, and a line the rule flags leaves. Compared with the lock's unit today (`forge/specs/athanor-lock/athanor-lock-1.0.0/data/athanor-lock.service`), it drops `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateNetwork=yes`, `PrivateTmp=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes` and `RestrictSUIDSGID=yes`. What replaces them, and what does not:
+- writes anywhere but `$XDG_RUNTIME_DIR`, in `/usr`, `/etc`, the home, `/tmp`, `/proc/sys` and the cgroup tree: refused by Landlock;
+- TCP: refused by `deny_tcp`; other families: `RestrictAddressFamilies=AF_UNIX`;
+- a setuid or setgid file: Landlock leaves nothing writable where one would matter, and `NoNewPrivileges=yes` stops an exec from gaining privilege;
+- **not replaced:** a private `/tmp` and a read-only view of the home. The agent can still read the user's `/tmp` and home, as any process of the user can; it writes neither. Abstract Unix sockets, which `PrivateNetwork=yes` isolated, stay reachable unless #1558's sandbox sets Landlock's abstract-socket scope; this plan does not claim it.
 
 The unit is installed with no preset line until the retirement pull request. No capability is held. `verify.py services` checks `NoNewPrivileges=yes`. `MemoryMax=96M` is LP11's value until spike L5's measurement sets it (LP15).
 
@@ -245,11 +253,11 @@ The unit is installed with no preset line until the retirement pull request. No 
   - the object path is `/org/athanor/PolkitAgent`;
   - the options are `{"fallback": <false>}` (polkit 128 reads `fallback` in `get_authentication_agent_for_subject`).
 
-  It is unregistered on a clean exit. The subject type is `polkit.rs#PolkitSubject`, used as it is (question A1).
+  It is unregistered on a clean exit. The subject type is `polkit.rs#PolkitSubject`, used as it is (A1, decided).
 - **`BeginAuthentication(action_id, message, icon_name, details, cookie, identities)`:**
   - the sender check (section 1, item 4);
   - the request is enqueued;
-  - the reply comes when the request ends: success after the helper's `SUCCESS`, `org.freedesktop.PolicyKit1.Error.Failed` after a failed attempt the user gives up on, and `org.freedesktop.PolicyKit1.Error.Cancelled` when the user dismisses the dialog.
+  - the reply comes when the request ends: success after the helper's `SUCCESS`, whether or not an answer was sent (section 1, item 2), `org.freedesktop.PolicyKit1.Error.Failed` after a failed attempt the user gives up on, and `org.freedesktop.PolicyKit1.Error.Cancelled` when the user dismisses the dialog.
 - **`CancelAuthentication(cookie)`:** the sender check; the request leaves the queue, or its dialog closes and its helper connection is dropped.
 - **logind:** the session's `LockedHint` is read at start and on `PropertiesChanged`. A read that fails counts as locked for the queue, which only delays a dialog.
 
@@ -263,7 +271,8 @@ The unit is installed with no preset line until the retirement pull request. No 
 Nothing else holds the password:
 - no `String`, no clone, no log line, no `Debug`;
 - no D-Bus message;
-- no core file (`RLIMIT_CORE` 0) and no ptrace by the user (non-dumpable).
+- no core file (`RLIMIT_CORE` 0);
+- no attach by another process of the user: the agent is non-dumpable, Yama's scope 1 holds, and no user namespace owned by the user is created for it (#1558). The rig probe of P5 checks it.
 
 The cookie is held in a zeroizing buffer too, since it is the request's capability within the user (section 4, T2).
 
@@ -294,8 +303,9 @@ The cookie is held in a zeroizing buffer too, since it is the request's capabili
 - The agent cannot grant: polkitd grants only on the root helper's report after PAM (section 1, item 2).
 - A caller other than polkitd cannot open the dialog (bus policy plus the sender check).
 - The password crosses one borrow and one bounded zeroizing buffer, then the socket.
-- No core file, no ptrace by the user, no input method, no paste, and no AT-SPI value set.
-- Landlock limits writes to `$XDG_RUNTIME_DIR`, and the unit has no network family but `AF_UNIX`.
+- No core file, no input method, no paste, and no AT-SPI value set.
+- No attach by another process of the same user: non-dumpable, Yama scope 1, and no user namespace that the user owns (#1558), probed on the rig.
+- Landlock limits writes to `$XDG_RUNTIME_DIR` and denies TCP, seccomp limits the system calls, and the unit has no network family but `AF_UNIX`.
 - Sulphur shows nothing but the lock while locked.
 
 **Absent, and said so:**
@@ -321,48 +331,50 @@ No placeholder is written: a part that cannot be built for real stops the work a
 | # | Threat | Tier | Mitigation |
 |---|---|---|---|
 | T1 | A requester's pid is reused before the agent reads `/proc/<pid>/exe`, so the dialog names the wrong program | TM2 | `BeginAuthentication` carries no pidfd, so the description is best effort. polkitd's decision does not depend on it (its own subject check). A dead or unreadable pid shows "Unknown program". Never shown as verified. |
-| T2 | Code of the same user reads a `BeginAuthentication` cookie from the agent's memory and races the dialog with its own helper connection | TM1 | Out of scope against tier 1 (TM1). Against tier 2 (TM2): registration only once the process is non-dumpable (D42), so no cookie exists before; the cookie is zeroized after use. polkitd still requires the user's PAM success on the helper. |
+| T2 | Code of the same user reads a `BeginAuthentication` cookie from the agent's memory and races the dialog with its own helper connection | TM1 | Out of scope against tier 1 (TM1). Against tier 2 (TM2): registration only once the process is non-dumpable (D42), so no cookie exists before; the cookie is zeroized after use. Non-dumpable binds only because the unit creates no user namespace owned by the user (#1558): inside one, a same-uid process holds `CAP_SYS_PTRACE` and attaches anyway. polkitd still requires the user's PAM success on the helper. |
 | T3 | A client draws an imitation of the dialog to harvest the password | TM2, TM6 | Sulphur's trusted path (LP13, OS4): only this executable in this unit gets the overlay layer and the mark. Against tier 1 the guarantee is not claimed (TM6). |
 | T4 | A forged `BeginAuthentication` with attacker-chosen text reaches the trusted surface | TM1, TM9 | The bus policy allows only `polkitd`, and the agent checks the sender against the owner of `org.freedesktop.PolicyKit1` on every call (section 1, item 4). Test: a call from another connection on a test bus draws nothing and gets `AccessDenied`. |
 | T5 | The dialog appears over the lock or takes keys meant for it | TM6 | Sulphur gives output and keyboard only to lock surfaces while locked (`lock.rs`). The queue holds requests while `LockedHint` is true or unreadable. |
 | T6 | Keys reach the field through an input method, a paste or an AT-SPI `SetValue` | TM2 | D38 (no text-input) and D40 (`SetValue` refused); the trusted field has no paste and no selection. |
 | T7 | Helper connections exhaust the per-uid limit, so no prompt can authenticate | TM2 | At most one helper connection per agent (section 1, item 7); `MaxConnectionsPerSource=8` and `TimeoutStartSec=5min` bound the rest. |
 | T8 | A cancel counts as a failure towards `pam_faillock` | none | polkit's `Patch1` and its test `test_agent_helper_cancel.py`; the agent closes the connection before any answer when dismissed. |
-| T9 | An over-long answer, or one with a newline, is split by the helper and counts two failures, or is truncated | none | The 510-byte, no-`\n`, no-NUL check before any write (D33), tested at 510 and 511 bytes. |
+| T9 | An over-long answer, or one with a newline, is split by the helper and counts two failures, or is truncated | none | The 510-byte, no-`\n`, no-NUL check before any write (D33), tested at 510 and 511 bytes. That 510 fits `PAM_MAX_RESP_SIZE` is unverified until P3 checks it against the forge's PAM headers. |
 | T10 | The helper's own copies of the password (`fgets` buffer, `strdup`) linger | TM7 | Root process, polkit's code, outside this tree. Reported, not patched; its lifetime ends with the helper's exit. |
 | T11 | The agent crashes or polkitd restarts, leaving the session without an agent | none | Guard (SN6); polkitd cancels the dead agent's requests (LP10); exit on owner change (section 1, item 5). Degraded: polkit finds no agent, fallback off (SN7). |
 | T12 | A failed registration leaves an unregistered agent that draws nothing | none | LP11: exit non-zero; readiness only after registration (`doc_session.md:91`). |
-| T13 | A core dump or ptrace exposes the password | TM1 | `RLIMIT_CORE` 0 before anything, non-dumpable after the connection (D42), before any secret exists. |
+| T13 | A core dump or ptrace exposes the password | TM1, TM2 | `RLIMIT_CORE` 0 before anything, non-dumpable after the connection (D42), before any secret exists, with Yama scope 1. Under a per-user manager a namespace directive would void both (#1558), so the unit has none, confinement is in process, and `verify.py`'s rule from #1558 keeps such directives out. P5's rig probe attaches from a same-uid process to the running agent and expects a refusal. Against tier 1 (TM1), unconfined code of the user, no guarantee is claimed. |
 | T14 | Text from details or the message spoofs the layout (newlines, bidi controls) | TM2 | Details can only come from a trusted caller. All displayed text passes `athanor_unit::text::line`, which strips hidden characters (`system/athanor-unit/src/text.rs#is_hidden`). |
+| T15 | The helper prints `SUCCESS` with no prompt, and the agent either reports a failure or shows the dialog as still waiting | none | A `SUCCESS` before any answer is a completion (section 1, item 2): the dialog closes and `BeginAuthentication` completes. The line is never the grant: polkitd decides on the root helper's report. Tested in P3 with a stub helper that answers `SUCCESS` at once. |
 
 ## 5. Pull requests, in order
 
 Each pull request merges on its own with its tests and leaves the agent disabled until P6. Each defect class an audit finds becomes a check in the pull request that fixes it (`AGENTS.md`).
 
 **P1. The session lookup shared.**
-- *Change.* `our_session` moves from `forge/specs/athanor-lock/athanor-lock-1.0.0/src/logind.rs` into `athanor-unit` behind `zbus`, and the lock calls it there.
+- *Change.* `our_session` moves from `forge/specs/athanor-lock/athanor-lock-1.0.0/src/logind.rs` into `athanor-unit` behind a new `logind` feature (section 3.1), and the lock calls it there.
 - *Tests.* The lock's tests unchanged; the moved function's tests move with it.
 - *Size estimate.* About 150 lines.
 
 **P2. The crate, toolkit-free.**
 - *Change.*
   - `queue`, `identity` and `subject`, with no bus and no screen;
-  - the spec and the unit, installed without a preset;
+  - the spec and the unit, installed without a preset, with no namespace directive (section 3.2);
   - `components.toml`'s entry (`status = "specified"`, `spec = "doc_lock_and_prompts.md"`, `item = "LP11"`).
 - *Tests.*
   - the queue's order, cancel of a queued and of the current request, and lock gating;
   - identity preselection and NSS failure;
   - subject resolution for a native process, a Flatpak `bwrap` with a fixture `.flatpak-info`, a dead pid and an unreadable `exe`.
-- *Checks.* `verify.py services`, `specs`, `shipped`, `panics`.
+- *Checks.* `verify.py services`, `specs`, `shipped`, `panics`, and #1558's rule on the agent's unit.
 - *Size estimate.* About 900 lines.
 
 **P3. The helper client.**
-- *Change.* `helper` on `athanor-auth`'s parser and line reader.
+- *Change.* `helper` on `athanor-auth`'s parser and line reader. Before the bound is written, P3 checks 510 against `PAM_MAX_RESP_SIZE` in the forge's PAM headers and records the value; a cap that does not fit stops the work and goes back to D33.
 - *Tests* against a scripted helper on a socketpair:
   - the handshake bytes exactly (user line, cookie line, nothing else);
   - an answer of 510 bytes is written, and one of 511 is refused with nothing written;
   - an answer with `\n` or NUL is refused;
-  - only `SUCCESS` after an answer counts as success;
+  - a stub helper that answers `SUCCESS` at once, with no prompt: the attempt ends as a completion, nothing is written, and no failure is reported;
+  - `SUCCESS` after an answer completes, and `FAILURE` fails;
   - a malformed, over-long, or too-many-lines stream fails;
   - the `Secret` is cleared after a failed write.
 - *Rig test.* The VM test against the real `polkit-agent-helper.socket` and a test user (`pkexec true` with a scripted agent).
@@ -383,11 +395,11 @@ Each pull request merges on its own with its tests and leaves the agent disabled
 **P5. The surface.**
 - *Change.*
   - `ui` and `main`;
-  - the start order, with a test that the process is not dumpable after `start`, as the lock's;
+  - the start order, with a test that the process is not dumpable after `start`, as the lock's, and a test that `confine` applies Landlock and seccomp or fails;
   - the allow-list line in `privileged-clients`, `identity.rs` and `rig-privileged-clients`;
   - the rig scenes `surface`, `atspi` and `orca polkit-agent [it]`, with the goldens of section 3.7.
 - *Judgement.* The maintainer judges the build on the reference laptop with cosmic-osd masked (LP18 step 5, OD17).
-- *Checks added.* `verify.py allow-list` covers the new line by derivation from the spec. A rig check that the agent's surface is refused the overlay layer when run from another unit.
+- *Checks added.* `verify.py allow-list` covers the new line by derivation from the spec. A rig check that the agent's surface is refused the overlay layer when run from another unit. A rig probe, #1558's for the lock applied to the agent: a same-uid process outside the unit tries `PTRACE_ATTACH` on the running agent, and the attach is refused.
 - *Size estimate.* About 1,400 lines, goldens aside.
 
 **P6. The retirement step, with `athanor-osd`** (OD17 step 5, D7, D12).
@@ -399,25 +411,25 @@ Each pull request merges on its own with its tests and leaves the agent disabled
 - *Checks.* Spike O8 and the gate of the standard (ST2) for the agent (LP18 step 9).
 - *Own-allow.* This pull request retires the entry **`rpm cosmic-osd`** of `forge/config/own-allow.txt`.
 
-## 6. Open questions for the maintainer
+## 6. Questions, decided by the maintainer on 2026-11-26
 
 **A1. Where the `AuthenticationAgent` D-Bus types and the registration proxy live.** `polkit.rs` is stop-and-ask and calls itself "one copy on purpose" of the client's subject rules (`system/athanor-bus-api/src/polkit.rs`, module comment).
 - (a) In the agent's crate: the interface and a proxy with only `RegisterAuthenticationAgentWithOptions` and `UnregisterAuthenticationAgent`, using `polkit.rs#PolkitSubject` as it is, with `polkit.rs` unedited.
 - (b) In `polkit.rs`: the same items added there, under CT6 review.
 - (c) A new module of `athanor-bus-api`, beside `polkit.rs`.
 
-**Recommendation: (a).** The "one copy" rule exists for building an authorisation subject from the caller (`verify.py polkit-subject`). The agent builds no authorisation subject; it registers itself. Keeping polkit.rs unchanged leaves the stop-and-ask file's review where it is, and one program uses these types.
+**Decided: (a).** Not taken: (b), which would grow a stop-and-ask file for one program; (c), a second polkit module beside the first. The "one copy" rule exists for building an authorisation subject from the caller (`verify.py polkit-subject`). The agent builds no authorisation subject; it registers itself. Keeping polkit.rs unchanged leaves the stop-and-ask file's review where it is, and one program uses these types.
 
 **A2. Where the polkit helper's client lives.**
 - (a) In the agent's crate, on `athanor-auth`'s parser, line reader and `write_answer`. The handshake and the 510-byte bound are written there, as the lock's `unlock.rs#Attempt` is written in the lock.
 - (b) In `athanor-auth`, as a second client entry point beside `transact`, with polkit's handshake and bound.
 
-**Recommendation: (a).** LP8 shares the parser (`doc_lock_and_prompts.md:129`), which (a) keeps. The handshake and the bound are polkit's and have one user. The lock already set the pattern of a program-side attempt over the shared parser, so `athanor-auth` stays unchanged and its reviewed surface does not grow.
+**Decided: (a).** Not taken: (b), which would grow `athanor-auth`'s reviewed surface for one program. LP8 shares the parser (`doc_lock_and_prompts.md:129`), which (a) keeps. The handshake and the bound are polkit's and have one user. The lock already set the pattern of a program-side attempt over the shared parser, so `athanor-auth` stays unchanged and its reviewed surface does not grow.
 
-No other question is asked here. The approved text answers the others:
+No other question is asked here. The approved text, with #1558's amendment, answers the others:
 - the 510-byte cap (D33);
 - the dumpable order and the registration after it (D42, LP11 `:179`);
-- the unit's hardening lines (LP11 `:179`) and class (SN6);
+- the unit's hardening lines (LP11 `:179`, as #1558 amends them) and class (SN6);
 - the layer and the allow-list line (LP11 `:181`);
 - one dialog at a time (`:183`);
 - enabling only at retirement (D7, LP18 step 5);
@@ -429,7 +441,8 @@ No other question is asked here. The approved text answers the others:
 **Rig:**
 - the shell rig for the surface, AT-SPI and Orca scenes;
 - the VM for the helper test (P3) and for the `us(intl)` dead-keys case (LP17 `:256`);
-- on the rig, a check that `/proc/<pid>/exe` and `/proc/<pid>/root/.flatpak-info` of a same-user process are readable from inside the unit's sandbox, and that a root-owned subject yields "Unknown program".
+- on the rig, a check that `/proc/<pid>/exe` and `/proc/<pid>/root/.flatpak-info` of a same-user process are readable from the confined agent, and that a root-owned subject yields "Unknown program";
+- on the rig, the same-uid attach probe of P5, expecting a refusal.
 
 **Hardware:** the reference laptop for P5's judgement and P6, with cosmic-osd masked (OD17).
 
