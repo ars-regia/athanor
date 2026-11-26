@@ -578,6 +578,33 @@ class RefusedNames(unittest.TestCase):
         problems = self.problems()
         self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
 
+    CITED = (
+        "ADR-0141 removes libadwaita (`doc_shell.md` SH3, lines `:{}`) from the shell."
+    )
+
+    def placed_again(self, after):
+        """The problems against the base of a kept sentence, entry unchanged, once the document's
+        sentence reads AFTER."""
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{self.CITED.format('3-4')}\n")
+        self.kept(text=self.CITED.format("3-4"))
+        self.commit()
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{after}\n")
+        return self.problems("HEAD")
+
+    def test_a_kept_sentence_whose_citation_is_placed_again_keeps_its_entry(self):
+        # #1548: line-citations asks for a citation to be placed again on a changed citing line,
+        # and the only change that places it with the same words is one of its numbers.
+        self.assertEqual(self.placed_again(self.CITED.format("3, 4")), [])
+        self.assertEqual(
+            verify.refused_citations_blank("`quay.io:443`, `:3`"), "`quay.io:443`, `:N`"
+        )
+
+    def test_a_reworded_kept_sentence_with_a_citation_still_fails(self):
+        problems = self.placed_again(self.CITED.format("3, 4").replace("shell", "bar"))
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("no longer appears" in p for p in problems), problems)
+        self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
+
     def test_a_malformed_entry_fails(self):
         for text in (
             "doc_x.md libadwaita\n",

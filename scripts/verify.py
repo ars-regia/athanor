@@ -8353,17 +8353,26 @@ def refused_base_text(root, base, path):
     return shown.stdout
 
 
+def refused_citations_blank(text):
+    """TEXT with the numbers of its line citations blanked: a backticked `:N`, and a `path:N`
+    whose path looks like a file (FILE_LIKE), become `:N` and `path:N`. The path stays, as it may
+    name a refused name, and a `quay.io:443` or a `fedora:43` stays whole. A kept sentence whose
+    citation is placed again, with new numbers and the same words, is the same sentence (#1548)."""
+    return CITATION_SPAN.sub(lambda m: f"`{m[1]}:N`" if not m[1] or FILE_LIKE.search(m[1]) else m[0], text)
+
+
 def refused_scan_docs(root, pattern, kept, scope):
     """(problems, notes, used, hits) of the specifications under ROOT/docs/architecture: the
     problems of their sections, the notes (a draft, a document with no Status line), the
     (document, text) of the KEPT entries that a normative sentence holds, and {(document, name):
     sentences} for the sentences that still name a refused name once the kept text is taken
-    out."""
+    out. A kept text matches a sentence with the numbers of the citations of both blanked
+    (refused_citations_blank)."""
     problems, notes, kept_texts = [], [], {}
     history, registers = refused_history(scope[0]), scope[1]
     for doc, names, text, _ in kept:
         for name in names.split(","):
-            kept_texts.setdefault((doc, name), []).append(text)
+            kept_texts.setdefault((doc, name), []).append((text, refused_citations_blank(text)))
     used, hits = set(), {}
     for path in sorted((root / "docs/architecture").glob("*.md")):
         if path.name in registers:
@@ -8379,11 +8388,11 @@ def refused_scan_docs(root, pattern, kept, scope):
                             "so its refused names cannot be checked")
         for _, sentence in found:
             for name in refused_line_names(sentence, pattern):
-                rest = sentence
-                for text in kept_texts.get((path.name, name), []):
-                    if text in rest:
+                rest = refused_citations_blank(sentence)
+                for text, blank in kept_texts.get((path.name, name), []):
+                    if blank in rest:
                         used.add((path.name, text))
-                        rest = rest.replace(text, " ")
+                        rest = rest.replace(blank, " ")
                 if name in refused_line_names(rest, pattern):
                     hits[(path.name, name)] = hits.get((path.name, name), 0) + 1
     return problems, notes, used, hits
