@@ -35,8 +35,9 @@ pub const MAX_AGE: Duration = Duration::from_secs(3600);
 /// [`MAX_KEPT_BYTES`] is kept alone.
 pub const MAX_KEPT: usize = 32;
 pub const MAX_KEPT_BYTES: u64 = 256 * 1024 * 1024;
-/// How long a request waits for its turn and its outputs' pictures before it answers 2: the
-/// client waits two seconds for every output at once, and the rest is its connection.
+/// How long a request waits for its turn and its outputs' pictures before it answers 2 (the
+/// proposal of #1559, doc_portal.md PT8): the client waits two seconds for every output at once,
+/// and the rest is its connection. Composing and writing the image are outside it.
 pub const CAPTURE_DEADLINE: Duration = Duration::from_secs(5);
 const PREFIX: &str = "screenshot-";
 const SUFFIX: &str = ".png";
@@ -193,10 +194,11 @@ impl Image {
 }
 
 /// The outputs as one image, in the layout's logical coordinates at the highest output scale
-/// (spike S6), or the lower scale that fits the image within [`MAX_SIDE`] and [`MAX_BYTES`]
-/// (maintainer decision, 2026-11-26): the image covers the bounding box of the outputs, each
-/// output is scaled to its place, and what no output covers is transparent. An output that
-/// overlaps another, as a mirror does, is drawn over it in the order given.
+/// (spike S6), or the lower scale that fits the image within [`MAX_SIDE`] (maintainer decision,
+/// 2026-11-26) and [`MAX_BYTES`] (the proposal of #1559): the image covers the bounding box of
+/// the outputs, each output is scaled to its place, and what no output covers is transparent. An
+/// output that overlaps another, as a mirror does, is drawn over it in the order given. A layout
+/// so spread that an output would have no pixel at that scale is refused (the proposal of #1559).
 // ponytail: nearest-neighbour scaling of the outputs below the highest scale, until spike S6
 // measures whether a filtered scale reads better in a mixed-scale layout.
 pub fn compose(shots: &[Shot]) -> Result<Image, String> {
@@ -277,6 +279,12 @@ pub fn compose(shots: &[Shot]) -> Result<Image, String> {
             top,
             height,
         );
+        if x1 <= x0 || y1 <= y0 {
+            return Err(format!(
+                "an output of {}×{} logical pixels has no pixel at the scale that fits the layout",
+                shot.width, shot.height
+            ));
+        }
         let along = |at: u32, start: u32, end: u32, size: u32| {
             let cells = f64::from(end.saturating_sub(start));
             let offset = f64::from(at.saturating_sub(start)) + 0.5;
@@ -429,6 +437,9 @@ pub fn cap(dir: &Path, files: usize, bytes: u64, kept: Option<&Path>) -> usize {
         if count <= files && total <= bytes {
             break;
         }
+        if Some(path.as_path()) == kept {
+            continue;
+        }
         if remove(&path) {
             count = count.saturating_sub(1);
             total = total.saturating_sub(len);
@@ -437,9 +448,6 @@ pub fn cap(dir: &Path, files: usize, bytes: u64, kept: Option<&Path>) -> usize {
     }
     removed
 }
-        if Some(path.as_path()) == kept {
-            continue;
-        }
 
 /// `path` as a `file://` URI, every byte outside RFC 3986's unreserved set and `/`
 /// percent-encoded.
@@ -915,13 +923,13 @@ mod tests {
     }
 
     #[test]
-    fn a_layout_of_far_outputs_is_composed_at_least_one_pixel_high() {
+    fn a_layout_that_leaves_an_output_no_pixel_is_refused() {
         let far = [
             shot(0, 0, (1, 1), (1, 1), |_, _| [0; 4]),
             shot(100_000, 0, (1, 1), (1, 1), |_, _| [0; 4]),
         ];
-        let image = compose(&far).expect("composed");
-        assert_eq!((image.width, image.height), (16384, 1));
+        // An `Err` of `compose` answers 2 (`Screenshot::screenshot`), never a blank image.
+        assert!(compose(&far).is_err_and(|why| why.contains("has no pixel")));
     }
 
     #[test]
