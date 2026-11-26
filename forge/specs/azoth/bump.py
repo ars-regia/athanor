@@ -397,7 +397,7 @@ def nvidia_relock(branch, current, notes, verify=lock_verify):
     The lock is verified against the repository metadata on every run: a new release or new
     checksums of the same version regenerate it. A version the repository dropped is only a
     note: image builds take the locked packages from the mirror, the mirror step that follows
-    in the same job fails only when neither the mirror nor the repository has a file, and moving a driver pin is the kernel
+    in the same job fails when neither the mirror nor the repository has a file, and moving a driver pin is the kernel
     group's job, so it never holds back the system base."""
     state = verify(branch, current)
     if state == "gone":
