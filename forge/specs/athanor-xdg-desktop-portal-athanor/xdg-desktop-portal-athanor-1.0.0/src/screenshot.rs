@@ -40,7 +40,10 @@ impl Host for Outputs {
     async fn capture(&self) -> Result<Vec<Shot>, String> {
         let (answer, answered) = oneshot::channel();
         let dir = self.dir.clone();
-        glib::MainContext::default().invoke(move || {
+        // An idle source runs only in an iteration of the default context, on the main
+        // thread, where `CLIENT` lives; `invoke` could run in place on this thread if the main
+        // loop did not own the context yet.
+        glib::idle_add_once(move || {
             glib::MainContext::default().spawn_local(async move {
                 if answer.send(take(dir).await).is_err() {
                     tracing::info!("the screenshot was closed before its pictures were taken");
