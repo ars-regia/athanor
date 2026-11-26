@@ -637,6 +637,7 @@ impl State {
     /// `[keyboard] numlock_state`, set once at the start of the session; the default is off.
     pub(crate) fn set_num_lock_at_start(&mut self) {
         let Some(keyboard) = self.seat.get_keyboard() else {
+            tracing::warn!("no keyboard on the seat: Num Lock is not set at the start");
             return;
         };
         let on = self.input_settings().num_lock.unwrap_or(false);
