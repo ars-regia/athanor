@@ -103,30 +103,22 @@ impl Ui {
     }
 
     /// The combination a shortcut capture holds, if `id` is one and holds one.
-    ///
-    /// # Panics
-    ///
-    /// When `id` names no widget of this `Ui`.
     pub fn shortcut(&self, id: WidgetId) -> Option<&Shortcut> {
-        match &self.widgets[id].kind {
+        match &self.widgets.get(id)?.kind {
             Kind::Shortcut(capture) => capture.value.as_ref(),
             _ => None,
         }
     }
 
     /// Whether `id` is a shortcut capture that records.
-    ///
-    /// # Panics
-    ///
-    /// When `id` names no widget of this `Ui`.
     pub fn is_recording(&self, id: WidgetId) -> bool {
-        matches!(&self.widgets[id].kind, Kind::Shortcut(c) if c.recording.is_some())
+        matches!(self.widgets.get(id).map(|w| &w.kind), Some(Kind::Shortcut(c)) if c.recording.is_some())
     }
 
     /// Starts `id`, a shortcut capture, recording, and announces its prompt; one that records
     /// already goes on.
     pub(crate) fn start_recording(&mut self, id: WidgetId) {
-        let Kind::Shortcut(capture) = &mut self.widgets[id].kind else {
+        let Some(Kind::Shortcut(capture)) = self.widgets.get_mut(id).map(|w| &mut w.kind) else {
             return;
         };
         if capture.recording.is_some() {
@@ -140,7 +132,11 @@ impl Ui {
     /// Stops the focused shortcut capture recording, keeping the combination it had. Whether
     /// one recorded.
     pub(crate) fn stop_recording(&mut self) -> bool {
-        let Some(Kind::Shortcut(capture)) = self.focus.map(|id| &mut self.widgets[id].kind) else {
+        let Some(Kind::Shortcut(capture)) = self
+            .focus
+            .and_then(|id| self.widgets.get_mut(id))
+            .map(|w| &mut w.kind)
+        else {
             return false;
         };
         capture.recording.take().is_some()
@@ -163,7 +159,7 @@ impl Ui {
         modifiers: KeyModifiers,
     ) -> Option<Option<Event>> {
         let id = self.focus.filter(|&id| self.is_recording(id))?;
-        let Kind::Shortcut(capture) = &mut self.widgets[id].kind else {
+        let Some(Kind::Shortcut(capture)) = self.widgets.get_mut(id).map(|w| &mut w.kind) else {
             return None;
         };
         let held = capture.recording.unwrap_or_default();
@@ -195,7 +191,7 @@ impl Ui {
             self.held_back = None;
         }
         let id = self.focus.filter(|&id| self.is_recording(id))?;
-        let Kind::Shortcut(capture) = &mut self.widgets[id].kind else {
+        let Some(Kind::Shortcut(capture)) = self.widgets.get_mut(id).map(|w| &mut w.kind) else {
             return None;
         };
         let held = capture.recording.unwrap_or_default();
