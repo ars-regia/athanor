@@ -5948,8 +5948,11 @@ def check_session_units():
 # Properties that put a user unit in namespaces of its own. Under the user manager each one
 # gives the unit a user namespace, a sibling of every other unit's, and the kernel refuses a
 # ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
-# ProtectProc=, ProcSubset= and PrivateBPF= are the exceptions: measured on systemd 262, each
-# alone in a transient user unit, they keep the host's user namespace (#1558).
+# ProtectProc=, ProcSubset= and PrivateBPF= stay in the pattern although each, set alone in a
+# transient user unit on systemd 262 on the reference desktop on 2026-11-26, kept the host's user
+# namespace (#1570's description, "What was measured"): the pattern errs toward a finding of
+# peer-exe, its only reader, and narrowing it belongs to a change of that check. separated-units
+# does not read it; it admits only SEPARATED_UNIT_KEYS.
 NAMESPACING_PROPERTY = re.compile(
     r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
     r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage"
@@ -6074,10 +6077,13 @@ SEPARATED_USER_UNITS = ("athanor-lock.service",)
 # The keys a separated unit may set, by section. Each was measured on systemd 262, on the
 # reference desktop on 2026-11-26, to keep the host's user namespace under the user manager:
 # set alone in a transient user unit, then the lock's whole unit in one, `/proc/<pid>/ns/user`
-# compared with the session's (#1558). Any other key fails until it is measured and added:
-# BindLogSockets=, NetworkNamespacePath= and the properties of NAMESPACING_PROPERTY created one,
-# IPCNamespacePath= and UserNamespacePath= kept the unit from running, and JoinsNamespaceOf=
-# joins another unit's namespaces. WantedBy= acts only when the unit is enabled.
+# compared with the session's (#1558; the list is in #1570's description, "What was
+# measured"). Any other key fails until it is measured and added: BindLogSockets=,
+# NetworkNamespacePath= and the properties of NAMESPACING_PROPERTY measured, other than
+# ProtectProc=, ProcSubset= and PrivateBPF=, created one, IPCNamespacePath= and
+# UserNamespacePath= kept the unit from running, and JoinsNamespaceOf= joins another unit's
+# namespaces. Those three kept the host's, and are left out as no separated unit sets them.
+# WantedBy= acts only when the unit is enabled.
 SEPARATED_UNIT_KEYS = {
     "Unit": frozenset({
         "Description", "Documentation", "After", "Before", "Wants", "Requires", "Requisite",
