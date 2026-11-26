@@ -678,9 +678,9 @@ fn an_inactive_workspace_is_captured() {
 }
 
 /// A workspace's windows keep their places and their marks when another workspace is shown: the
-/// window not focused is drawn as before, divider and corners with it. The focus outline goes
-/// with the focus, as on screen: the focused window, once its workspace is left, is drawn as
-/// before away from the ring of its outline.
+/// window not focused is drawn as before, divider and corners with it, and the focused one as
+/// before inside its geometry. The focus outline round it goes once its workspace is left, since
+/// the session's focus moves to the workspace shown.
 #[test]
 fn a_workspace_keeps_its_frame_when_it_is_left() {
     let mut run = Running::start(None);
@@ -709,10 +709,22 @@ fn a_workspace_keeps_its_frame_when_it_is_left() {
     // Two pixels round the window not focused: its edge, where the divider is, and outside it.
     let (x, y, w, h) = (unfocused.loc.x, unfocused.loc.y, unfocused.size.w, unfocused.size.h);
     same(x - 2, y - 2, x + w + 2, y + h + 2);
+    assert_ne!(
+        pixel(&left, width, x, y + h / 2),
+        GREEN,
+        "the divider on the window's left edge"
+    );
+    assert_eq!(pixel(&left, width, x + 1, y + h / 2), GREEN, "inside the divider");
     // The focused window away from its corners, which the outline's ring overlaps.
     let corner = 16;
     let (x, y, w, h) = (focused.loc.x, focused.loc.y, focused.size.w, focused.size.h);
     same(x + corner, y + corner, x + w - corner, y + h - corner);
+    // The middle of each of its sides, where its divider lies inside the outline's ring.
+    same(x, y + h / 2, x + 1, y + h / 2 + 1);
+    same(x + w - 1, y + h / 2, x + w, y + h / 2 + 1);
+    same(x + w / 2, y, x + w / 2 + 1, y + 1);
+    same(x + w / 2, y + h - 1, x + w / 2 + 1, y + h);
+    assert_ne!(pixel(&left, width, x, y + h / 2), BLUE, "its divider");
     assert_eq!(pixel(&left, width, x + corner, y + corner), BLUE);
     run.stop();
 }
