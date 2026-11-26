@@ -1,10 +1,10 @@
 # LP18 step 5, the polkit authentication agent: Implementation Plan
 
-**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The design was approved by the maintainer on 2026-11-26. The agent carries the user's password from Sal's field to polkit's helper, an authentication path (`AGENTS.md`, "Stop and ask before editing"), and LP8 requires the plan of "the agent's password path" to be approved before any code is written (`docs/architecture/doc_lock_and_prompts.md:118`). No code is written until then.
+**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The agent carries the user's password from Sal's field to polkit's helper, an authentication path (`AGENTS.md`, "Stop and ask before editing"), and LP8 requires the plan of "the agent's password path" to be approved before any code is written (`docs/architecture/doc_lock_and_prompts.md:118`). No code is written until then.
 
 **Decided on 2026-11-26.** The maintainer decided questions A1 and A2 (section 6) and the confinement rule of #1558, written below as decided.
 
-**Depends on #1558.** #1558 confines the lock in process with Landlock and removes from its unit the directives that create a user namespace under a per-user manager. It amends the approved text first (ADR-0074), the lock's confinement and the rule for this class of unit in `doc_lock_and_prompts.md`, LP11's unit lines (`:179`) among them. This plan follows that rule (section 3.2) and writes no code before the amendment is approved.
+**Depends on #1558.** #1558 confines the lock in process with Landlock and removes from its unit the directives that create a user namespace under a per-user manager. It amends the approved text first (ADR-0074), the lock's confinement and the rule for this class of unit in `doc_lock_and_prompts.md`, LP11's unit lines (`:179`) among them. This plan follows that rule (section 3.2) and writes no code before the amendment is approved. P2 and P5 also wait until #1558's `verify.py` rule and its rig probe are merged (section 5).
 
 **Goal:** `athanor-polkit-agent`, a Sal client, is the session's polkit authentication agent on the forge's polkit 128. It is built, tested and judged on the reference laptop with cosmic-osd's unit masked there. It is enabled by preset only in cosmic-osd's retirement change, together with `athanor-osd` and the end-of-session dialogs. That change retires the own-allow entry `rpm cosmic-osd` (`forge/config/own-allow.txt`).
 
@@ -26,9 +26,9 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 - **Sulphur alone.** The agent is built and tested on Sulphur only. D39 dropped cosmic-comp's session from the lock and the prompts (`doc_lock_and_prompts.md:427`).
 - **The password's path.** The password leaves the field only as a borrow (`system/athanor-sal/src/widget.rs#Ui::password_text`). It is copied once into an `athanor-auth` buffer (`system/athanor-auth/src/buffer.rs#Secret`), written to the helper's socket, and both are cleared at once (LP1). Nothing logs it, and no `Debug` shows it.
 - **No panics and least privilege.** No new `unwrap`, `expect` or `panic!` outside tests (`verify.py panics`). The unit sets `NoNewPrivileges=yes` (TM8, `verify.py services`).
-- **Confinement (#1558, maintainer decision, 2026-11-26).** Its unit carries no directive that creates a user namespace under a per-user manager. The mount, network and IPC class is replaced in process by Landlock, `athanor-unit`'s `restrict_writes` and `deny_tcp`, as the lock's `confine.rs` does. seccomp is the unit's `SystemCallFilter=`, which keeps the host user namespace (section 3.2); it is not new in-process code.
-  - *Why.* In a user unit such a directive puts the service in a user namespace owned by the user (`uid_map 1000 1000 1`). A same-uid process then holds `CAP_SYS_PTRACE` there, and `PTRACE_ATTACH` succeeds against a non-dumpable process under Yama scope 1. `PrivateUsers=no` changes nothing (reproduced by the maintainer on 2026-11-26 with `ProtectSystem=strict`, `PrivateTmp=yes` and `NoNewPrivileges=yes`). Measured on the reference desktop on 2026-11-26 with `readlink /proc/self/ns/user`: a plain shell and a user unit with `NoNewPrivileges=yes`, `SystemCallFilter=@system-service`, `RestrictAddressFamilies=AF_UNIX`, `LockPersonality=yes`, `RestrictRealtime=yes` and `MemoryMax=100M` both gave 4026531837, the host's user namespace; a unit with `ProtectSystem=strict` alone gave a new one, 4026533449.
-  - *The check.* The `verify.py` rule of #1558, which fails on such a directive in a unit of this class, covers this unit. A rig probe checks that a same-uid attach to the running agent is refused (P5).
+- **Confinement (#1558, maintainer decision, 2026-11-26).** Its unit carries no directive that creates a user namespace under a per-user manager. The mount, network and IPC class is replaced in process by Landlock, `athanor-unit`'s `restrict_writes` and `deny_tcp`, as the lock's `confine.rs` does after #1558 (today it calls `restrict_writes` and sets `RLIMIT_CORE`, but not `deny_tcp`). seccomp is the unit's `SystemCallFilter=`, which keeps the host user namespace (section 3.2); it is not new in-process code.
+  - *Why.* In a user unit such a directive puts the service in a user namespace owned by the user (`uid_map 1000 1000 1`). A same-uid process then holds `CAP_SYS_PTRACE` there, and `PTRACE_ATTACH` succeeds against a non-dumpable process under Yama scope 1. `PrivateUsers=no` changes nothing (confirmed on a reference desktop (#1558) on 2026-11-26, with `ProtectSystem=strict`, `PrivateTmp=yes` and `NoNewPrivileges=yes`). Measured on the reference desktop on 2026-11-26 with `readlink /proc/self/ns/user`: a plain shell and a user unit with `NoNewPrivileges=yes`, `SystemCallFilter=@system-service`, `RestrictAddressFamilies=AF_UNIX`, `LockPersonality=yes`, `RestrictRealtime=yes` and `MemoryMax=100M` both gave 4026531837, the host's user namespace; a unit with `ProtectSystem=strict` alone gave a new one, 4026533449.
+  - *The check.* The `verify.py` rule of #1558, which fails on such a directive in a unit of this class, covers this unit. A rig probe checks that a same-uid attach to the running agent is refused (P5). Both are #1558's, and both must be merged before P2 and P5 start.
 - **Review.** Every pull request of this plan touches an authentication path. It takes the two-person review of CT6 (`docs/operations/contributing.md`, CT6). Its reviewer checks it against a concrete failure scenario from section 4 below.
 - **What this plan does not edit.** `system/athanor-bus-api/src/polkit.rs` is stop-and-ask (`system/AGENTS.md`) and is not edited by this plan (section 6, A1, decided).
 
@@ -130,7 +130,7 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
   - `polkit-agent-helper.socket` enabled by preset;
   - `forge/specs/polkit/tests/test_agent_helper_cancel.py` and `test_agent_helper_faillock.py`.
 - **`athanor-auth`** (`system/athanor-auth`): the line protocol's parser (`src/protocol.rs#parse`, `#escape`, `#unescape`), `src/buffer.rs#Secret` (a fixed zeroizing buffer, no `Clone`, no `Display`), `src/buffer.rs#LineReader`, and `src/lib.rs#write_answer`.
-- **Sal's prerequisites** (LP18, `doc_lock_and_prompts.md:262`): all of them are present.
+- **Sal's prerequisites** (LP18, `doc_lock_and_prompts.md:262`): the ones below are present. One point is not settled: on Sulphur, Sal cannot place the dialog on the focused output (section 3.5).
   - `system/athanor-sal/src/widget.rs#Ui::trusted_password`, with no input method, no paste and no selection;
   - an AT-SPI value set on it is refused (D40);
   - `#Ui::password_text`, a borrow;
@@ -171,6 +171,7 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 - **`identity`** (toolkit-free). It chooses among the offered `unix-user` identities, preselecting the session's uid when offered, and resolves each uid to a name through NSS. The name is the helper's first line.
 - **`subject`** (pure functions, plus one thin reader). It reads `polkit.subject-pid` from the details: `readlink /proc/<pid>/exe`, and for `/usr/bin/bwrap` the `[Application] name` of `/proc/<pid>/root/.flatpak-info`.
   - It never follows a path from the subject's root other than that file.
+  - The read of that file is bounded. It opens it with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`, so a symbolic link there is refused and a FIFO cannot block the bus thread; `fstat` on the open descriptor must show a regular file; and it reads at most 16 KiB, a file that does not fit being refused. A refusal is a failure, below.
   - The text is escaped for display with `athanor_unit::text::line`.
   - Any failure, including a dead pid, gives "Unknown program". It is descriptive, never a decision (section 4, T1).
 - **`bus`.** The system-bus thread, with three duties:
@@ -280,7 +281,8 @@ The cookie is held in a zeroizing buffer too, since it is the request's capabili
 ### 3.5 Sal on Sulphur, with no GTK
 
 **The surface:**
-- one layer surface from `Shell::open_layer`, on the overlay layer of the focused output, with `KeyboardInteractivity::Exclusive`;
+- one layer surface from `Shell::open_layer`, on the overlay layer, with `KeyboardInteractivity::Exclusive`;
+- **the output, not settled on Sulphur.** LP11 asks for the focused output (`:181`). `Shell::open_layer(None)` takes the output the compositor picks, which is cosmic-comp's active one but Sulphur's first (`system/athanor-sal/src/driver.rs:925-927`), and `Shell::outputs` returns sctk's `OutputInfo`, which carries no focus. How the agent learns Sulphur's focused output is unsettled: this plan names no mechanism. Until it is settled the surface opens with `None`, P5's judgement on the laptop records which output it lands on with two outputs, and the choice is decided before P6 enables the agent;
 - one dimmed, input-less overlay per other output;
 - opaque, with the radius and motion of Sal's theme (D34).
 
@@ -364,7 +366,8 @@ Each pull request merges on its own with its tests and leaves the agent disabled
 - *Tests.*
   - the queue's order, cancel of a queued and of the current request, and lock gating;
   - identity preselection and NSS failure;
-  - subject resolution for a native process, a Flatpak `bwrap` with a fixture `.flatpak-info`, a dead pid and an unreadable `exe`.
+  - subject resolution for a native process, a Flatpak `bwrap` with a fixture `.flatpak-info`, a dead pid and an unreadable `exe`; a `.flatpak-info` that is a symbolic link, a FIFO, or longer than 16 KiB gives "Unknown program".
+- *Waits for* #1558's `verify.py` rule and rig probe, merged.
 - *Checks.* `verify.py services`, `specs`, `shipped`, `panics`, and #1558's rule on the agent's unit.
 - *Size estimate.* About 900 lines.
 
@@ -399,6 +402,7 @@ Each pull request merges on its own with its tests and leaves the agent disabled
   - the start order, with a test that the process is not dumpable after `start`, as the lock's, and a test that `confine` applies Landlock or fails;
   - the allow-list line in `privileged-clients`, `identity.rs` and `rig-privileged-clients`;
   - the rig scenes `surface`, `atspi` and `orca polkit-agent [it]`, with the goldens of section 3.7.
+- *Waits for* #1558's `verify.py` rule and rig probe, merged.
 - *Judgement.* The maintainer judges the build on the reference laptop with cosmic-osd masked (LP18 step 5, OD17).
 - *Checks added.* `verify.py allow-list` covers the new line by derivation from the spec. A rig check that the agent's surface is refused the overlay layer when run from another unit. A rig probe, #1558's for the lock applied to the agent: a same-uid process outside the unit tries `PTRACE_ATTACH` on the running agent, and the attach is refused.
 - *Size estimate.* About 1,400 lines, goldens aside.

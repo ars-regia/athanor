@@ -1,8 +1,8 @@
 # The greeter UI on Sal: Implementation Plan
 
-**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The design was approved by the maintainer on 2026-11-26. The greeter reads the password at login, which is the greeter's login path in `AGENTS.md`, "Stop and ask before editing". No code is written until the maintainer approves this plan.
+**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The greeter reads the password at login, which is the greeter's login path in `AGENTS.md`, "Stop and ask before editing". No code is written until the maintainer approves this plan.
 
-**Decided on 2026-11-26.** The maintainer decided questions G1, G2 and G3 (section 6) and the confinement rule of #1558, written below as decided.
+**Decided on 2026-11-26.** The maintainer decided questions G1, G2 and G3 (section 6), the session-menu timing (section 1, item 7) and the confinement rule of #1558, written below as decided.
 
 **Depends on #1558.** #1558 confines the lock in process with Landlock and keeps out of its unit the directives that create a user namespace under a per-user manager; the polkit agent and this greeter follow the same rule (maintainer decision, 2026-11-26). The greeter has no unit, so the part of the rule that applies to it is the in-process one (section 3.2).
 
@@ -33,11 +33,11 @@ The port is the prerequisite of #1356, the greeter on Sulphur's greeter mode (`d
 - `docs/architecture/doc_accessibility.md`, AX4, AX8 and AX13;
 - `docs/architecture/doc_languages.md`, LN10;
 - `doc_threat_model.md`, TM1, TM6 and TM7;
-- `docs/architecture/doc_session.md`, SN14 revision 5, which removes the greeter's session menu (`:190`).
+- `docs/architecture/doc_session.md`, SN14, the session menu (`:190-192`), and its revision 5, which removes the menu in the change that takes cosmic-comp's session off the greeter (`:190`).
 
 ## Global constraints
 
-- **A port, not a redesign.** What the greeter shows, in what order, and what it sends to greetd stays as it is. The 12 surface cases and the AT-SPI and Orca walks are the proof. AX13's accessibility menu and its `ATHANOR_A11Y` hand-off are not built in the GTK greeter today, and they are not built here. They belong to `doc_accessibility.md` AX18 step 4. One thing the port does not carry over: the session menu, which SN14 revision 5 removes (section 1, item 7).
+- **A port, not a redesign.** What the greeter shows, in what order, and what it sends to greetd stays as it is. The 12 surface cases and the AT-SPI and Orca walks are the proof. AX13's accessibility menu and its `ATHANOR_A11Y` hand-off are not built in the GTK greeter today, and they are not built here. They belong to `doc_accessibility.md` AX18 step 4. The session menu is carried over as SN14 describes it; SN14 revision 5 removes it later, in the change that takes cosmic-comp's session off the greeter (section 1, item 7).
 - **The conversation code stays where it is.** `auth.rs` and its tests do not change. D2 moves them into `athanor-auth` in a change of its own, after the lock has run (`doc_lock_and_prompts.md:265`, LP18 step 4). That change and this port are independent: whichever lands second carries the move.
 - **cosmic-comp first.** The ported greeter ships on cosmic-comp's greeter session, as the GTK one does today (`forge/specs/athanor-system-config/SOURCES/usr/bin/athanor-greeter-session`). Moving it to Sulphur is #1356, under the revision of decision 41 (section 5, P1).
 - **No panics.** No new `unwrap`, `expect` or `panic!` outside tests (`verify.py panics`).
@@ -97,7 +97,7 @@ These hold once #1356 lands.
    - Sal reaches AT-SPI through `org.a11y.Bus` alone and owns no name.
    - After the port, the name and the `--own` go (P4). So do the expectations that name it, in `forge/specs/athanor-system-config/tests/test_greeter_client.py` and `scripts/devvm/greeter_probe.py`.
 5. **Dead keys.**
-   - *Today.* `athanor-greeter-session` exports `GTK_IM_MODULE=simple` (`forge/specs/athanor-system-config/SOURCES/usr/bin/athanor-greeter-session:93`), and with no input method GTK's simple module drops dead keys (`doc_languages.md:72`).
+   - *Today.* With no input method bound, GTK's default `wayland` module composes nothing and drops dead keys, and the `simple` module restores them (`doc_languages.md:72`). So `athanor-greeter-session` exports `GTK_IM_MODULE=simple` (`forge/specs/athanor-system-config/SOURCES/usr/bin/athanor-greeter-session:86-93`).
    - *After the port.* Sal takes text from xkb's compose state, which sctk sets up from `LC_ALL`, `LC_CTYPE` or `LANG`. The greeter therefore needs the locale in its environment; bubblewrap passes the environment through, and the wrapper sets no `--clearenv`.
    - *Where it is proved.* In the development VM with `us(intl)` (section 7). The export goes in P4.
 6. **The icon theme.**
@@ -105,9 +105,10 @@ These hold once #1356 lands.
    - *After the port.* Sal's `IconTheme::system` reads the same installed theme (`system/athanor-sal/src/icon.rs`), so the `Requires` stays. The own-allow entry `rpm cosmic-icon-theme` has its own retirement, which is not this plan's.
    - *What else stays.* `athanor-style` and `rpm gtk4-layer-shell` stay on the list: the dock and cosmic-comp still use them.
 7. **The session menu.**
-   - *The approved text.* `doc_session.md` SN14 revision 5 removes the greeter's session menu: the greeter offers one session, sends `/usr/bin/athanor-sulphur-session` as `StartSession`'s `cmd`, and shows no menu (`doc_session.md:190`). The removal belongs to the change that takes cosmic-comp's session off the greeter, which waits for this port (`:190`, `:237`).
-   - *Today.* The GTK greeter draws the menu when the own compositor's script is installed (`ui.rs#session_menu`; `auth.rs#sessions_offered`). The committed Orca and AT-SPI references hold no session menu, so OS8's gate does not need it.
-   - *What this plan does.* The Sal screen draws no session menu and does not bring it back. The bridge sends the command of the first session `auth.rs#sessions_offered` gives, `/usr/bin/athanor-sulphur-session` where it is installed, as SN14 asks. So that no build ships a greeter that still lists cosmic-comp's session with no menu to reach it, P3 lands together with the change that takes cosmic-comp's session off the greeter, its fallback to the recovery console included (SN17, `:237`). `auth.rs`'s `Session::CosmicComp` and its tests leave with that change, not with this port.
+   - *The approved text.* SN14 (`doc_session.md:190-192`): the greeter offers the menu only when `/usr/bin/athanor-sulphur-session` is installed, tested as `session_command` tests its paths (`auth.rs:97-113`). The menu is a button named "Session" beside the password field, after it in the focus chain, exposed to AT-SPI as a menu button with its checked entry; it holds the two sessions as a radio group with the default checked, cosmic-comp's entry with its one line "Workspace overview and Alt+Tab". `StartSession`'s `cmd` is the checked entry's path, read when `StartSession` is sent. SN14 revision 5 removes the menu, but in the change that takes cosmic-comp's session off the greeter (`:190`), not in this port.
+   - *The order.* OS19 (`doc_own_stack.md:491-494`) and SN14 revision 5 make that change wait for this port, so P3 cannot land together with it.
+   - *Today.* The GTK greeter draws the menu when the own compositor's script is installed (`ui.rs#session_menu`; `auth.rs#sessions_offered`). The rig installs no such script, so the committed Orca and AT-SPI references hold no session menu.
+   - *What this plan does (maintainer decision, 2026-11-26).* P3 ports the session menu to Sal under SN14 as approved: the same rule, entries, names, focus order and `cmd`. The menu leaves with the SN14 revision 5 change, as the text says, and no amendment is needed. `auth.rs`'s `Session` and its tests stay. P3 merges on its own, and records the Orca and AT-SPI walks that reach the menu as references (section 3.7).
 
 ## 2. What exists and what is missing
 
@@ -132,7 +133,8 @@ These hold once #1356 lands.
   - nested user namespaces left allowed for glycin (`:48`).
 - **Sal's widgets for every part of the card:**
   - `Ui::trusted_password`, `Ui::field` and `Ui::list` (`system/athanor-sal/src/widget.rs`);
-  - `Ui::switch`; `Ui::menu_radio` is not needed, since the port draws no session menu (section 1, item 7);
+  - `Ui::switch`;
+  - `Ui::menu_radio` in a menu opened with `Shell::open_popup`, for the session menu (section 1, item 7);
   - `Shell::open_layer` and `Shell::keyboard_layout` (`system/athanor-sal/src/driver.rs`);
   - right-to-left layout (`system/athanor-sal/src/align.rs`);
   - `Image::from_file` for system icons (`system/athanor-sal/src/icon.rs`).
@@ -165,7 +167,8 @@ It keeps `greetd`, `athanor-calmo` and `cosmic-icon-theme`.
   - `next_match`, the type-ahead;
   - `Notices` and `Turn`, PAM's info and error lines across steps;
   - `now_text`, the clock;
-  - the seal's retry schedule (`SEAL_AGAIN_SECS`, `SEAL_RETRY_SECS`).
+  - the seal's retry schedule (`SEAL_AGAIN_SECS`, `SEAL_RETRY_SECS`);
+  - the session choice: the sessions `auth.rs#sessions_offered` gives, the first checked at every start and the choice written nowhere (SN14).
 
   The GTK screen calls it first, so the move is proved before the toolkit changes.
 - **`ui`** (rewritten in P3). One Sal layer surface on the overlay layer, with the keyboard exclusive, as `build_ui` opens one window today (`ui.rs#build_ui`). The card shows:
@@ -173,6 +176,7 @@ It keeps `greetd`, `athanor-calmo` and `cosmic-icon-theme`.
   - the seal chip;
   - the account list (`Ui::list`), with "Other user" and a field for the name (`accounts.rs#typed_name_is_valid`);
   - the password (`Ui::trusted_password`), or a visible field for an echo-on prompt;
+  - the session menu, only where `sessions_offered` gives two sessions: the "Session" button after the password field, whose menu holds the entries as a radio group (`Ui::menu_radio`), as SN14 describes (section 1, item 7);
   - PAM's lines;
   - the layout chip (`Shell::keyboard_layout`);
   - the power chips.
@@ -181,7 +185,7 @@ It keeps `greetd`, `athanor-calmo` and `cosmic-icon-theme`.
 - **`bridge`** (new). It implements `auth::Conversation` for the tokio worker:
   - `progress`, `info` and `error` send a message to the main loop;
   - `ask` sends the prompt and awaits the answer, with `None` when the person goes back;
-  - `session_command` returns the command of the first session `auth.rs#sessions_offered` gives (section 1, item 7).
+  - `session_command` returns the checked entry's command, read when `StartSession` is sent (SN14, section 1, item 7).
 
   The main loop drains the channel on each ping, as the lock's `turn` does.
 - **`main`** keeps its order (section 1, item 1), minus `GSK_RENDERER`. It ends in `athanor_sal::run_with(greeter, source)`.
@@ -247,7 +251,7 @@ The answer's length stays bounded by `REQUEST_BUFFER_BYTES` (`auth.rs`): the fix
 - *Before #1356*, on cosmic-comp, any client of the `greetd` uid can draw over the greeter. cosmic-comp checks no identity, and the port changes nothing there.
 - *A system-call filter.* The greeter runs with no seccomp filter (section 3.2); bubblewrap's namespaces (`--unshare-all`), `--cap-drop ALL` and Landlock are its confinement.
 - *Ptrace by the `greetd` uid.* Neither the non-dumpable flag nor Yama's scope 1 stops a `greetd`-uid process outside the sandbox, because that uid owns the greeter's user namespace (section 4, T3). This is stated as a residual, not claimed as a defence.
-- *A client that execs.* Sulphur identifies a client once, at connect, and "A client that `exec`s after connecting keeps what it connected as" (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/identity.rs`, module comment). The greeter bounds it by two rules of G1, not by Sulphur.
+- *A client that execs.* Sulphur identifies a client once, at connect, and "A client that `exec`s after connecting keeps what it connected as" (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/identity.rs`, module comment). The greeter bounds it by the two rules this plan proposes with G1 (section 6), not by Sulphur.
 
 ### 3.7 Accessibility
 
@@ -260,7 +264,7 @@ What the GTK greeter already has must hold:
 - every control named (`ui.rs`, module comment);
 - the account rows read as "full name, user name".
 
-The session menu's radio group leaves with the menu (section 1, item 7); the committed references hold none.
+The session menu must hold too: a menu button named "Session" with its checked entry, after the password field in the focus chain (SN14, AX6, AX7). The committed references hold no menu, because the rig installs no `/usr/bin/athanor-sulphur-session`. P3 therefore first records, with the GTK screen and that script present in the rig, the Orca and AT-SPI walks that reach the menu, in English and Italian, and commits them as references beside the existing ones; the Sal screen must then pass both sets.
 
 ## 4. Threats, against `doc_threat_model.md`
 
@@ -269,21 +273,21 @@ The session menu's radio group leaves with the menu (section 1, item 7); the com
 | T1 | The password lingers in GTK's entry buffer after login | TM7 (memory read by root or a core) | Removed: Sal's trusted field keeps it in a zeroizing buffer rebuilt at its size; a greeter variant of `password_memory.rs` searches the process's memory for the typed text after submit. |
 | T2 | Keys reach the field from an input method, a paste or an AT-SPI `SetValue` | Physical user, AT peer | The trusted field (D38 and D40's properties); the session-bus proxy talks to `org.a11y.Bus` only. |
 | T3 | A `greetd`-uid process outside the sandbox reads the greeter's memory or attaches to it | TM7 (image services) | **Residual, not mitigated by the greeter's own flags.** *Who:* every `greetd`-uid process in the parent user namespace: the compositor (cosmic-comp, then Sulphur), which `athanor-greeter-session` execs; the `xdg-dbus-proxy` instances the wrapper starts; and the services the `greetd` user's manager runs for the greeter (Orca and the accessibility services, PipeWire, WirePlumber). *Why:* bubblewrap's `--unshare-all` creates the greeter's user namespace, owned by the `greetd` uid, so each of these holds `CAP_SYS_PTRACE` over it, which waives both the non-dumpable flag and Yama's scope 1 (`doc_kernel_profile.md`, D47). It is the case #1558 removes from user units, here with no unit to remove it from. It is also what lets Sulphur read the greeter's `exe` (G2). *What holds:* these are image software (TM7); a process of any other uid is refused, and the greeter's in-process Landlock (section 3.2) bounds what a compromised greeter does, not who reads it. *Check:* a rig probe attaches from another uid and expects a refusal; it also attaches from a `greetd`-uid process outside the sandbox and records the success as this residual, never as a pass. |
-| T4 | Another client of the `greetd` uid draws an imitation of the greeter | TM6 | On cosmic-comp: not mitigated, as today. On Sulphur: OS21's one-client mode and the grant of G1 (section 6), with its two rules (T11). |
+| T4 | Another client of the `greetd` uid draws an imitation of the greeter | TM6 | On cosmic-comp: not mitigated, as today. On Sulphur: OS21's one-client mode and the grant of G1 (section 6), with the two rules this plan proposes (T11). |
 | T5 | A crafted image is decoded in the process that reads the password | TM7 | No account image is decoded (`ui.rs#Avatar`); icons come from `/usr`, read-only and signed with the image; nested user namespaces disabled after P4. |
 | T6 | Text from PAM, NSS (a GECOS full name) or the seal reorders the card or hides content (newlines, bidi controls) | Local account data, TM7 | `athanor_unit::text::line` and `::lines` before display (`system/athanor-unit/src/text.rs#is_hidden`); Sal draws no markup. |
 | T7 | The greeter cannot draw on a GPU and nobody can sign in | none | `vello_cpu` over `wl_shm` uses no GPU; three greeter failures within 60 s start the recovery console (`doc_recovery.md` R1). |
 | T8 | Dead keys are dropped and a password with accents cannot be typed | none | xkb compose from the locale; the VM's `us(intl)` case in P3 and again in #1356. |
 | T9 | A wrong password leaves greetd's session under configuration, blocking later logins | none | Unchanged: `auth.rs#converse` cancels every failed session; its tests stay unchanged. |
 | T10 | A panic or a refused layer leaves a black screen | none | `panic = "abort"`, the panic hook and the journal; greetd restarts its greeter; R1 after three failures. |
-| T11 | On Sulphur, the greeter's grant passes to another program: a child it starts, or a program it execs after connecting | TM6 | Sulphur identifies at connect, and a client that execs afterwards keeps what it connected as (`identity.rs`, module comment). G1's rules close it on the greeter's side: the Wayland connection's fd is `O_CLOEXEC`, so no exec'd image inherits it, and the greeter spawns nothing while it holds the grant. Tested in P3 (section 5). |
+| T11 | On Sulphur, the greeter's grant passes to another program: a child it starts, or a program it execs after connecting | TM6 | Sulphur identifies at connect, and a client that execs afterwards keeps what it connected as (`identity.rs`, module comment). The two rules this plan proposes with G1 close it on the greeter's side: the Wayland connection's fd is `O_CLOEXEC`, so no exec'd image inherits it, and the greeter spawns nothing while it holds the grant. Tested in P3 (section 5). |
 
 ## 5. Pull requests, in order
 
 Each pull request merges on its own with its tests and is judged on the reference laptop before it merges, as AX18 asks of every accessibility-bearing step. Each defect class an audit finds becomes a check in the pull request that fixes it.
 
 **P1. The revision of decision 41** (`docs/` only).
-- *Change.* `doc_own_stack.md` takes the grant of G1(a) with its two rules, and the greeter's dumpable order of G2(a) with D42's order written in as the fallback, and OS21's tests gain the grant's fixture tests.
+- *Change.* `doc_own_stack.md` takes the grant of G1(a), with the two rules this plan proposes for it (section 6, G1), and the greeter's dumpable order of G2(a) with D42's order written in as the fallback, and OS21's tests gain the grant's fixture tests.
 - *Approval.* ADR-0074: approved before #1356's code. P2 to P4 do not wait for it.
 - *Size estimate.* About 60 lines of text.
 
@@ -297,17 +301,18 @@ Each pull request merges on its own with its tests and is judged on the referenc
   - `ui` on Sal, `bridge`, `main` without GTK;
   - `layer_guard.rs` and `rig.sh layer-guard greeter` removed;
   - the spec's `Requires` and `BuildRequires`;
-  - `ATHANOR_GREETER_BIN` in the rig.
+  - `ATHANOR_GREETER_BIN` in the rig;
+  - the session menu on Sal (section 1, item 7), and, before the GTK screen leaves, the GTK references for the walks that reach it (section 3.7).
 - *Tests.*
   - the bridge against a scripted conversation (prompt, answer, back, two steps, PAM error then success);
   - `password_memory` for the greeter;
   - the exit without a layer shell;
-  - G1's rules: a test that reads the Wayland connection's fd flags with `F_GETFD` and expects `FD_CLOEXEC`, and a check that fails when the greeter's crate calls `std::process::Command`, `fork` or an `exec` (no such call exists today);
-  - no session menu on the card, and `StartSession`'s `cmd` the first offered session's (section 1, item 7);
+  - the two rules proposed with G1: a test that reads the Wayland connection's fd flags with `F_GETFD` and expects `FD_CLOEXEC`, and a check that fails when the greeter's crate calls `std::process::Command`, `fork` or an `exec` (no such call exists today);
+  - the session menu shown only when `/usr/bin/athanor-sulphur-session` is installed, tested against a tree the test owns as `first_installed` is; the first entry checked at start; `StartSession`'s `cmd` the checked entry's path (section 1, item 7);
   - `atspi greeter [it]` and `orca greeter [it]` against the GTK references;
   - the 12 `vello_cpu` goldens;
   - the VM greeter stage with a `us(intl)` password.
-- *Lands with* the change that takes cosmic-comp's session off the greeter (section 1, item 7).
+- *Merges on its own.* The session menu stays; it leaves with the SN14 revision 5 change, which waits for this port (section 1, item 7).
 - *Own-allow.* This pull request retires **`crate athanor-greeter-ui`**: its dependencies, dev-dependencies aside, no longer reach `gtk4` (`verify.py own`, `scripts/verify.py#check_own`).
 - *Size estimate.* About 1,600 lines added and 1,400 removed.
 
@@ -338,7 +343,7 @@ The last pull request of this plan, P4, retires no entry. The entry this plan re
 
 **Decided: (a), the executable plus the compositor's own logind session scope.** Not taken: (b), which depends on the `greetd` user's manager, kept out of the mode by OS21 (`doc_own_stack.md:563`, "No user unit"), and ties the grant to a scope name any `greetd` process can give; (c), which matches every user's session scope, not only the greeter's. (a) writes nothing into a user manager and needs no wildcard, and OS21's one-client rule already closes the compositor to any other process at connect.
 
-Two rules come with the grant, because Sulphur identifies a client only at connect and "A client that `exec`s after connecting keeps what it connected as" (`identity.rs`, module comment):
+This plan proposes two rules to go with the grant; they come from the plan's audit, not from the decision of G1(a). They are needed because Sulphur identifies a client only at connect and "A client that `exec`s after connecting keeps what it connected as" (`identity.rs`, module comment):
 - the Wayland connection's fd is `O_CLOEXEC`, so an exec'd image never inherits it;
 - the greeter spawns nothing while it holds the grant.
 
