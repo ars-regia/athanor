@@ -398,7 +398,8 @@ pub fn uri(path: &Path) -> String {
 pub trait Host: Send + Sync + 'static {
     /// `Ok` when the caller is the frontend, the owner of `org.freedesktop.portal.Desktop`.
     fn frontend(&self, header: &Header<'_>) -> impl Future<Output = Result<(), String>> + Send;
-    /// Every output's picture, without the pointer.
+    /// Every output's picture, without the pointer. The future resolves only once the
+    /// capture has ended, so that the turn held until then covers it.
     fn capture(&self) -> impl Future<Output = Result<Vec<Shot>, String>> + Send;
 }
 
@@ -408,8 +409,9 @@ struct Shared<H: Host> {
     dir: PathBuf,
     /// Held from a screenshot's capture to its file: each holds every output's picture, the
     /// composed image and its PNG in memory, and a caller that asks again and again waits for
-    /// its turn instead of multiplying them.
-    turn: Mutex<()>,
+    /// its turn instead of multiplying them. The capture's task owns it, so a request closed
+    /// while its capture runs keeps the turn until that capture ends.
+    turn: Arc<Mutex<()>>,
 }
 
 impl<H: Host> Shared<H> {
@@ -435,7 +437,7 @@ impl<H: Host> Screenshot<H> {
         Screenshot(Arc::new(Shared {
             host,
             dir,
-            turn: Mutex::new(()),
+            turn: Arc::new(Mutex::new(())),
         }))
     }
 
@@ -487,23 +489,29 @@ impl<H: Host> Screenshot<H> {
             tracing::warn!(%handle, "Screenshot refused: the request's object path is taken");
             return Ok(answer(2));
         }
+        let shared = self.0.clone();
+        // Waiting for the turn ends with the request; the capture, once begun, runs in a task
+        // of its own that holds the turn until the capture ends.
         let taken = tokio::select! {
             biased;
             () = closed.notified() => None,
-            taken = async {
-                let turn = self.0.turn.lock().await;
-                (self.0.host.capture().await, turn)
+            taken = async move {
+                let turn = shared.turn.clone().lock_owned().await;
+                tokio::spawn(async move { (shared.host.capture().await, turn) }).await
             } => Some(taken),
         };
         if let Err(error) = server.remove::<Request<H>, _>(&handle).await {
             tracing::error!(%error, %handle, "the request's object was not removed");
         }
-        let Some((shots, _turn)) = taken else {
-            return Ok(answer(1));
-        };
-        let kept = match shots {
-            Ok(shots) => self.keep(shots).await,
-            Err(why) => Err(format!("the outputs were not captured: {why}")),
+        let kept = match taken {
+            None => return Ok(answer(1)),
+            Some(Err(error)) => Err(format!("the capture's task ended: {error}")),
+            Some(Ok((Err(why), _turn))) => Err(format!("the outputs were not captured: {why}")),
+            Some(Ok((Ok(shots), turn))) => {
+                let kept = self.keep(shots).await;
+                drop(turn);
+                kept
+            }
         };
         match kept {
             Ok(path) => {
@@ -559,6 +567,7 @@ mod tests {
     use std::os::unix::fs::{symlink, MetadataExt};
     use std::sync::Mutex;
 
+    use tokio::sync::Semaphore;
     use zbus::Connection;
 
     use super::*;
@@ -877,10 +886,10 @@ mod tests {
     }
 
     /// The frontend is one connection of the test, admitted by its unique name. The capture
-    /// gives one red pixel, or never answers.
+    /// gives one red pixel once it passes the gate, which the test may keep closed.
     struct TestHost {
         frontend: String,
-        answers: bool,
+        gate: Arc<Semaphore>,
         captures: Arc<Mutex<u32>>,
     }
 
@@ -894,9 +903,7 @@ mod tests {
 
         async fn capture(&self) -> Result<Vec<Shot>, String> {
             *self.captures.lock().expect("lock") += 1;
-            if !self.answers {
-                std::future::pending::<()>().await;
-            }
+            drop(self.gate.acquire().await.expect("gate"));
             Ok(vec![shot(0, 0, (1, 1), (1, 1), |_, _| [255, 0, 0, 255])])
         }
     }
@@ -907,6 +914,7 @@ mod tests {
         backend: String,
         frontend: Connection,
         stranger: Connection,
+        gate: Arc<Semaphore>,
         captures: Arc<Mutex<u32>>,
         dir: PathBuf,
     }
@@ -917,9 +925,14 @@ mod tests {
         let stranger = bus.builder().build().await.expect("stranger");
         let captures = Arc::new(Mutex::new(0));
         let dir = dir(name);
+        let gate = Arc::new(Semaphore::new(if answers {
+            Semaphore::MAX_PERMITS
+        } else {
+            0
+        }));
         let host = TestHost {
             frontend: frontend.unique_name().expect("name").to_string(),
-            answers,
+            gate: gate.clone(),
             captures: captures.clone(),
         };
         let serving = bus
@@ -934,6 +947,7 @@ mod tests {
             _bus: bus,
             frontend,
             stranger,
+            gate,
             captures,
             dir,
         }
@@ -1073,6 +1087,59 @@ mod tests {
         let (response, results) = asking.await.expect("task").expect("Screenshot");
         assert_eq!((response, results.len()), (1, 0));
         assert_eq!(fs::read_dir(&portal.dir).expect("dir").count(), 0);
+        fs::remove_dir_all(&portal.dir).ok();
+    }
+
+    /// Closes `handle` from the frontend once its Request object exists.
+    async fn close_when_asked(portal: &Portal, handle: &str) {
+        for _ in 0..100 {
+            match portal
+                .frontend
+                .call_method(
+                    Some(portal.backend.as_str()),
+                    handle,
+                    Some("org.freedesktop.impl.portal.Request"),
+                    "Close",
+                    &(),
+                )
+                .await
+            {
+                Err(zbus::Error::FDO(error)) if matches!(*error, fdo::Error::UnknownObject(_)) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                other => {
+                    other.expect("Close");
+                    return;
+                }
+            }
+        }
+        panic!("the request {handle} never existed");
+    }
+
+    #[tokio::test]
+    async fn a_closed_request_keeps_the_turn_until_its_capture_ends() {
+        let portal = Arc::new(portal("turn", false).await);
+        let ask = |handle: &'static str| {
+            let portal = portal.clone();
+            tokio::spawn(async move {
+                portal
+                    .call(&portal.frontend, "Screenshot", handle, &checked())
+                    .await
+            })
+        };
+        let first = ask("/org/freedesktop/portal/desktop/request/1_1/t1");
+        close_when_asked(&portal, "/org/freedesktop/portal/desktop/request/1_1/t1").await;
+        let (response, _) = first.await.expect("task").expect("Screenshot");
+        assert_eq!(response, 1);
+        // The first capture still runs: the second request waits for it before capturing.
+        let second = ask("/org/freedesktop/portal/desktop/request/1_1/t2");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!second.is_finished());
+        assert_eq!(*portal.captures.lock().expect("lock"), 1);
+        portal.gate.add_permits(1);
+        let (response, _) = second.await.expect("task").expect("Screenshot");
+        assert_eq!(response, 0);
+        assert_eq!(*portal.captures.lock().expect("lock"), 2);
         fs::remove_dir_all(&portal.dir).ok();
     }
 
