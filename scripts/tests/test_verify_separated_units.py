@@ -13,7 +13,7 @@ spec.loader.exec_module(verify)
 
 LOCK = "athanor-lock.service"
 SHIPPED = SCRIPT.parents[1] / "forge/specs/athanor-lock/athanor-lock-1.0.0/data" / LOCK
-KEPT = "NoNewPrivileges=yes\nSystemCallFilter=@system-service\nRestrictRealtime=yes\nRestrictSUIDSGID=yes\nLockPersonality=yes\nRestrictAddressFamilies=AF_UNIX\n"
+KEPT = "NoNewPrivileges=yes\nSystemCallArchitectures=native\nSystemCallFilter=@system-service\nRestrictRealtime=yes\nRestrictSUIDSGID=yes\nLockPersonality=yes\nRestrictAddressFamilies=AF_UNIX\n"
 
 
 def unit(lines):
@@ -23,24 +23,21 @@ def unit(lines):
 
 
 def problems(units, dropins=None):
-    """`dropins` maps `<spec>/<directory>/<file>` to the text of a user drop-in."""
+    """`dropins` maps `<spec>/<directory>/<file>` to the text of a user drop-in installed
+    under usr/lib/systemd/user/, or a longer path under forge/specs to a file put there."""
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         for name, text in (dropins or {}).items():
-            spec, directory, file = name.split("/")
-            path = (
-                root
-                / "forge/specs"
-                / spec
-                / f"{spec}-1.0.0/data/usr/lib/systemd/user"
-                / directory
-                / file
-            )
+            if name.count("/") == 2:
+                spec, directory, file = name.split("/")
+                name = (
+                    f"{spec}/{spec}-1.0.0/data/usr/lib/systemd/user/{directory}/{file}"
+                )
+            path = root / "forge/specs" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
-        return verify.separated_unit_problems(
-            {**units, **verify.separated_unit_texts(root, units)}
-        )
+        texts, found = verify.separated_unit_texts(root, units)
+        return found + verify.separated_unit_problems({**units, **texts})
 
 
 class SeparatedUnitsTest(unittest.TestCase):
@@ -51,6 +48,9 @@ class SeparatedUnitsTest(unittest.TestCase):
 
     def test_each_directive_measured_to_create_a_user_namespace_fails(self):
         for line in (
+            "BindLogSockets=yes",
+            "UserNamespacePath=/proc/1/ns/user",
+            "JoinsNamespaceOf=other.service",
             "ProtectSystem=strict",
             "ProtectHome=read-only",
             "PrivateNetwork=yes",
@@ -70,24 +70,54 @@ class SeparatedUnitsTest(unittest.TestCase):
                 found = problems({LOCK: unit(KEPT + line + "\n")})
                 self.assertEqual(len(found), 1, found)
                 self.assertIn(line, found[0])
+                self.assertIn("not measured for separated units", found[0])
 
-    def test_a_property_turned_off_passes(self):
+    def test_a_key_not_measured_fails_whatever_its_value(self):
+        # The allow-list holds keys, not values: an off value is not measured either.
         for line in (
+            "Frobnicate=yes",
             "ProtectSystem=no",
             "PrivateNetwork=false",
             "ProtectProc=default",
             "ReadWritePaths=",
         ):
             with self.subTest(line=line):
-                self.assertEqual(problems({LOCK: unit(KEPT + line + "\n")}), [])
+                found = problems({LOCK: unit(KEPT + line + "\n")})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("not measured for separated units", found[0])
 
-    def test_the_last_assignment_decides(self):
+    def test_every_assignment_is_read(self):
         self.assertEqual(
-            problems({LOCK: unit(KEPT + "PrivateTmp=yes\nPrivateTmp=no\n")}), []
+            len(problems({LOCK: unit(KEPT + "PrivateTmp=yes\nPrivateTmp=no\n")})), 2
         )
+
+    def test_a_filter_without_the_native_architecture_fails(self):
+        without = KEPT.replace("SystemCallArchitectures=native\n", "")
+        for lines in (
+            without,
+            without + "SystemCallArchitectures=native x86\n",
+            KEPT + "SystemCallArchitectures=\n",
+            "RestrictAddressFamilies=AF_UNIX\n",
+        ):
+            with self.subTest(lines=lines):
+                found = problems({LOCK: unit(lines)})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("without SystemCallArchitectures=native", found[0])
+        # No filter, no requirement; and a filter reset by an empty assignment needs none.
+        self.assertEqual(problems({LOCK: unit("NoNewPrivileges=yes\n")}), [])
         self.assertEqual(
-            len(problems({LOCK: unit(KEPT + "PrivateTmp=no\nPrivateTmp=yes\n")})), 1
+            problems(
+                {LOCK: unit("SystemCallFilter=@system-service\nSystemCallFilter=\n")}
+            ),
+            [],
         )
+
+    def test_the_shipped_unit_without_its_native_line_fails(self):
+        # The negative control on the real unit.
+        text = SHIPPED.read_text()
+        self.assertIn("SystemCallArchitectures=native\n", text)
+        found = problems({LOCK: text.replace("SystemCallArchitectures=native\n", "")})
+        self.assertEqual(len(found), 1, found)
 
     def test_a_drop_in_that_adds_a_directive_fails(self):
         found = problems(
@@ -100,11 +130,12 @@ class SeparatedUnitsTest(unittest.TestCase):
     def test_drop_ins_apply_in_file_name_order_across_directories(self):
         # systemd sorts every drop-in of a unit by file name, whatever its directory or
         # spec; a walk in directory order would read these two the other way round.
-        on, off = "[Service]\nPrivateTmp=yes\n", "[Service]\nPrivateTmp=no\n"
+        on = "[Service]\nSystemCallArchitectures=native\n"
+        off = "[Service]\nSystemCallArchitectures=\n"
         self.assertEqual(
             problems(
                 {LOCK: unit(KEPT)},
-                {"zz/service.d/10-on.conf": on, f"aa/{LOCK}.d/90-off.conf": off},
+                {"zz/service.d/10-off.conf": off, f"aa/{LOCK}.d/90-on.conf": on},
             ),
             [],
         )
@@ -112,7 +143,7 @@ class SeparatedUnitsTest(unittest.TestCase):
             len(
                 problems(
                     {LOCK: unit(KEPT)},
-                    {f"aa/{LOCK}.d/10-off.conf": off, "zz/service.d/90-on.conf": on},
+                    {f"aa/{LOCK}.d/10-on.conf": on, "zz/service.d/90-off.conf": off},
                 )
             ),
             1,
@@ -152,10 +183,25 @@ class SeparatedUnitsTest(unittest.TestCase):
             [],
         )
 
-    def test_a_directive_outside_the_service_section_is_not_read(self):
+    def test_every_section_is_read(self):
+        found = problems({LOCK: "[Unit]\nProtectSystem=strict\n" + unit(KEPT)})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("[Unit] ProtectSystem=strict", found[0])
         self.assertEqual(
-            problems({LOCK: "[Unit]\nProtectSystem=strict\n" + unit(KEPT)}), []
+            problems({LOCK: unit(KEPT) + "[Install]\nWantedBy=x.target\n"}), []
         )
+
+    def test_a_drop_in_the_check_cannot_merge_fails(self):
+        for path in (
+            f"athanor-lock/athanor-lock-1.0.0/data/{LOCK}.d/50-x.conf",
+            f"athanor-lock/athanor-lock-1.0.0/data/etc/skel/.config/systemd/user/{LOCK}.d/50-x.conf",
+        ):
+            with self.subTest(path=path):
+                found = problems(
+                    {LOCK: unit(KEPT)}, {path: "[Service]\nRestrictRealtime=yes\n"}
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("cannot merge it", found[0])
 
     def test_a_continued_line_is_read_whole(self):
         found = problems({LOCK: unit(KEPT + "ReadOnlyPaths=/etc \\\n  /usr\n")})

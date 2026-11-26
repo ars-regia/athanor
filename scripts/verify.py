@@ -5281,8 +5281,9 @@ HEREDOC = re.compile(
 )
 
 
-def unit_directives(text):
-    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+def unit_assignments(text):
+    """(section, key, value) of every assignment of a unit or drop-in, in order; the section is
+    None before the first header."""
     section, found = None, []
     # A trailing backslash continues the line (systemd.syntax(7)): join before parsing.
     for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
@@ -5291,10 +5292,15 @@ def unit_directives(text):
             continue
         if line.startswith("[") and line.endswith("]"):
             section = line[1:-1]
-        elif section == "Service" and "=" in line:
+        elif "=" in line:
             key, value = line.split("=", 1)
-            found.append((key.strip(), value.strip()))
+            found.append((section, key.strip(), value.strip()))
     return found
+
+
+def unit_directives(text):
+    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+    return [(key, value) for section, key, value in unit_assignments(text) if section == "Service"]
 
 
 # Capabilities that give root back to a process that keeps them (doc_threat_model.md).
@@ -5886,6 +5892,8 @@ def check_session_units():
 # Properties that put a user unit in namespaces of its own. Under the user manager each one
 # gives the unit a user namespace, a sibling of every other unit's, and the kernel refuses a
 # ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
+# ProtectProc=, ProcSubset= and PrivateBPF= are the exceptions: measured on systemd 262, each
+# alone in a transient user unit, they keep the host's user namespace (#1558).
 NAMESPACING_PROPERTY = re.compile(
     r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
     r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage"
@@ -6007,18 +6015,41 @@ def check_peer_exe():
 # and Yama's scope 1 no longer keep them from attaching. Such a unit confines itself in process.
 # The polkit agent's unit joins when it ships (LP11); the greeter has no unit of its own.
 SEPARATED_USER_UNITS = ("athanor-lock.service",)
-# Beyond NAMESPACING_PROPERTY: DelegateNamespaces= and NetworkNamespacePath=, measured on systemd
-# 262 to create a user namespace under the user manager, and LogNamespace= and IPCNamespacePath=,
-# which join or make a namespace of their own and which the user manager failed to run when measured.
-SEPARATION_NAMESPACING = re.compile(r"^(DelegateNamespaces|LogNamespace|NetworkNamespacePath|IPCNamespacePath)\s*=(.*)$")
+# The keys a separated unit may set, by section. Each was measured on systemd 262, on the
+# reference desktop on 2026-11-26, to keep the host's user namespace under the user manager:
+# set alone in a transient user unit, then the lock's whole unit in one, `/proc/<pid>/ns/user`
+# compared with the session's (#1558). Any other key fails until it is measured and added:
+# BindLogSockets=, NetworkNamespacePath= and the properties of NAMESPACING_PROPERTY created one,
+# IPCNamespacePath= and UserNamespacePath= kept the unit from running, and JoinsNamespaceOf=
+# joins another unit's namespaces. WantedBy= acts only when the unit is enabled.
+SEPARATED_UNIT_KEYS = {
+    "Unit": frozenset({
+        "Description", "Documentation", "After", "Before", "Wants", "Requires", "Requisite",
+        "BindsTo", "PartOf", "StartLimitIntervalSec", "StartLimitBurst", "OnFailure",
+    }),
+    "Service": frozenset({
+        "ExecStart", "Type", "Environment", "UnsetEnvironment", "NotifyAccess", "Restart",
+        "RestartSec", "RestartSteps", "RestartMaxDelaySec", "Slice", "MemoryMax", "UMask",
+        "KeyringMode", "RemoveIPC", "NoNewPrivileges", "SystemCallArchitectures",
+        "SystemCallFilter", "SystemCallErrorNumber", "RestrictAddressFamilies", "LockPersonality",
+        "RestrictRealtime", "RestrictSUIDSGID", "RestrictNamespaces", "MemoryDenyWriteExecute",
+    }),
+    "Install": frozenset({"WantedBy"}),
+}
+# Filters that systemd installs for the architectures of SystemCallArchitectures= alone: without
+# `native`, a 32-bit socketcall made through int 0x80 opened a UDP socket past
+# RestrictAddressFamilies=AF_UNIX, measured on systemd 262 (#1558).
+SECCOMP_FILTER_KEYS = ("RestrictAddressFamilies", "SystemCallFilter")
 
 
 def separated_unit_texts(root, units, separated=SEPARATED_USER_UNITS):
-    """{unit: text} of each separated unit with every user drop-in that applies to it appended in
-    systemd's order, by file name (systemd.unit(5)): `<unit>.d`, each `<prefix>-.service.d` of its
-    name and the type-wide `service.d`, a file of the more specific directory replacing one of the
-    same name."""
-    texts = {}
+    """({unit: text}, problems): each separated unit with every user drop-in that applies to it
+    appended in systemd's order, by file name (systemd.unit(5)): `<unit>.d`, each
+    `<prefix>-.service.d` of its name and the type-wide `service.d`, a file of the more specific
+    directory replacing one of the same name. A `<unit>.d` drop-in outside a `systemd/user/`
+    directory of a spec, such as one next to the unit under `data/`, is a problem: the check does
+    not know where it installs, so it cannot merge it."""
+    texts, problems = {}, []
     for unit in separated:
         if unit not in units:
             continue
@@ -6027,37 +6058,45 @@ def separated_unit_texts(root, units, separated=SEPARATED_USER_UNITS):
         dirs = [f"{unit}.d"] + [f"{'-'.join(parts[:n])}-.{kind}.d" for n in range(len(parts) - 1, 0, -1)] + [f"{kind}.d"]
         found = {}
         for conf in walk(root / "forge" / "specs", ".conf"):
-            if conf.parent.name in dirs and conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
+            placed = conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts
+            if conf.parent.name == f"{unit}.d" and not placed:
+                problems.append(f"{unit}: drop-in {conf.relative_to(root)} is not under a spec's systemd/user/ directory, so separated-units cannot merge it; ship it as usr/lib/systemd/user/{unit}.d/{conf.name} or move its lines into the unit")
+            elif conf.parent.name in dirs and placed:
                 rank = dirs.index(conf.parent.name)
                 if conf.name not in found or rank < found[conf.name][0]:
                     found[conf.name] = (rank, conf)
         texts[unit] = units[unit] + "".join("\n" + read(conf) for _, (_, conf) in sorted(found.items()))
-    return texts
+    return texts, problems
 
 
 def separated_unit_problems(units, separated=SEPARATED_USER_UNITS):
-    """A separated unit that no spec ships, or whose last assignment of a namespacing property,
-    its drop-ins merged, turns the property on."""
+    """A separated unit that no spec ships; or that, its drop-ins merged, sets a key outside
+    SEPARATED_UNIT_KEYS, or a seccomp filter without SystemCallArchitectures=native alone."""
     problems = []
     for unit in separated:
         if unit not in units:
             problems.append(f"{unit}: listed in SEPARATED_USER_UNITS and shipped by no spec under forge/specs")
             continue
-        last = dict(unit_directives(units[unit]))
-        for key, value in sorted(last.items()):
-            line = f"{key}={value}"
-            if (NAMESPACING_PROPERTY.match(line) or SEPARATION_NAMESPACING.match(line)) and value.lower() not in NAMESPACING_OFF:
-                problems.append(f"{unit}: sets {line}, which puts it in a user namespace of the user's under the user manager, where a process of the same uid can attach to it; confine it in process instead (doc_lock_and_prompts.md D43)")
+        architectures, filters = set(), set()
+        for section, key, value in unit_assignments(units[unit]):
+            if key not in SEPARATED_UNIT_KEYS.get(section, ()):
+                problems.append(f"{unit}: [{section}] {key}={value} is not measured for separated units: measure that it keeps the host's user namespace under the user manager, where a namespace of the user's lets a process of the same uid attach, and add it to SEPARATED_UNIT_KEYS (doc_lock_and_prompts.md D43)")
+            # Both are lists that accumulate, and an empty assignment resets (systemd.exec(5)).
+            elif key == "SystemCallArchitectures":
+                architectures = architectures | set(value.split()) if value else set()
+            elif key in SECCOMP_FILTER_KEYS:
+                (filters.add if value else filters.discard)(key)
+        if filters and architectures != {"native"}:
+            problems.append(f"{unit}: sets {'= and '.join(sorted(filters))}= without SystemCallArchitectures=native alone, so a 32-bit call through int 0x80 escapes the filter, as a socketcall escaped RestrictAddressFamilies=AF_UNIX (doc_lock_and_prompts.md LP15)")
     return problems
 
 
-@check("separated-units", "A per-user unit kept apart from the user's other processes sets no directive that gives it a user namespace (D43)")
+@check("separated-units", "A per-user unit kept apart from the user's other processes sets only keys measured to keep the host's user namespace, its filters on the native architecture (D43)")
 def check_separated_units():
     r = Result()
     units, problems = shipped_user_units(ROOT)
-    for problem in problems:
-        r.fail(problem)
-    for problem in separated_unit_problems({**units, **separated_unit_texts(ROOT, units)}):
+    texts, dropin_problems = separated_unit_texts(ROOT, units)
+    for problem in problems + dropin_problems + separated_unit_problems({**units, **texts}):
         r.fail(problem)
     for unit in SEPARATED_USER_UNITS:
         r.note(f"separated: {unit}")
