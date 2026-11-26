@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="athanor_workspace_v1">
+  <copyright>
+    Copyright © 2026 Athanor Forge
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="the overview's control of workspaces and of their windows">
+    What the overview needs of the workspaces of ext-workspace-v1 and of the windows of
+    ext-foreign-toplevel-list-v1 beyond those protocols: a workspace's pinned state, its pin and
+    its place among its output's workspaces; each window's workspace, its place on the outputs
+    and its move to another workspace; and the ext-image-copy-capture-v1 source of a workspace,
+    for its thumbnail. The compositor offers the manager only to the clients it trusts with it;
+    it is Athanor's own protocol (doc_own_stack.md OS5, decision 32).
+
+    Every request of athanor_workspace_v1 and athanor_workspace_window_v1 does nothing, with no
+    protocol error, while the session is locked or paused on another virtual terminal, on a
+    handle that went away, and on a window that is neither minimised nor drawn and placed.
+
+    A new version adds interfaces, requests, events or enum entries; a client binds the
+    version it knows.
+  </description>
+
+  <interface name="athanor_workspace_manager_v1" version="1">
+    <description summary="the overview's control of workspaces">
+      Makes the object of a workspace, the object of a window and the capture source of a
+      workspace.
+    </description>
+
+    <enum name="error">
+      <entry name="already_made" value="0"
+        summary="the client already has an object of this workspace or of this window"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        The objects and the sources made from the manager stay valid.
+      </description>
+    </request>
+
+    <request name="get_workspace">
+      <description summary="the object of a workspace">
+        Makes the object of the workspace an ext_workspace_handle_v1 stands for. Its state and
+        its capabilities are sent at once; for a workspace already removed, removed is sent
+        instead. A second object of the same workspace, while the client holds a first that was
+        not sent removed, is the already_made error.
+      </description>
+      <arg name="id" type="new_id" interface="athanor_workspace_v1"/>
+      <arg name="workspace" type="object" interface="ext_workspace_handle_v1"/>
+    </request>
+
+    <request name="get_workspace_window">
+      <description summary="the object of a window">
+        Makes the object of the window an ext_foreign_toplevel_handle_v1 stands for. Its
+        workspace, its places and a done event are sent at once, then each change followed by
+        done. On a closed handle the object is inert: it sends nothing. A second object of the
+        same window, while the client holds the first, is the already_made error.
+      </description>
+      <arg name="id" type="new_id" interface="athanor_workspace_window_v1"/>
+      <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+    </request>
+
+    <request name="get_capture_source">
+      <description summary="the capture source of a workspace">
+        Makes the ext-image-copy-capture-v1 source of the workspace an ext_workspace_handle_v1
+        stands for, active or not. Its frames have the size of the workspace's output in
+        pixels, its mode, and that output's transform. They hold the workspace's windows as
+        that output draws them, each with its marks: the confined border, the focus outline and
+        the divider ring. They never hold the pointer, nor any layer surface: behind the windows
+        the frame is transparent, and an empty workspace gives a transparent frame. While the
+        session is locked, and once the workspace is gone, a session of the source is refused
+        and its frames fail.
+      </description>
+      <arg name="source" type="new_id" interface="ext_image_capture_source_v1"/>
+      <arg name="workspace" type="object" interface="ext_workspace_handle_v1"/>
+    </request>
+  </interface>
+
+  <interface name="athanor_workspace_v1" version="1">
+    <description summary="a workspace's pin and place">
+      A workspace's pinned state and capabilities, sent when the object is made and at each
+      change, whatever made it, and the requests that pin it and move it among its output's
+      workspaces. The order of the workspaces is the coordinates ext-workspace-v1 sends.
+    </description>
+
+    <enum name="state" bitfield="true">
+      <entry name="pinned" value="1"
+        summary="the workspace is kept when it empties, for the rest of the session"/>
+    </enum>
+
+    <enum name="capabilities" bitfield="true">
+      <entry name="pin" value="1" summary="pin and unpin apply"/>
+      <entry name="move" value="2" summary="move_before and move_after apply"/>
+    </enum>
+
+    <event name="state">
+      <description summary="the workspace's state">
+        Every flag that holds; a flag absent no longer holds. A new workspace is not pinned.
+      </description>
+      <arg name="state" type="uint" enum="state"/>
+    </event>
+
+    <event name="capabilities">
+      <description summary="what the workspace's requests can do">
+        Every workspace can be pinned. The empty workspace each output keeps last cannot move,
+        and is sent without move; it is sent move once it is no longer last.
+      </description>
+      <arg name="capabilities" type="uint" enum="capabilities"/>
+    </event>
+
+    <event name="removed">
+      <description summary="the workspace is gone">
+        The workspace was removed. The object sends nothing more and ignores its requests; the
+        client destroys it.
+      </description>
+    </event>
+
+    <request name="pin">
+      <description summary="keep the workspace">
+        Pins the workspace: it is not removed when its last window leaves it, for the rest of
+        the session. Nothing is stored on disk. Every object of the workspace is then sent
+        state.
+      </description>
+    </request>
+
+    <request name="unpin">
+      <description summary="let the workspace go when it empties">
+        Unpins the workspace: an empty workspace that is neither active nor last is then
+        removed, as any emptied workspace is. Every object of the workspace is sent state, or
+        removed.
+      </description>
+    </request>
+
+    <request name="move_before">
+      <description summary="move the workspace before another">
+        Places the workspace just before the workspace other stands for, among the workspaces of
+        its output. It is refused, and changes nothing, when other is a workspace of another
+        output, and when the workspace cannot move.
+      </description>
+      <arg name="other" type="object" interface="ext_workspace_handle_v1"/>
+    </request>
+
+    <request name="move_after">
+      <description summary="move the workspace after another">
+        Places the workspace just after the workspace other stands for, among the workspaces of
+        its output. It is refused, and changes nothing, when other is a workspace of another
+        output, when other is the empty workspace kept last, and when the workspace cannot move.
+      </description>
+      <arg name="other" type="object" interface="ext_workspace_handle_v1"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the workspace object">
+      </description>
+    </request>
+  </interface>
+
+  <interface name="athanor_workspace_window_v1" version="1">
+    <description summary="a window's workspace and place">
+      The workspace a window is on and its place on each output, sent as what changed at each
+      frame, and the request that moves it to another workspace. Events are applied together
+      at done.
+    </description>
+
+    <event name="workspace_enter">
+      <description summary="the window is on a workspace">
+        Sent only to a client that holds the ext_workspace_handle_v1 of that workspace.
+      </description>
+      <arg name="workspace" type="object" interface="ext_workspace_handle_v1"/>
+    </event>
+
+    <event name="workspace_leave">
+      <description summary="the window is no longer on a workspace"/>
+      <arg name="workspace" type="object" interface="ext_workspace_handle_v1"/>
+    </event>
+
+    <event name="geometry">
+      <description summary="the window's place on an output">
+        The window's geometry on output, in logical pixels, x and y relative to that output's
+        top left. A window shown is sent for each output it overlaps; a window on an inactive
+        workspace, or minimised, is sent the place it keeps, on its workspace's output. A
+        width or a height of zero withdraws the window from that output.
+      </description>
+      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
+
+    <event name="done">
+      <description summary="the events since the last done apply"/>
+    </event>
+
+    <request name="move_to_workspace">
+      <description summary="move the window to a workspace">
+        Moves the window to the workspace an ext_workspace_handle_v1 stands for, on output: a
+        window moved to an inactive workspace leaves the screen, and one moved to another
+        output's workspace is centred there. A minimised window stays minimised. It is refused,
+        and changes nothing, when output is not the workspace's own.
+      </description>
+      <arg name="workspace" type="object" interface="ext_workspace_handle_v1"/>
+      <arg name="output" type="object" interface="wl_output"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the window object">
+      </description>
+    </request>
+  </interface>
+</protocol>
