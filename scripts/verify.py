@@ -9952,6 +9952,30 @@ MAIN_BRANCH_LINE = re.compile(
     r"""|^\s*-\s*['"]?main['"]?\s*(#.*)?$|ref_name\s*==\s*['"]main['"]""")
 
 
+DIRECTION_CALL = re.compile(r"\bcatalog\w*(?:\(\))?\s*\.is_rtl\(\)|\bCatalog::is_rtl\b", re.I)
+
+
+def direction_problems(relative_path, text):
+    """A program settles its text direction through `athanor_i18n::is_rtl(domain)`, the one place
+    that does; a call of `Catalog::is_rtl` anywhere but athanor-i18n is a second source of the
+    same fact. Already formatted, with line and reason."""
+    if relative_path.startswith("system/athanor-i18n/"):
+        return []
+    return [f"{relative_path}:{i} calls Catalog::is_rtl: settle the direction with "
+            f"athanor_i18n::is_rtl(domain)"
+            for i, line in enumerate(text.split("\n"), 1)
+            if DIRECTION_CALL.search(line.split("//")[0])]
+
+
+@check("i18n-direction", "No crate but athanor-i18n calls Catalog::is_rtl: programs use athanor_i18n::is_rtl")
+def check_i18n_direction():
+    r = Result()
+    for p in rust_files():
+        for problem in direction_problems(rel(p), read(p)):
+            r.fail(problem)
+    return r
+
+
 def main_branch_problems(files):
     """`files` maps a path to its text; a comment line is not read."""
     out = []
