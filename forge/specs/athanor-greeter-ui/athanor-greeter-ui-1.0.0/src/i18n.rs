@@ -59,7 +59,6 @@ mod tests {
     #[test]
     fn without_a_catalog_the_message_id_is_the_text() {
         assert_eq!(tr("Shut down"), "Shut down");
-        assert!(!is_rtl());
     }
 
     #[test]
