@@ -151,8 +151,9 @@ impl ImageCopyCaptureHandler for State {
     }
 
     /// Queued for the next frame of the outputs, which paces a client capturing continuously.
-    /// On DRM an output draws only when something asks it to, so the frame asks: an output
-    /// where nothing changes would otherwise never draw, and never answer it.
+    /// On DRM an output draws only when something asks it to, so the frame asks: a powered
+    /// output where nothing changes would otherwise never draw, and never answer it. An output
+    /// the power client has turned off still does not draw, so its frame waits until it is on.
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
         if self.lock.is_some() {
             frame.fail(CaptureFailureReason::Stopped);
