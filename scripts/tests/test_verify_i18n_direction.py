@@ -15,15 +15,27 @@ PROGRAM = "forge/specs/athanor-bar/athanor-bar-1.0.0/src/i18n.rs"
 
 class DirectionProblemsTest(unittest.TestCase):
     def test_a_direct_call_is_reported_with_its_line(self):
-        for call in ("catalog().is_rtl()", "catalog.is_rtl()", "catalog_ref().is_rtl()",
-                     "Catalog::is_rtl(&c)"):
-            problems = verify.direction_problems(PROGRAM, f"fn a() {{}}\nfn b() -> bool {{ {call} }}\n")
-            self.assertEqual(len(problems), 1, call)
-            self.assertTrue(problems[0].startswith(f"{PROGRAM}:2 "), problems[0])
+        calls = {
+            "catalog": "fn a() {}\nfn b() -> bool { catalog().is_rtl() }\n",
+            "a local": "fn a() {}\nlet c = Catalog::load(D)?; c.is_rtl()\n",
+            "a chain": "fn a() {}\nCatalog::load(D).unwrap_or_else(f).is_rtl()\n",
+            "a closure": "fn a() {}\nCatalog::load(D).map(|c| c.is_rtl())\n",
+            "a path": "fn a() {}\nCatalog::load(D).map(Catalog::is_rtl)\n",
+            "a wrapped call": "fn a() {}\ncatalog\n    .is_rtl()\n",
+            "a line that begins with it": "fn a() {}\n    .is_rtl()\n",
+            "after a url": 'fn a() {}\nlet u = "https://x"; catalog.is_rtl()\n',
+        }
+        for name, text in calls.items():
+            problems = verify.direction_problems(PROGRAM, text)
+            self.assertEqual(len(problems), 1, name)
+            line = 3 if name == "a wrapped call" else 2  # a wrapped call is named at its `.is_rtl(`
+            self.assertTrue(problems[0].startswith(f"{PROGRAM}:{line} "), (name, problems[0]))
 
     def test_the_shared_function_and_comments_pass(self):
         text = "// catalog.is_rtl() is the catalog's rule\nathanor_i18n::is_rtl(DOMAIN)\n"
         self.assertEqual(verify.direction_problems(PROGRAM, text), [])
+        url = 'let u = "https://x"; athanor_i18n::is_rtl(DOMAIN)\n'
+        self.assertEqual(verify.direction_problems(PROGRAM, url), [])
 
     def test_athanor_i18n_may_call_it(self):
         self.assertEqual(
