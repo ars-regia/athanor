@@ -285,6 +285,14 @@ class Names(unittest.TestCase):
         unit = {"unit/b.service": "[Service]\n# ProtectSystem=strict below\nProtectSystem=strict\n"}
         self.assertEqual(messages("It sets `ProtectSystem=strict` (`unit/b.service:2`).", unit), [])
 
+    def test_a_setting_whose_value_changed_is_a_finding(self):
+        unit = {"unit/c.service": "[Service]\nProtectSystem=full\n"}
+        out = messages("It sets `ProtectSystem=strict` (`unit/c.service:2`).", unit)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("the file sets `ProtectSystem` to another value", out[0])
+        # a key that the file does not set is no token, as before
+        self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/c.service:2`).", unit), [])
+
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
         self.assertEqual(messages("`grant` and `x.rs` at `src/x.rs:1`."), [])
