@@ -635,11 +635,11 @@ impl State {
             .map(|area| area.loc.x + area.size.w)
             .max()
             .unwrap_or(0);
-        self.space.map_output(output, (x, 0));
+        self.place_output(output, (x, 0).into());
         let reach = crate::output_management::REACH;
         let area = self.space.output_geometry(output);
         if area.is_some_and(|area| area.loc.x + area.size.w > reach) {
-            self.space.map_output(output, (0, 0));
+            self.place_output(output, (0, 0).into());
         }
         if let Some(shown) = self.space.output_geometry(output) {
             let known = output.user_data().get_or_insert(KnownArea::default);
@@ -1158,6 +1158,16 @@ impl State {
         self.refresh_pointer();
         self.request_redraw();
         true
+    }
+
+    /// Maps `output` at `at` in the space, and tells its clients the new position through
+    /// `wl_output.geometry` and `xdg_output.logical_position`, which mapping it in the space
+    /// alone does not: without it every client sees each output at the origin.
+    pub fn place_output(&mut self, output: &Output, at: Point<i32, Logical>) {
+        self.space.map_output(output, at);
+        if output.current_location() != at {
+            output.change_current_state(None, None, None, Some(at));
+        }
     }
 
     /// Fits the maximised windows to their `home_area` again, and the full-screen ones to their

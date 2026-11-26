@@ -55,6 +55,7 @@ tab
 A switch on switch
 Its second line describes it
 tab
+Open a terminal: Super+T button
 Screen reader off.
 Screen reader on.
 Gallery

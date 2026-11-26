@@ -186,6 +186,8 @@ def fill_page(page, container, text):
         row.attach(detail, 0, 1, 1, 1)
         row.attach(switch, 1, 0, 1, 2)
         container.append(row)
+        # A shortcut capture reads and draws as a button until it is activated.
+        container.append(Gtk.Button(label=text["shortcut"]))
     elif page == "values":
         scale = Gtk.Scale(
             orientation=Gtk.Orientation.HORIZONTAL,

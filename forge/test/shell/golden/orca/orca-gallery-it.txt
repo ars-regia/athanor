@@ -55,6 +55,7 @@ tabulazione
 Un interruttore attivo selettore
 La sua seconda riga lo descrive
 tabulazione
+Apri un terminale: Super+T pulsante
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria

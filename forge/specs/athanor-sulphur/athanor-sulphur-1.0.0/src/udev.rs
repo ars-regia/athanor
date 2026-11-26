@@ -1000,7 +1000,7 @@ impl State {
         outputs.sort_by_key(|(x, _)| *x);
         let mut x = 0;
         for (_, output) in outputs {
-            self.space.map_output(&output, (x, 0));
+            self.place_output(&output, (x, 0).into());
             x += self
                 .space
                 .output_geometry(&output)
