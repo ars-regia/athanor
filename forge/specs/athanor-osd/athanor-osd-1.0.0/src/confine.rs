@@ -1,11 +1,14 @@
 //! The overlay's Landlock (doc_osd.md OD12), applied at start while the process has one
-//! thread, before the audio model's thread, the Tokio runtime and any GIO object. Step 1 grants
-//! what volume and the microphone use, and nothing of the later steps (backlights, the COSMIC
-//! files, i2c-dev):
+//! thread, before the audio model's thread, the Tokio runtime and any GIO object. Steps 1 and 2
+//! grant what volume, the microphone and the two backlights use, and nothing of the later steps
+//! (the COSMIC files, i2c-dev):
 //!
 //! - read beneath `/usr` and `/etc`: the libraries, the icon themes and fonts of the image,
 //!   fontconfig's configuration, the GSettings schemas, dconf's profile, libpulse's
 //!   `client.conf` and the machine id;
+//! - read `/sys/class/backlight` and `/sys/class/leds`, to list them, and the device directory
+//!   of the screen's backlight and of the keyboard's that the battery model chooses
+//!   ([`backlights`]);
 //! - read the user's fonts, icon themes and fontconfig configuration, the dconf database
 //!   GSettings reads for the appearance and the reduced-motion preference (T1), the schema
 //!   directories GLib reads besides `/usr`, and libpulse's `~/.config/pulse` (its cookie);
@@ -25,6 +28,7 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use athanor_services::battery::{self, Backlight};
 use athanor_unit::dirs::{self, Checked, Dirs};
 use athanor_unit::sandbox;
 
@@ -60,6 +64,35 @@ pub fn overlay(dirs: &Dirs, var: impl Fn(&str) -> Option<OsString>) -> Grants {
         Err(error) => tracing::warn!(%error, "dconf's runtime directory is not granted"),
     }
     Grants::new(write, var)
+}
+
+/// The backlights the battery model reads, and the grants that reading them needs.
+#[derive(Debug)]
+pub struct Backlights {
+    /// The class entry of the screen's backlight; `None` without one.
+    pub screen: Option<PathBuf>,
+    /// The class entry of the keyboard's backlight; `None` without one.
+    pub keyboard: Option<PathBuf>,
+    pub read: Vec<PathBuf>,
+}
+
+/// The two class directories, to list them, and the device directories of the screen's and the
+/// keyboard's backlight, chosen as the battery model chooses them. A class entry is a link into
+/// `/sys/devices`, and Landlock checks the file the link leads to. Landlock opens each granted
+/// path through its links, once, when the rules are built, so a chosen class entry grants its
+/// device directory, and no other device of either class is granted. A device that appears
+/// after the start is not granted until the next start.
+pub fn backlights(backlight_root: &Path, leds_root: &Path) -> Backlights {
+    let entry = |root: &Path, chosen: Option<Backlight>| chosen.map(|b| root.join(b.name));
+    let screen = entry(backlight_root, battery::read_backlight(backlight_root));
+    let keyboard = entry(leds_root, battery::read_keyboard_backlight(leds_root));
+    let mut read = vec![backlight_root.to_owned(), leds_root.to_owned()];
+    read.extend(screen.iter().chain(&keyboard).cloned());
+    Backlights {
+        screen,
+        keyboard,
+        read,
+    }
 }
 
 /// `name` as an absolute path, or `None`.
