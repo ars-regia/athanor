@@ -609,17 +609,20 @@ impl State {
     /// Keeps the input devices, each given `input.toml` as it is added; a touchpad added while
     /// the touchpad key has turned them off starts off (D16).
     fn track_devices(&mut self, event: &InputEvent<LibinputInputBackend>) {
-        let settings = self.input_settings();
+        let settings = match event {
+            InputEvent::DeviceAdded { .. } => Some(self.input_settings()),
+            _ => None,
+        };
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
-        match event {
-            InputEvent::DeviceAdded { device } => {
+        match (event, settings) {
+            (InputEvent::DeviceAdded { device }, Some(settings)) => {
                 let mut device = device.clone();
                 input_settings::apply(&mut device, &settings, drm.touchpads_off);
                 drm.devices.push(device);
             }
-            InputEvent::DeviceRemoved { device } => {
+            (InputEvent::DeviceRemoved { device }, _) => {
                 drm.devices.retain(|kept| kept != device);
             }
             _ => {}
