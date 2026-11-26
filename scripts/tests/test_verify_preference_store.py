@@ -140,6 +140,30 @@ class PreferenceStoreTest(unittest.TestCase):
             found, ["input.toml has writer modules besides input: settings"]
         )
 
+    def test_a_write_that_names_no_pub_const_of_its_module_fails(self):
+        writes = {
+            "literal": 'fn set(store: &Store) {\n    store.update("input.toml", |_, _| Ok(()))\n}\n',
+            "private": 'const F: &str = "input.toml";\nfn set(store: &Store) {\n'
+            "    store\n        .update(F, |_, _| Ok(()))\n}\n",
+            "other": "fn set(store: &Store) {\n    store.update(input::FILE, |_, _| Ok(()))\n}\n",
+            "path": 'fn set(store: &Store) {\n    Store::update(store, "input.toml", |_, _| Ok(()))\n}\n',
+        }
+        for case, source in writes.items():
+            with self.subTest(case):
+                found, _ = problems({CLIENT + "settings.rs": source})
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith(CLIENT + "settings.rs:"), found)
+                self.assertIn("not a `pub const` of this module", found[0])
+
+    def test_a_write_through_the_module_s_pub_const_and_a_test_s_write_pass(self):
+        source = INPUT.replace(
+            "#[cfg(test)]",
+            "fn set(store: &Store) {\n    store.update(FILE, |_, _| Ok(()))\n}\n"
+            "fn hash(h: &mut Hasher) {\n    h.update(b\"x\");\n}\n#[cfg(test)]",
+        ) + 'fn t(store: &Store) {\n    store.update("x.toml", |_, _| Ok(()));\n}\n'
+        found, _ = problems({CLIENT + "input.rs": source})
+        self.assertEqual(found, [])
+
     def test_a_file_the_table_does_not_list_fails(self):
         found, _ = problems(
             {CLIENT + "bindings.rs": 'pub const FILE: &str = "bindings.toml";\n'}

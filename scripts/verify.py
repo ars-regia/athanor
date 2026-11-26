@@ -4589,7 +4589,14 @@ STORE_NAMERS = {
         "ConfigurationDirectory= of the import's unit, which makes the directory (ADR-0150 point 6)",
 }
 # A file of the store a writer module of the client names: `pub const FILE: &str = "input.toml";`.
-STORE_WRITER_FILE = re.compile(r'^pub const \w+: &str = "([\w-]+\.toml)";', re.M)
+STORE_WRITER_FILE = re.compile(r'^pub const (\w+): &str = "([\w-]+\.toml)";', re.M)
+# A write of the store in the client: the name the method form `.update(` takes first, and the
+# path form `Store::update(` or `Locked::update(` second, after the receiver. A one-argument
+# `update` of another type (a hasher's) has no comma before its statement ends and is not one.
+STORE_UPDATE_CALL = re.compile(r"\.update\s*\(\s*([^,;]*?)\s*,"
+                               r"|\b(?:Store|Locked)::update\s*\(\s*[^,;]*,\s*([^,;]*?)\s*,")
+# The module of the store's type, whose two `update`s forward the name they are given.
+STORE_TYPE_MODULE = "store.rs"
 STORE_MODULE = re.compile(r"^`athanor_sulphur_client::(\w+)`$")
 
 
@@ -4679,8 +4686,21 @@ def preference_store_problems(root):
     written = {}
     for path in sorted(walk(root / STORE_CLIENT / "src", ".rs")):
         source = read(path).split("#[cfg(test)]")[0]
-        for file in STORE_WRITER_FILE.findall(source):
+        consts = set()
+        for const, file in STORE_WRITER_FILE.findall(source):
             written.setdefault(file, []).append(path.stem)
+            consts.add(const)
+        if path.name == STORE_TYPE_MODULE:
+            consts = {"name"}
+        # Each write names its file through a `pub const` of its own module, so the consts above
+        # are every file a module writes, and a second writer of a file is seen (decision 38).
+        for call in STORE_UPDATE_CALL.finditer(source):
+            name = call.group(1) if call.group(1) is not None else call.group(2)
+            if name not in consts:
+                line = source.count("\n", 0, call.start()) + 1
+                problems.append(f"{path.relative_to(root).as_posix()}:{line}: writes the store with "
+                                f"`{name}`, not a `pub const` of this module that names its file "
+                                f"(decision 38)")
     for file, module in sorted(tabled.items()):
         source = root / STORE_CLIENT / "src" / f"{module}.rs"
         if not source.is_file():
