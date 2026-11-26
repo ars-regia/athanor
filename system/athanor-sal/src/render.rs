@@ -889,7 +889,7 @@ pub fn paint<C: Canvas>(
                 ctx.set_stroke(Stroke::new(1.5));
                 ctx.stroke_path(&chevron);
             }
-            Kind::Button(_) | Kind::Toggle { .. } => {
+            Kind::Button(_) | Kind::Toggle { .. } | Kind::Shortcut(_) => {
                 let active = matches!(widget.kind, Kind::Toggle { active: true, .. });
                 let (fill, ink) = if active {
                     (t.accent, t.on_accent)

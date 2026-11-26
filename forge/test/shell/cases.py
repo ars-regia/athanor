@@ -87,7 +87,7 @@ SURFACES = {
 # page with the focus on its toggle in the page row.
 GALLERY_PAGES = {
     "buttons": 5,
-    "choices": 3,
+    "choices": 4,
     "values": 1,
     "lists": 2,
     "text": 1,
