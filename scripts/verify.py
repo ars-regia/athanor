@@ -6744,8 +6744,9 @@ LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?
 # `S/src/a.rs:12` cites `forge/specs/x/x-1.0.0/src/a.rs:12` (#1428).
 PATH_ABBREVIATION = re.compile(r"\(`([^`\s]+)`, below `([^`\s/]+)`\)")
 # What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
-# `cosmic-osd.service`), or a bare snake_case or `::` path.
-CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
+# `cosmic-osd.service`), a backticked `Key=value` setting (`ProtectSystem=strict`, #1548), or a
+# bare snake_case or `::` path.
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*=[^`\s]+(?=`)|(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
 FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
 CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
 # The length from which a range is too long for one citation: such a range holds almost any word, so it proves nothing.
@@ -6815,9 +6816,12 @@ def holds_token(text, token, quoted=False):
     """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
     inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open. With
     `quoted` (a JSON file) the token must be a whole string: `"cosmic-settings"`, not
-    `cosmic-settings-daemon` or `cosmic-osd.service`."""
+    `cosmic-settings-daemon` or `cosmic-osd.service`. A `Key=value` token is held as written,
+    whole: `ProtectSystem=strict`, not `ProtectSystem=strictly` or `ProtectSystem=full`."""
     if quoted:
         return f'"{token}"' in text
+    if "=" in token:
+        return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", text) is not None
     word = re.escape(token.rsplit("::", 1)[-1])
     return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
 

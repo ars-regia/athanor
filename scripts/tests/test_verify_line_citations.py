@@ -247,6 +247,22 @@ class Names(unittest.TestCase):
         self.assertEqual(messages("| `grant` | the `unheld` at `src/x.rs:2` |"), [])
         self.assertEqual(len(messages("| `grant` the `unheld` at `src/x.rs:2` |")), 1)
 
+    def test_a_key_value_setting_is_a_token_held_as_written(self):
+        # #1548: `ProtectSystem=strict` was no token, so a citation of it could not be placed again
+        unit = {"unit/a.service": "[Service]\nProtectSystem=strict\nProtectHome=yes\n# ProtectSystem off\n"}
+        cite = "The unit sets `ProtectSystem=strict` (`unit/a.service:{}`)."
+        self.assertEqual(messages(cite.format(2), unit), [])
+        for line in (3, 4):
+            with self.subTest(line=line):
+                out = messages(cite.format(line), unit)
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("does not hold `ProtectSystem=strict`", out[0])
+        self.assertFalse(verify.holds_token("ProtectSystem=strictly", "ProtectSystem=strict"))
+        # the bare words keep their reading: `strict`, the last of them, is the token
+        bare = "The unit sets `ProtectSystem`=`strict` (`unit/a.service:{}`)."
+        self.assertEqual(messages(bare.format(2), unit), [])
+        self.assertEqual(len(messages(bare.format(3), unit)), 1)
+
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
         self.assertEqual(messages("`grant` and `x.rs` at `src/x.rs:1`."), [])
