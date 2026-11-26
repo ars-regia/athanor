@@ -288,6 +288,8 @@ pub struct State {
     /// The magnifier and the colour filters, and the managers of athanor-a11y-v1.
     pub a11y: crate::a11y::A11y,
     pub focus_theme: crate::focus_theme::FocusTheme,
+    /// `input.toml`, as last read (`input_settings.rs`).
+    pub input_settings: crate::input_settings::InputSettings,
     /// The keyboard's repeat, rate then delay as `repeat_info` takes them: `REPEAT_RATE` and
     /// `REPEAT_DELAY` until `xkb_config` sets it.
     pub repeat: (i32, i32),
@@ -540,6 +542,7 @@ impl State {
             sent_group: 0,
             a11y: crate::a11y::A11y::default(),
             focus_theme: crate::focus_theme::FocusTheme::default(),
+            input_settings: Default::default(),
             repeat: (REPEAT_RATE, REPEAT_DELAY),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),

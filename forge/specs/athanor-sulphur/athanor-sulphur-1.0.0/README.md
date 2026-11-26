@@ -287,6 +287,16 @@ keymap under both compositors. The seat keeps its group, clamped to the new layo
 Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
 most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
 keymap is the environment's and the repeat 25 per second after 200 ms.
+The input settings are Athanor's own `athanor/sulphur/input.toml` under the configuration root
+(`src/input_settings.rs`, `doc_own_stack.md` decision 38), TOML with `schema = 1`, read at start
+and after each change as `xkb_config` is: `[mouse]`, `[touchpad]`, one `[[device]]` per libinput
+device by its `name`, and `[keyboard]`'s `numlock_state`, which sets Num Lock once, at the start.
+Each libinput device takes them when it appears and again at each change; a key that is absent
+takes libinput's default for the device and, for a touchpad, the values cosmic-comp shipped (click
+method by finger count, two-finger scrolling, tap and tap-and-drag on, drag lock off). A file that
+is not TOML, has another schema, or is not a regular file of at most 64 KiB leaves the settings as
+they were, and a key that is unknown, of the wrong type or out of range is skipped alone; both
+are logged. While the touchpad key holds the touchpads off, it wins over their `state`.
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
 granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
