@@ -1,4 +1,4 @@
-# base: registry.fedoraproject.org/fedora:45@sha256:62d5eaec1e8a34f6cb94934f806420754611834c7eef8a4f50b9cdbcd1c90c10
+# base: registry.fedoraproject.org/fedora:45@sha256:806e6bc4b2f302baca3b0f53382416888f6ad46476063a2b47e72fc29968ae25
 # kernel: 7.3.4-300.fc45
 # inputs: b0cfec56625e7ce792b3f93d1e427f8a57c5b72b8bcb7f611471d8c796450762
 # key: 4f50a6114cd5c6976a7f1179655a4b02f577861e
@@ -21,7 +21,7 @@ f9baaf6f16e202b2a2afbbe62beb67c86c519044e28d99e904f625193cf97179  cmake-filesyst
 754ced4b57ee135ee3cb45b160c1a45e25b820a4ac3d1db23e96ba8502ba0dfb  cmake-srpm-macros-4.3.0-7.fc45.noarch.rpm  cmake/4.3.0/7.fc45
 e414f2d136f33e9f6ab73a913d58eadad193f3bdee64b3f1583ee5e81d11d4b2  cpio-2.15-10.fc45.x86_64.rpm  cpio/2.15/10.fc45
 66fe200396e674df921ed78d496a6179d3ff2f586dcfb2b013cf4749155cd84b  cpp-16.2.1-3.fc45.x86_64.rpm  gcc/16.2.1/3.fc45
-11d9d3a9c7285f1009c5b2d70e96f752b4448d433fc1464dc35974ddae2b7cbf  cryptsetup-libs-2.8.8-1.fc45.x86_64.rpm  cryptsetup/2.8.8/1.fc45
+0856802e60efccece1580c9423823087b68cd74870e520d0d72c036b2fd3ef2a  cryptsetup-libs-2.8.9-1.fc45.x86_64.rpm  cryptsetup/2.8.9/1.fc45
 23cda1f4a50860f34329407d2740830dad1294a450258c052568bb58bca8d5d1  dbus-libs-1.16.4-2.fc45.x86_64.rpm  dbus/1.16.4/2.fc45
 23763de0365f296372531acc67c3a585c383fd95f01bdceacff8abb8ccf6b5b6  debugedit-5.4-1.fc45.x86_64.rpm  debugedit/5.4/1.fc45
 e1f4d66e00a816724b2d52b56d91390f263bc5928a748d0b8fd6c3f209077782  device-mapper-1.02.217-2.fc45.x86_64.rpm  lvm2/2.03.43/2.fc45
@@ -135,8 +135,8 @@ a4bb05c1c7c7d83dd29df260ade877e45f431f1921798d3da8201d0dd824e82a  nss-util-3.133
 73a45af0d5dd2118f2812e456ec9713b7028c74762b992821128d2f6acbafd86  ocaml-srpm-macros-11-4.fc45.noarch.rpm  ocaml-srpm-macros/11/4.fc45
 ceb747ff29762b5825bd49926b01623a110f8cdbaaed96ccb168ab4540fd6613  oniguruma-6.9.10-5.fc45.x86_64.rpm  oniguruma/6.9.10/5.fc45
 366df3478c46ddff4b4f93034b01207c69429198da83dc599d22f8c46e55cb37  openblas-srpm-macros-2-22.fc45.noarch.rpm  openblas-srpm-macros/2/22.fc45
-d5a8f227a2e1046b10b2bea5ea4db73dd210b22d0d695efb5a3acbaffa23ab8b  openssh-10.5p1-1.fc45.x86_64.rpm  openssh/10.5p1/1.fc45
-3cdc26a05c1411ca2e6e782347df5fc32b05ee7e09e1746fd71bda7b4a89fb11  openssh-clients-10.5p1-1.fc45.x86_64.rpm  openssh/10.5p1/1.fc45
+fce48605d74ec669de31cf1d240ad4771055c6ba9de64fa02e331bdad7a2a90b  openssh-10.6p1-1.fc45.x86_64.rpm  openssh/10.6p1/1.fc45
+f056455d54c38ffd4b0bad47458bda4bec863538679ea2298cf81c077fef2903  openssh-clients-10.6p1-1.fc45.x86_64.rpm  openssh/10.6p1/1.fc45
 cb48b06cba09eb5f3b21235c4f6169339a71beece2b4e4ec3b4fc8fcbfba9325  openssl-4.0.3-1.fc45.x86_64.rpm  openssl/4.0.3/1.fc45
 cd97032c5975bf1c620d5e4f08a6ac307d61dfa550528a0b43c47bd13e4cf8dc  openssl-devel-4.0.3-1.fc45.x86_64.rpm  openssl/4.0.3/1.fc45
 a12f25c672e269eebdf363ebd1568826995e8d6079339ce9e96c5469d39b43c2  package-notes-srpm-macros-0.20-2.fc45.noarch.rpm  package-notes/0.20/2.fc45
@@ -214,7 +214,7 @@ a07db2e5f71784490a664b6e968070a100f59b1fade7de985ed9194efe8eaea0  perl-generator
 92cd44f065e5264c37b10ceb358c10da46b6471ed0469becd316091ca6284276  perl-if-0.61.000-527.fc45.noarch.rpm  perl/5.44.0/527.fc45
 883224813baab83fafb20f93971b391578e098ff041cc53dff9891cb71338b95  perl-interpreter-5.44.0-527.fc45.x86_64.rpm  perl/5.44.0/527.fc45
 3cd560e46ad52ad9f9891302a8b5711525a6123de0746870ebb2309a74fa55f1  perl-lib-0.65-527.fc45.x86_64.rpm  perl/5.44.0/527.fc45
-54f3898654afa4b78f52b276bb0ac22528b6485e2eabf8d8c2b1fa28a0a546f9  perl-libnet-3.16-1.fc45.noarch.rpm  perl-libnet/3.16/1.fc45
+ffeeede0bb8b5c95ca167fa1da84b7958ec37e7edd8dc703c1a14306346ed164  perl-libnet-3.17-1.fc45.noarch.rpm  perl-libnet/3.17/1.fc45
 31b1e2bdb6194ff2e19ca07f034b9d2f9530ad9081c2c117f667feed4771bb4a  perl-libs-5.44.0-527.fc45.x86_64.rpm  perl/5.44.0/527.fc45
 b1dfd28cbc56d7b7bd049e8fba278bbb822c6218f6189bf17ffec4713028887e  perl-locale-1.13-527.fc45.noarch.rpm  perl/5.44.0/527.fc45
 8dda492bb5c670bb6549ba4ae1ffdb7ba4e43561f61c78720bfcc915d283dc2f  perl-macros-5.44.0-527.fc45.noarch.rpm  perl/5.44.0/527.fc45
@@ -272,8 +272,8 @@ fec5d3036c0592185ed8942b58d7735da8b4319ed2f5857ee1cd314e38171ca1  rust-src-1.100
 a58ce1036c27ac26fba581e590a1776cbfdaa4185ef08c6f36944ceb40b3bb66  rust-srpm-macros-28.5-2.fc45.noarch.rpm  cargo-rpm-macros/28.5/2.fc45
 35f58252e68cedeefffc3e6833195dcf18e70b28c54c3f490a3cf51d528eeb34  rust-std-static-1.100.0-1.fc45.x86_64.rpm  rust/1.100.0/1.fc45
 e3a75d3d20ef030677e0b4a83a97308c08cf68e8de0a431c490e61bceae0d62d  rustfmt-1.100.0-1.fc45.x86_64.rpm  rust/1.100.0/1.fc45
-8f3eda8c7261bd73429cf8abd31d5c155d7674ee81ceee844145aaba8f3bba6b  selinux-policy-45.24-1.fc45.noarch.rpm  selinux-policy/45.24/1.fc45
-5c293be469e50d4c07bbbc52613f9e81cbfbb97fa18a16f7a3c2b4e8162b27c8  selinux-policy-targeted-45.24-1.fc45.noarch.rpm  selinux-policy/45.24/1.fc45
+9731457311bba6a3575ff063084c128410fa1faa7a1e8e0106a2f6825fb29347  selinux-policy-45.25-1.fc45.noarch.rpm  selinux-policy/45.25/1.fc45
+07d649cfb02b05d38f94eb6a41237fdf7fe9178a160ef4f2440cf3218ef759b8  selinux-policy-targeted-45.25-1.fc45.noarch.rpm  selinux-policy/45.25/1.fc45
 5eca577b7cbedbe667924c7bb4f3acbf880529d74d4102c9ba9d3a58c7613345  systemd-262.1-1.fc45.x86_64.rpm  systemd/262.1/1.fc45
 c98dbc5fe87d4211f705d6827c08747130c7c702f20ba9ed45d12aac1b1c6d11  systemd-boot-unsigned-262.1-1.fc45.x86_64.rpm  systemd/262.1/1.fc45
 bad96bea86f3be842c51bf5abca326cbc8aed91084e8381a0cf37c78e43d26de  systemd-rpm-macros-262.1-1.fc45.noarch.rpm  systemd/262.1/1.fc45
