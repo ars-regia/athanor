@@ -54,6 +54,53 @@ write a new record that names the old one in its Context, then change only the `
 line of the old record to `superseded by <new id>` or `amended by <new id>`. A record
 that amends only part of another says which part in its Consequences.
 
+## Who owns which decision
+
+A decision lives in one document, the one that owns its kind. Every other document cites it and
+does not restate it.
+
+| Kind of decision | Owner |
+| --- | --- |
+| A direction: what Athanor is, what it refuses, how it is built, shipped, secured or run | The decision record (ADR) |
+| A contract: the interfaces, behaviour, limits and tests of a component | The specification, `docs/architecture/doc_<area>.md` |
+| What is in which release | `docs/operations/release-1.0.md`, and only that document |
+
+- **Release placement.** `docs/operations/release-1.0.md` is the only owner of release
+  placement. The records decide the changes (for example ADR-0141 decisions 2 and 4, ADR-0138
+  and ADR-0135) and `release-1.0.md` states the result (its sections 2 to 4). A record that
+  moves something between releases is a decision of direction, and `release-1.0.md` takes its
+  result in the same pull request; a specification that needs a placement cites that document
+  and does not state one.
+- **Amendments.** A record is never amended inside itself: an `## Amendment` heading in a
+  decision record is refused, except in the three records that
+  `forge/config/decision-amendment-kept.txt` names (ADR-0121, ADR-0122 and ADR-0126). That list
+  only shrinks: against the base it adds no entry, and an entry whose record is gone or has
+  lost the heading fails. An amendment is a new record that names the one it amends, and the old
+  record's `status` then reads `amended by <new id>` ("Superseding and amending", above). A
+  claim in a document under `docs/` outside this folder that "ADR-X amends ADR-Y" is true only while the status of
+  ADR-Y names ADR-X, and a claim about a number that has no record fails.
+  `scripts/verify.py decisions` checks all of it. The check knows a record by its front-matter
+  id and by `ADR-NNNN`, its file number, reads each list item as a sentence of its own, and
+  skips code fences. It reads "X amends ADR-Y", "amends item 2 of ADR-Y", "amends decision 3
+  of ADR-Y", "amends D12 of ADR-Y", "ADR-Y as amended by ADR-X" and "ADR-Y item 6, amended by
+  ADR-X", with a link (`[ADR-Y](path)` too), backticks or bold around the id and with "ADR 0044"
+  spelled with a space; X is the subject of the clause: for "which amends" the nearest ADR
+  before the pronoun, and when the clause names none or two joined by "and", the status of
+  ADR-Y only has to read `amended by`. It does not read a negation ("never amends", "does not
+  amend", "is not amended by", "or amend" after a negation), a modal form ("may", "would"), a
+  hypothesis word followed by the id, then only auxiliaries or adverbs, then the verb ("If
+  ADR-X amends", "whether ADR-X later amends", "if ADR-Y is ever amended by"), a second target
+  after one `amends`, "amended" without `by ADR-X` (a date, or a specification item as in "VL8
+  as amended by ADR-0077"), an id that is not `ADR-NNNN` (A2-1, W1-OLD) or that continues
+  (ADR-00011, ADR-0001-x), "amends the text, the revision or the decision of ADR-Y", "which
+  ADR-X amends", "amended by" more than 60 characters after the target, `amends "ADR-Y"` or
+  `amended by "ADR-X"` in quotes, or `_ADR-Y_`. A relative clause reads "which" or "that" with
+  at most three words before the verb. Any other shape is read as a claim with the first
+  ungoverned ADR as its subject: a conditional or a relative clause that the check misreads
+  passes only when the status of ADR-Y already names that subject, and otherwise fails and the
+  sentence is reworded; it never passes unread. Without a base, and on the first pull request,
+  when the base lacks the list file, the ratchet against the base is skipped with a note.
+
 ## Approval
 
 The maintainer approves every record. Once CODEOWNERS defines areas, the owner of the
@@ -63,7 +110,10 @@ area approves records tagged with it.
 
 `python3 scripts/verify.py decisions` verifies the front matter of every record, that
 ids are unique, that this index lists every record and nothing else, and that every
-`superseded by` or `amended by` target exists.
+`superseded by` or `amended by` target exists. It also checks the two ways
+a record is amended (see "Who owns which decision"): no `## Amendment` heading outside the
+three kept records, and every "ADR-X amends ADR-Y" of a document under `docs/` outside this folder is
+confirmed by the status of ADR-Y.
 
 ## Index
 
