@@ -3334,10 +3334,14 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
-# every name of them in the crate. connection.rs binds the rest when a client connects, so it
-# counts for a target only when code outside the crate names `Client`, the one type that
-# connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
-# does, binds nothing through it (maintainer decision, 2026-11-07).
+# every name of them in the crate. workspaces.rs binds the workspace manager when a client
+# connects with `Client::connect` or `Client::connect_wayland`, so it counts for a target only
+# when a file outside the crate names `Client`, under any alias, and makes one of those calls
+# (another type's `::connect`, as athanor-idle's `Display::connect`, alone is not one): a
+# crate that reads only the crate's `idle` module, as athanor-idle does, binds nothing through it
+# (maintainer decision, 2026-11-07), and one that connects with
+# `Client::connect_without_workspaces`, as the portal's Screenshot backend does, never binds the
+# manager. connection.rs names no privileged global and counts for every target.
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -3355,15 +3359,16 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              "system/athanor-sulphur-client/src/windows.rs":
              ("system/athanor-sulphur-client",
               re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
-             "system/athanor-sulphur-client/src/connection.rs":
+             "system/athanor-sulphur-client/src/workspaces.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\bClient\b"))}
+              re.compile(r"(?s)\bClient\b.*::\s*connect(?:_wayland)?\b(?!\s*::)"
+                         r"|::\s*connect(?:_wayland)?\b(?!\s*::).*\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
 # first watch of the accessibility state, at the first watch of the tiling and at the first watch
 # of the windows. Each names at least one, or the check no longer sees what the client binds.
-CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
+CLIENT_BINDS = {"system/athanor-sulphur-client/src/workspaces.rs": "at connect",
                 "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
                 "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
                 "system/athanor-sulphur-client/src/keyboard_group.rs":

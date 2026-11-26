@@ -75,7 +75,9 @@ async fn take(dir: PathBuf) -> Result<Vec<Shot>, String> {
 fn connect(dir: PathBuf) -> Result<Client, String> {
     let connection = wayland_client::Connection::connect_to_env()
         .map_err(|err| format!("cannot connect to the compositor: {err}"))?;
-    let client = Client::connect_wayland(&connection)
+    // Without the workspaces: the backend's line of the compositor's allow-list grants only
+    // the capture globals.
+    let client = Client::connect_without_workspaces(&connection)
         .map_err(|err| format!("cannot connect to the compositor: {err}"))?;
     client.set_capture_dir(dir);
     Ok(client)

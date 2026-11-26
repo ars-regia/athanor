@@ -52,7 +52,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - `doc_shell.md` (row 8 of the replacement table, `doc_shell.md:75`) has cosmic-settings-daemon leave in stage 8, so all three behaviours must have a replacement by then.
   - **The live configuration on this machine.** The user's `xkb_config` is `layout:"us", variant:"intl"`. `/etc/vconsole.conf` holds `KEYMAP=us-intl`, `XKBLAYOUT=us` and `XKBVARIANT=intl`. `/etc/locale.conf` holds `LANG=it_IT.utf8`.
   - **What the shell does with layouts today.**
-    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:54-56, 268-274, 320-325`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
+    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:53-55, 276-282, 328-333`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
     - The greeter shows a read-only label (`athanor-greeter-ui`, `ui.rs:88-122`).
     - `athanor-greeter-session` exports only `LANG`, `LANGUAGE`, `LC_MESSAGES` and `LC_TIME` from `/etc/locale.conf` and no XKB variable. The greeter cosmic-comp's own `~/.config/cosmic/com.system76.CosmicComp/v1/` under `/var/lib/greetd` is empty. So the greeter's layout follows neither `/etc/vconsole.conf` nor localed (inferred, spike S4).
     - The greeter's client binds the compositor's main socket (`/usr/libexec/athanor-greeter-client`), so it sees the keyboard-layout global.

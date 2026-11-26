@@ -124,7 +124,7 @@ delegate_noop!(State: ignore AthanorToplevelManagerV1);
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::connection::Client;
+    use crate::connection::{Client, Error};
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use std::sync::{Arc, Mutex};
@@ -206,12 +206,20 @@ pub(crate) mod tests {
     pub(crate) fn connect(
         offered: &'static [&'static str],
     ) -> (Connection, Client, Arc<Mutex<Vec<String>>>) {
+        connect_with(offered, Client::connect_wayland)
+    }
+
+    /// As [`connect`], the client connecting through `connect`.
+    pub(crate) fn connect_with(
+        offered: &'static [&'static str],
+        connect: fn(&Connection) -> Result<Client, Error>,
+    ) -> (Connection, Client, Arc<Mutex<Vec<String>>>) {
         let (ours, theirs) = UnixStream::pair().expect("socket pair");
         let bound = Arc::new(Mutex::new(Vec::new()));
         let record = bound.clone();
         std::thread::spawn(move || serve(theirs, offered, &record));
         let connection = Connection::from_socket(ours).expect("connection");
-        let client = Client::connect_wayland(&connection).expect("client");
+        let client = connect(&connection).expect("client");
         (connection, client, bound)
     }
 
