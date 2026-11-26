@@ -692,7 +692,7 @@ impl State {
         // An output given no place keeps its own; one enabled again went to the right above.
         for plan in plans {
             if let Some(at) = plan.wanted.as_ref().and_then(|wanted| wanted.position) {
-                self.space.map_output(&plan.output, at);
+                self.place_output(&plan.output, at);
             }
         }
         self.fit_to_outputs();
