@@ -22,3 +22,7 @@ updates:
       # system/athanor-sal/vendor/ (#638); it moves when that copy's PATCHES.md entry goes.
       - dependency-name: "accesskit_unix"
         versions: [">=0.24.1"]
+      # athanor-sal takes the xkbcommon that smithay-client-toolkit links (its Cargo.toml), so a
+      # program on it holds one copy of the wrapper; it moves when smithay-client-toolkit moves (#1537).
+      - dependency-name: "xkbcommon"
+        versions: [">=0.9"]
