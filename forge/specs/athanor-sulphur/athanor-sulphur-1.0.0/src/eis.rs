@@ -947,7 +947,7 @@ impl State {
                 if self.eis_aims_at_backend() {
                     return;
                 }
-                self.eis_pointing(|state| crate::input::scroll(state, &pointer, &event));
+                self.eis_pointing(|state| crate::input::scroll(state, &pointer, &event, 1.0));
             }
             InputEvent::TouchDown { event } => {
                 let device = device_key(id, &Event::device(&event));

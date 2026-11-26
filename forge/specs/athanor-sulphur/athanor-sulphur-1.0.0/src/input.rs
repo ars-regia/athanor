@@ -381,7 +381,8 @@ impl State {
                 if self.scroll_zooms(&event) {
                     return;
                 }
-                scroll(self, &pointer, &event);
+                let factor = self.scroll_factor(&event.device());
+                scroll(self, &pointer, &event, factor);
             }
             // A gesture goes to the focused surface; one still disarms Super alone (D4).
             event @ (InputEvent::GestureSwipeBegin { .. }
@@ -810,23 +811,26 @@ pub(crate) const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
 pub(crate) const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
 
 /// A scroll, to the pointer's focus, framed: what reads the scroll for a binding comes before
-/// (`State::scroll_zooms`), and an injected scroll has none (`eis.rs`).
+/// (`State::scroll_zooms`), and an injected scroll has none (`eis.rs`). `factor` is the
+/// device's scroll speed (`input.toml`'s `scroll_factor`), as cosmic-comp applies it.
 pub(crate) fn scroll<I: InputBackend>(
     state: &mut State,
     pointer: &PointerHandle<State>,
     event: &impl PointerAxisEvent<I>,
+    factor: f64,
 ) {
     let source = event.source();
     let mut frame = AxisFrame::new(event.time()).source(source);
     for axis in [Axis::Horizontal, Axis::Vertical] {
-        let discrete = event.amount_v120(axis);
+        let discrete = event.amount_v120(axis).map(|discrete| discrete * factor);
         let amount = event
             .amount(axis)
+            .map(|amount| amount * factor)
             .unwrap_or_else(|| discrete.unwrap_or(0.0) * 15.0 / 120.0);
         if amount != 0.0 {
             frame = frame.value(axis, amount);
             if let Some(discrete) = discrete {
-                frame = frame.v120(axis, discrete as i32);
+                frame = frame.v120(axis, discrete.round() as i32);
             }
         }
         if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
