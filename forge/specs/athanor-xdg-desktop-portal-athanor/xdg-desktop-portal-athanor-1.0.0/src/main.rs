@@ -1,10 +1,13 @@
 //! xdg-desktop-portal-athanor, Athanor's backend for xdg-desktop-portal (doc_portal.md).
 //!
-//! It serves `org.freedesktop.impl.portal.Settings` (PT5). The main thread runs the GLib
-//! main loop that GSettings reports changes on; D-Bus runs on a Tokio thread of its own
-//! (PT2). Landlock confines the process before either thread starts (PT3).
+//! It serves `org.freedesktop.impl.portal.Settings` (PT5) and the silent
+//! `org.freedesktop.impl.portal.Screenshot` (PT8). The main thread runs the GLib main loop
+//! that GSettings reports changes on and the compositor's client captures on; D-Bus runs on a
+//! Tokio thread of its own (PT2). Landlock confines the process before either thread starts
+//! (PT3).
 
 mod caller;
+mod screenshot;
 mod settings;
 
 use std::env;
@@ -18,6 +21,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.athanor";
 const PATH: &str = "/org/freedesktop/portal/desktop";
+/// The unit's runtime directory beneath `$XDG_RUNTIME_DIR`: the screenshots in flight and
+/// their capture buffers (PT3, PT8).
+const RUNTIME_DIR: &str = "xdg-desktop-portal-athanor";
 
 /// The errors the backend answers with.
 #[derive(Debug, zbus::DBusError)]
@@ -51,7 +57,7 @@ fn main() -> ExitCode {
     let (changes, received) = tokio::sync::mpsc::unbounded_channel();
     let (store, _watched) = settings::watch(changes, None, None);
     std::thread::spawn(move || {
-        if let Err(err) = serve(store, received) {
+        if let Err(err) = serve(store, received, runtime.join(RUNTIME_DIR)) {
             tracing::error!(error = %err, "the portal's D-Bus service ended");
             std::process::exit(1);
         }
@@ -60,29 +66,39 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Before any thread starts. Reads stay open (PT3); the only write is dconf's shared-memory
+/// Before any thread starts. Reads stay open (PT3); the writes are dconf's shared-memory
 /// flag beneath `$XDG_RUNTIME_DIR/dconf`, which GSettings maps to learn that a value changed,
-/// granted by the descriptor `dirs::private_dir` checked. No TCP. The chooser's and the
-/// screenshots' grants of PT3 join with the first window.
+/// and the screenshots in flight beneath the unit's runtime directory (PT8), each granted by
+/// the descriptor `dirs::private_dir` checked. No TCP. The chooser's grants of PT3 join with
+/// the first window.
 fn confine(runtime: &Path) -> Result<(), Box<dyn StdError>> {
     sandbox::ensure_single_threaded()?;
-    sandbox::restrict_writes(&[dirs::private_dir(runtime, "dconf")?], &[])?;
+    sandbox::restrict_writes(
+        &[
+            dirs::private_dir(runtime, "dconf")?,
+            dirs::private_dir(runtime, RUNTIME_DIR)?,
+        ],
+        &[],
+    )?;
     sandbox::deny_tcp()
 }
 
-/// Serves the Settings interface on the session bus and forwards every change the GLib
-/// thread reports as `SettingChanged`. Returns only on failure.
+/// Serves the Settings and Screenshot interfaces on the session bus and forwards every
+/// change the GLib thread reports as `SettingChanged`. Returns only on failure.
 fn serve(
     store: Arc<RwLock<settings::Store>>,
     mut received: UnboundedReceiver<settings::Change>,
+    dir: PathBuf,
 ) -> Result<(), Box<dyn StdError>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     runtime.block_on(async move {
         let query = zbus::connection::Builder::session().build().await?;
+        let outputs = screenshot::Outputs::new(query.clone(), dir.clone());
         let conn = zbus::connection::Builder::session()
             .serve_at(PATH, settings::Portal::new(store, query))
+            .serve_at(PATH, athanor_portal::screenshot::Screenshot::new(outputs, dir))
             .name(BUS_NAME)
             .build()
             .await?;

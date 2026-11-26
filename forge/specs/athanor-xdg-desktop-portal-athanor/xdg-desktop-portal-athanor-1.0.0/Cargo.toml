@@ -8,11 +8,14 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
 athanor-portal = { path = "../../../../system/athanor-portal" }
+# The outputs' pictures for a screenshot (doc_portal.md, PT8), without GTK.
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false, features = ["capture"] }
 athanor-unit = { path = "../../../../system/athanor-unit", features = ["watchdog"] }
 gio = { workspace = true }
 glib = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+wayland-client = { workspace = true }
 zbus = { workspace = true }
 
 [lints]

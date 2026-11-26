@@ -6881,11 +6881,13 @@ name = "xdg-desktop-portal-athanor"
 version = "1.0.0"
 dependencies = [
  "athanor-portal",
+ "athanor-sulphur-client",
  "athanor-unit",
  "gio",
  "glib",
  "tokio",
  "tracing",
+ "wayland-client",
  "zbus 6.2.1",
 ]
 

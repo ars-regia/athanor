@@ -26,6 +26,10 @@ Slice=session.slice
 RuntimeDirectory=dconf
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
+# The screenshots in flight and their capture buffers (doc_portal.md, PT3 and PT8), granted by
+# Landlock the same way. The mode and the preservation above apply to it too: a file answered
+# to the frontend outlives a restart, and the backend's sweep removes it after an hour.
+RuntimeDirectory=xdg-desktop-portal-athanor
 
 ProtectSystem=strict
 PrivateTmp=yes
