@@ -60,9 +60,10 @@ What the forge does today, read on `iso-v0` at c774a2056:
    kernel follows for `azoth-debuginfo` (`doc_kernel_build.md` K2). Core dumps stay off
    (`doc_session.md` SN8).
 2. **The route is rpm's own debuginfo subpackage, made by `find-debuginfo` of debugedit.** One
-   mechanism serves every forge RPM, Rust and C alike, workspace and upstream; it writes the
-   `.debug` files under `/usr/lib/debug` with links by build ID, which `eu-addr2line`,
-   `llvm-symbolizer`, gdb and debuginfod read as they are; and its output is RPMs, the form
+   mechanism can serve every forge RPM, Rust and C alike, workspace and upstream, once the specs
+   that strip on their own stop (below); it writes the `.debug` files under `/usr/lib/debug`
+   with links by build ID, which `eu-addr2line`, `llvm-symbolizer`, gdb and debuginfod read as
+   they are; and its output is RPMs, the form
    `azoth-debuginfo` already has. The other route, `objcopy --only-keep-debug` after a Rust
    split-debuginfo build, covers Rust only and would leave the C packages to a second mechanism.
    - `forge/config/rpmmacros`: the global `%debug_package %{nil}` goes;
@@ -77,8 +78,19 @@ What the forge does today, read on `iso-v0` at c774a2056:
      image's `org.opencontainers.image.revision` label names the commit that holds the sources).
      `%_optflags` gains `-g1`, the line tables of gcc and clang alike, and `%_ldflags` gains
      `-Wl,--build-id=sha1`.
-   - The specs drop their own `%global debug_package %{nil}`, but for those of the exempt list
-     below.
+   - The 32 specs that set `%global debug_package %{nil}` themselves drop it, but for
+     `athanor-dart-sass` of the exempt list below. Six more rely on the global of
+     `forge/config/rpmmacros` line 9 alone: `athanor-tetragon` and `athanor-semantic-db` gain the
+     line and join the exempt list; `athanor-keylime` is `noarch` and gets no debuginfo package;
+     `athanor-matugen`, `cosmic-comp` and `greenboot-rs` gain debuginfo once their own stripping
+     goes.
+   - Five specs strip on their own today, which would leave `find-debuginfo` nothing to split:
+     `cosmic-comp.spec` line 66 and `greenboot-rs.spec` lines 83–84 pass `-C strip=symbols` and
+     `CARGO_PROFILE_RELEASE_STRIP=symbols`, `athanor-matugen.spec` line 27 passes
+     `-C strip=symbols`, `polkit.spec` lines 151–155 run `llvm-strip --strip-unneeded` on every
+     ELF file, and `athanor-cliphist.spec` line 29 links with `go build -ldflags '-s -w'`, with no
+     build ID. The implementing work removes that stripping, and links `athanor-cliphist` with
+     `-ldflags '-B gobuildid'` and without `-s -w`; a spec it cannot fix joins the exempt list.
    - `Cargo.toml`, `[profile.release]`: `debug = "line-tables-only"` and `strip = false`. The
      stripping moves to `find-debuginfo`, which strips the shipped binary as fully as
      `strip = true` does today and keeps the symbol table in the `.debug` file. The toolkit
@@ -87,48 +99,70 @@ What the forge does today, read on `iso-v0` at c774a2056:
    - `.cargo/config.toml`: both rustflags tables gain `-C link-arg=-Wl,--build-id=sha1`. A spec
      that builds Rust with flags of its own passes the same option.
    - `flake.nix`: `debugedit` joins the builder's build tools.
-   - A spec that repackages an upstream release's prebuilt, stripped binaries keeps
-     `%global debug_package %{nil}`: they carry no debug data to split, and `find-debuginfo` would
-     rewrite them. Two do today: `athanor-dart-sass`, whose Dart runtime has no build ID and whose
-     spec says it is never stripped or rewritten, and `athanor-tetragon`, whose Go executables come
-     stripped from the upstream tarball (read on the desktop: `tetragon` has a GNU build ID and no
-     symbol table). Only a spec that `forge/config/debuginfo-exempt.txt` names may, and the list
-     only shrinks. Relocatable objects, such as the eBPF objects of `athanor-tetragon`, are not
-     executables or shared objects and take nothing.
-   - The macro names and defaults above were read in rpm 4.20.1 of nixpkgs on the desktop; the
-     implementing pull request confirms them on the builder's rpm.
+   - A spec whose package has no debug data to split carries `%global debug_package %{nil}` and
+     is named in `forge/config/debuginfo-exempt.txt`; no other spec may, and the list only
+     shrinks. Three are today: `athanor-dart-sass`, which repackages the prebuilt Dart runtime and
+     snapshot of an upstream release, with no build ID, and whose spec says they are never
+     stripped or rewritten; `athanor-tetragon`, whose Go executables come stripped from the
+     upstream tarball (read on the desktop: `tetragon` has a GNU build ID and no symbol table);
+     and `athanor-semantic-db`, which ships a shell script and no ELF file. Relocatable objects,
+     such as the eBPF objects of `athanor-tetragon`, are not executables or shared objects and
+     take nothing.
+   - `forge/config/rpmmacros` defines `%_enable_debug_packages`, the `%install` wrapper and
+     `%_missing_build_ids_terminate_build` itself: the first two come from Fedora's
+     `redhat-rpm-config`, which the builder lacks, and the rpm 4.20.1 of nixpkgs carries the third
+     only as a commented-out line (`lib/rpm/macros` line 472). `%__find_debuginfo`,
+     `%_build_id_links`, `%_unique_build_ids`, `%_include_minidebuginfo` and
+     `%_debugsource_packages` are rpm's own, read in that rpm on the desktop; the revision of the
+     specifications confirms them on the builder's rpm.
    - rpm's default `%_unique_build_ids` seeds the build ID with the package's version and
      release, and the release carries the content hash (`.h<hash>`, `doc_build_system.md`
      section 5): one build ID names one build of one NEVRA.
    - Line tables only, as #1397 decided: function names and file and line for each frame, no
      variables or types.
 3. **The debuginfo RPMs are published by the package job, beside the package image, and never
-   reach a tier repository.** The job of `call-dag-compile.yml` that pushes
-   `<registry>/<owner>/athanor-forge-<package>:hash-<hash>` pushes
-   `<registry>/<owner>/athanor-forge-<package>-debuginfo:hash-<hash>` too, a `FROM scratch`
-   image of the package's debuginfo RPMs with the same `tier.content.sha256` label, and signs and
-   attests it keyless with `forge/scripts/sign_attest.sh`, unchanged, and an SBOM that Syft writes
-   for it, as it does for the package image. The registry host is `REGISTRY_HOST` and the owner
-   is the repository's, as for the package images; no owner is written down. A package with no ELF
-   file pushes none. `fetch_repo_rpms.sh` never reads these images, so the tier repositories and
-   the system image build are unchanged. The package's debuginfo shares its package image's
-   lifecycle, so whatever package image a run reads, its debuginfo is there too.
+   reach a package image or a tier repository.** Today both would take them:
+   `forge/scripts/build_spec.sh` line 85 copies every `RPMS/*/*.rpm` into `forge/RPMS`,
+   `forge/scripts/dag_package.sh` line 92 copies `RPMS/*.rpm` into the package image,
+   `fetch_repo_rpms.sh` builds the tier repositories from those images, and only the filter of
+   `system/Containerfile` keeps them out of the system image. `build_spec.sh` therefore puts the
+   debuginfo RPMs in a directory of their own, `forge/RPMS-debuginfo`, and the `publish` step of
+   `dag_package.sh` copies each directory into its own image, so the package image, and through
+   it the tier repository, holds the shipped RPMs only; the filter of `system/Containerfile`
+   stays as a second guard.
+   - The job of `call-dag-compile.yml` pushes
+     `<registry>/<owner>/athanor-forge-<package>-debuginfo`, a `FROM scratch` image of those RPMs
+     with the same `tier.content.sha256` label, signs and attests it keyless with
+     `forge/scripts/sign_attest.sh`, unchanged, and an SBOM that Syft writes for it, and gives it
+     its `hash-<hash>` tag, all before the `tag` step gives the package image its own
+     `hash-<hash>` tag (`tag_signed_image.sh`). A package image with a hash tag therefore always
+     has its debuginfo.
+   - `check_idempotency.sh` counts a package whose image is tagged and whose
+     `-debuginfo:hash-<hash>` image is missing, for a spec off the exempt list, as not built, and
+     the job builds it again. An exempt spec pushes none.
+   - The registry host is `REGISTRY_HOST` and the owner is the repository's, as for the package
+     images; no owner is written down. The package's debuginfo shares its package image's
+     lifecycle, so whatever package image a run reads, its debuginfo is there too.
 4. **One artifact per image build, `athanor-debuginfo`, next to the images it describes.** After
    CI5 `dag-system-image` pushes the system images of the run, it pushes
    `<registry>/<owner>/athanor-debuginfo`, a `FROM scratch` image holding the debuginfo RPMs of
-   every forge package those images install and a file `build-ids.txt`, one line for each
-   ELF file: build ID, NEVRA, installed path. It takes each package's debuginfo by the digest of
-   `:hash-<hash>` from the run's `dag-hashes` map, verified as `resolve_node_image.sh` verifies
-   a package image (a trusted run of `call-dag-compile.yml`, the hash label); any other answer
-   stops the job. It carries the images' `io.athanor.forge-tier<N>.digest` and
-   `org.opencontainers.image.revision` labels. Its tags are the run's `<run_id>` and, for each
-   image the run pushed, `<image>-<12 hex of its digest>` (for example
-   `athanor-system-3f2a9c1b7d40`), the form of the kernel's `<nvr>-k<12 hex>` tag. The
-   variants are built from the same tiers, so one artifact serves every image of the run, under
-   one tag for each. CI5 writes its digest to a digests file of its own, `debuginfo-digests.txt`
-   (repository, tag, digest), which `system/image-digests.sh` checks against an allow-list that
-   names only `athanor-debuginfo`, as `--check-kernel` does for the kernel's repositories; CI33
-   signs that digest, never a tag.
+   every forge package those images install, one layer for each RPM, and a file `build-ids.txt`
+   in a layer of its own, one line for each ELF file: build ID, NEVRA, installed path. It takes
+   each package's debuginfo by the digest of `:hash-<hash>` from the run's `dag-hashes` map,
+   verified as `resolve_node_image.sh` verifies a package image (a trusted run of
+   `call-dag-compile.yml`, the hash label); any other answer stops the job. It carries the
+   images' `io.athanor.forge-tier<N>.digest` and `org.opencontainers.image.revision` labels.
+   Its tags are the run's `<run_id>` and, for each image the run pushed,
+   `<image>-<12 hex of its digest>` (for example `athanor-system-3f2a9c1b7d40`), the form of the
+   kernel's `<nvr>-k<12 hex>` tag, and `<image>-<version>`, the image's version of UT9 that
+   `/usr/lib/os-release` and the crash report carry (decision 6). The variants are built from the
+   same tiers, so one artifact serves every image of the run, under its tags for each. CI5
+   writes its digest to a digests file of its own, `debuginfo-digests.txt` (repository, tag,
+   digest), which `system/image-digests.sh` checks against an allow-list that names only
+   `athanor-debuginfo`, as `--check-kernel` does for the kernel's repositories, and that
+   `scripts/ci/release_candidate.py check` checks against the API's record of the build run, as
+   it checks the image and kernel digests files before `sign-images` (`release.yml`, the
+   `candidate` job). CI33 signs only that checked digest, never a tag.
 5. **It is signed as `azoth-debuginfo` is.** The push of CI5 signs it keyless, the build record.
    CI33 `sign-images`, in the environment `signing` (the alias of `signing-images` during the
    image key rotation, `signing-images` after it), signs its digest with the project key whose
@@ -139,24 +173,36 @@ What the forge does today, read on `iso-v0` at c774a2056:
    approval is added. The package-level images keep only their keyless signature: the artifact
    of decision 4 holds copies of their RPMs, so the key signature covers every byte a reader
    uses.
-6. **A backtrace is symbolised offline, from the report and the artifact.**
-   1. From the machine or the report: the program's path, the frame addresses, the address of
-      `athanor_unit::panic::install` the report prints, the booted image digest
-      (`bootc status --format json`) and, for a check, the build ID (`eu-readelf -n <program>`).
-   2. Verify `<registry>/<owner>/athanor-debuginfo:athanor-system-<12 hex>` (or the variant's
-      tag) as CI33 does, with
+6. **A backtrace is symbolised offline, from the report and the artifact.** The procedure covers
+   the workspace programs that install the panic hook of `athanor-unit`. The C packages,
+   `cosmic-comp` and the other upstream programs publish debuginfo too, but while core dumps stay
+   off nothing records their addresses: their debuginfo has no consumer until a later decision
+   gives it one.
+   - **The panic hook prints the build ID.** The crash report of SN8 holds the image version from
+     `/usr/lib/os-release` and the last 50 journal lines of the failed run, and a long backtrace
+     can push the `install at` line out of them. The hook therefore ends its output, after the
+     backtrace and just before the abort, with one line that carries the program's GNU build ID
+     and the address of `install`. It reads the note from its own executable with safe code: the
+     workspace denies `unsafe_code`, and this adds no exception.
+   1. From the report: the program, the frame addresses, the last line's build ID and `install`
+      address, and the image version.
+   2. Verify `<registry>/<owner>/athanor-debuginfo:<image>-<version>` (or, from the machine, the
+      `<image>-<12 hex>` tag of the booted digest that `bootc status --format json` gives) as
+      CI33 does, with
       `cosign verify --key athanor-image-<n>.pub --new-bundle-format=false --insecure-ignore-tlog=true <reference>`,
       keep the digest it verified, copy that digest
       (`skopeo copy docker://<repository>@<digest> oci:<directory>`) and unpack its layer.
-   3. Find the build ID in `build-ids.txt`, and unpack that NEVRA's debuginfo RPM into a
-      directory `D` (`rpm2cpio <rpm> | cpio -idm`).
+   3. Find the build ID in `build-ids.txt`; a build ID it lacks means the wrong artifact. Unpack
+      that NEVRA's debuginfo RPM into a directory `D` (`rpm2cpio <rpm> | cpio -idm`).
    4. A Rust program of the workspace is position-independent: its load bias is the printed
       address of `install` less the value of that symbol in the `.debug` file (`llvm-nm` or
-      `eu-nm` on `D/usr/lib/debug/.build-id/<xx>/<rest>.debug`). Symbolise each frame address less
-      the bias with `llvm-symbolizer --obj=<.debug file>`, which demangles Rust, or with
-      `eu-addr2line -f -i -e <.debug file>`.
+      `eu-nm` on `D/usr/lib/debug/.build-id/<xx>/<rest>.debug`). Take the bias from each frame
+      address and, for every frame but the first, 1 more, since a return address points past its
+      call. Symbolise the result with `llvm-symbolizer --obj=<.debug file>`, which demangles Rust,
+      or with `eu-addr2line -f -i -e <.debug file>`.
 
-   `doc_session.md` section 1 names the artifact and points at these steps once they are built.
+   The revision of the specifications (Consequences) writes these steps and the hook's line into
+   `doc_session.md`.
 7. **Retention follows the system images, not the kernel's two releases.** `athanor-debuginfo`
    is kept while the janitor (`forge/scripts/clean_ghcr.sh`) keeps any system image whose digest
    one of its tags names, with whatever signs it (the rule of the `athanor-system` packages,
@@ -168,16 +214,22 @@ What the forge does today, read on `iso-v0` at c774a2056:
    **Storage** is an estimate, not a measurement. The 22 x86_64 forge RPMs on the maintainer's
    desktop whose release carries a content hash (the four of `RELEASE_BY_HAND`, `cosmic-comp`
    among them, are not counted) hold 81 ELF files, 55 of them eBPF objects of `athanor-tetragon`,
-   339 MiB stripped (measured on 2026-11-26), the two exempt specs of decision 2 included, so an
+   339 MiB stripped (measured on 2026-11-26), the exempt specs of decision 2 included, so an
    upper bound on what is split; line tables under the RPM's zstd level 19 are estimated at tens
    to a few hundred MiB per artifact, below the size of the system image it stands beside. The
-   implementing pull request measures it on a spec build and records the figure in
+   registry stores that once for each kept image, the images of the last 90 days and every
+   promoted one (UT10), less what they share: with one layer for each debuginfo RPM, a package
+   unchanged between two image builds is one blob for both. The implementing pull request
+   measures the size per artifact and the total over the kept set, and records them in
    `doc_build_system.md`.
 8. **The image gains nothing.** No package, file or byte of debug data is added to it: the
    debuginfo RPMs reach no tier repository, the shipped RPMs carry no `/usr/lib/.build-id` link
-   and no `.gnu_debugdata`, and the binaries stay stripped. The only change to a shipped ELF file
-   is the GNU build-ID note of decision 2, a 20-byte SHA-1 with its note header (computed, not
-   measured), which is what ties it to its debug data.
+   and no `.gnu_debugdata`, and the binaries stay stripped. A shipped ELF file changes in three
+   ways, none of them debug data: it gains the GNU build-ID note of decision 2, a 20-byte SHA-1
+   with its note header (computed, not measured), which ties it to its debug data; it gains a
+   `.gnu_debuglink` section naming its `.debug` file and that file's checksum, which `eu-strip -f`
+   of `find-debuginfo` writes; and it loses its `.comment` section, which the same strip
+   removes.
 
 ## Consequences
 
@@ -193,11 +245,15 @@ What the forge does today, read on `iso-v0` at c774a2056:
   - **`forge/scripts/check_elf_hardening.py`**, on every spec build (Spec Build Check and the
     DAG): every ELF executable and shared object of a shipped RPM, outside the exempt specs, has
     a GNU build ID and no `.debug_*` section and no `.symtab`, and the spec's debuginfo RPM holds
-    `/usr/lib/debug/.build-id/<xx>/<rest>.debug` for each of those build IDs.
+    `/usr/lib/debug/.build-id/<xx>/<rest>.debug` for each of those build IDs, with a
+    `.debug_line` section.
+  - **An end-to-end symbolisation test**: a workspace test program that panics, built by the spec
+    path, whose backtrace decision 6's steps turn into the function and line of the panic.
   - **The image checks**: the system image holds no `/usr/lib/debug` and no
     `/usr/lib/.build-id`, no ELF executable or shared object of a forge RPM in it has a
     `.debug_*` section or a `.symtab`, and CI33 fails a release whose `athanor-debuginfo` is
-    missing, is unsigned, or lacks in `build-ids.txt` a build ID of a shipped ELF file.
+    missing, is unsigned, or lacks in `build-ids.txt` the build ID of a shipped ELF executable or
+    shared object outside the exempt specs.
 - The implementing work edits `system/sign-images.sh`, `system/image-digests.sh` (its allow-list
   of repositories), the registries.d entries that `sign-images.sh` renders, today
   `system/kernel-registries.d.yaml.in`, so that skopeo writes the sigstore attachment of
@@ -206,14 +262,34 @@ What the forge does today, read on `iso-v0` at c774a2056:
   `polkit`, which sit on the authentication path. This record approves the direction; the pull
   request that edits those files still asks before it edits them.
 - The release profile's link time and the shell rig's and local builds' binaries grow by the
-  line tables; the rig's binaries are not shipped. The figure is measured with decision 7's.
-- Specifications that apply it, in the implementing pull requests, as small amendments approved
-  with their code ([ADR-0145](0145-small-spec-amendment-in-the-code-pull-request.md)):
-  `doc_build_system.md` sections 3, 5 and 6 (`debugedit` in the builder, the package-level
-  image, the artifact); `doc_ci.md`, the registry table and CI33 `sign-images` (a row for
-  `athanor-debuginfo` and its signing); `doc_session.md` section 1, whose sentence "symbolising
-  the addresses waits for a debuginfo artifact, not yet published (#1397)" then names the artifact
-  and decision 6's steps. `doc_kernel_build.md` does not change.
+  line tables; the rig's binaries are not shipped. The Rust caches of
+  [ADR-0140](0140-cache-the-shell-jobs-rust-builds.md) grow with them: their 10 GB budget then
+  holds targets built with `debug = "line-tables-only"` and `strip = false`. The implementing
+  pull request measures both with decision 7's figure.
+- **The implementing work starts with a revision of the specifications under ADR-0074**, in a
+  pull request of its own, approved before any code is written. The small-amendment path of
+  [ADR-0145](0145-small-spec-amendment-in-the-code-pull-request.md) does not apply: its decision
+  2 excludes a new component, a new trust boundary and any amendment in a "Stop and ask" area,
+  and this work adds new images and an artifact, new registry entries and a new input of the
+  signing job. The revision covers:
+  - `doc_build_system.md` section 3 (`debugedit` and the macros of decision 2 in the builder),
+    section 5 (the split of decision 3, the `-debuginfo` image, its push order and the
+    idempotency check) and section 6 (the artifact of decision 4 beside the system images);
+  - `doc_ci.md` section 1.3 (rows for the `-debuginfo` images and `athanor-debuginfo`, their
+    tags and signatures), CI4, CI5, CI21 (the janitor) and CI33 `candidate`, `sign-images` and
+    `verify-images` (decisions 4 and 5);
+  - `doc_pipeline.md` section 5, the kept set of the janitor: an `athanor-debuginfo` digest whose
+    tag names a kept system image, and each `-debuginfo` image with its package image
+    (decision 7);
+  - `doc_update_trust.md` UT10, the list of what `clean_ghcr.sh` never deletes (decision 7);
+  - `doc_session.md` section 1, whose sentence "symbolising the addresses waits for a debuginfo
+    artifact, not yet published (#1397)" then names the artifact and decision 6's steps, and SN8,
+    the build-ID line of the panic hook.
+
+  `doc_kernel_build.md` and `doc_report_problem.md` do not change: the report already carries
+  the image version. ADR-0145's path stays open for what it covers, a corrected macro name or
+  path found while building, in a section outside the signing areas, since that narrows nothing
+  and adds no component.
 - #1397 tracks the implementation and closes with it; the last item of #1352 is settled by this
   record and closes with the same work.
 - This record amends no other record. ADR-0076 decision 2 stands: the RPMs, the debuginfo ones
