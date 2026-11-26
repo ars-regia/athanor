@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 use zbus::fdo;
 use zbus::message::Header;
 use zbus::object_server::ObjectServer;
@@ -406,6 +406,10 @@ struct Shared<H: Host> {
     host: H,
     /// The unit's runtime directory, where the files in flight are written.
     dir: PathBuf,
+    /// Held from a screenshot's capture to its file: each holds every output's picture, the
+    /// composed image and its PNG in memory, and a caller that asks again and again waits for
+    /// its turn instead of multiplying them.
+    turn: Mutex<()>,
 }
 
 impl<H: Host> Shared<H> {
@@ -428,7 +432,11 @@ pub struct Screenshot<H: Host>(Arc<Shared<H>>);
 
 impl<H: Host> Screenshot<H> {
     pub fn new(host: H, dir: PathBuf) -> Screenshot<H> {
-        Screenshot(Arc::new(Shared { host, dir }))
+        Screenshot(Arc::new(Shared {
+            host,
+            dir,
+            turn: Mutex::new(()),
+        }))
     }
 
     /// Composes, sweeps and writes, off the runtime's thread: a layout of several outputs is
@@ -482,12 +490,15 @@ impl<H: Host> Screenshot<H> {
         let taken = tokio::select! {
             biased;
             () = closed.notified() => None,
-            shots = self.0.host.capture() => Some(shots),
+            taken = async {
+                let turn = self.0.turn.lock().await;
+                (self.0.host.capture().await, turn)
+            } => Some(taken),
         };
         if let Err(error) = server.remove::<Request<H>, _>(&handle).await {
             tracing::error!(%error, %handle, "the request's object was not removed");
         }
-        let Some(shots) = taken else {
+        let Some((shots, _turn)) = taken else {
             return Ok(answer(1));
         };
         let kept = match shots {
