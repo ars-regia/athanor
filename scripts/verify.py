@@ -6816,12 +6816,18 @@ def holds_token(text, token, quoted=False):
     """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
     inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open. With
     `quoted` (a JSON file) the token must be a whole string: `"cosmic-settings"`, not
-    `cosmic-settings-daemon` or `cosmic-osd.service`. A `Key=value` token is held as written,
-    whole: `ProtectSystem=strict`, not `ProtectSystem=strictly` or `ProtectSystem=full`."""
+    `cosmic-settings-daemon` or `cosmic-osd.service`. A `Key=value` token is held as written and
+    whole: not after a word character or `-`, and followed by whitespace, the end of the text or
+    another character than a word character, `-`, `.`, `/`, `:`, `,` or `=`. So
+    `ProtectSystem=strict` is not held by `ProtectSystem=strictly` or `ProtectSystem=full`,
+    `WantedBy=a.target` not by `WantedBy=a.target.wants`, `Foo=bar` not by `Foo=bar,baz` or
+    `Foo=bar:baz`, and `CapabilityBoundingSet=CAP_A` is held by `CapabilityBoundingSet=CAP_A CAP_B`.
+    A comment that holds the whole setting holds it too (#1553).
+    """
     if quoted:
         return f'"{token}"' in text
     if "=" in token:
-        return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", text) is not None
+        return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w./:,=-])", text) is not None
     word = re.escape(token.rsplit("::", 1)[-1])
     return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
 
