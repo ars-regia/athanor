@@ -2051,7 +2051,7 @@ compositor and that the own compositor did not yet offer:
       - `windows.toml`: the workspace and window keys of SE14 (the workspaces' mode, layout
         and wraparound, the action on typing, automatic tiling and its behaviour, the active window's
         hint, focus follows the pointer and its delay, the pointer follows focus, and the edge
-        snap threshold).
+        snap threshold). *Amended on 2026-11-26 (maintainer decision, 2026-11-26), #1417:* the edge snap threshold is not a key of `windows.toml` until #1417, which snaps a floating window to the edges of the screen, has approved text: the compositor snaps no window to an edge, so the file refuses `edge_snap_threshold` as an unknown key and Settings shows no row for it.
       A key that is absent takes the compositor's default, compiled into it: for the touchpad the
       values cosmic-comp shipped (click method by finger count, two-finger scrolling, tap and drag
       on; SE16), which leave the image with cosmic-comp. The files are written only through
