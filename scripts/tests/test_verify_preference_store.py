@@ -71,6 +71,40 @@ class PreferenceStoreTest(unittest.TestCase):
             ["forge/specs/x/data/x.service:2", "system/athanor-shelld/src/seed.rs:1"],
         )
 
+    def test_every_form_of_the_store_s_directory_fails(self):
+        holes = {
+            "system/a/src/path.rs": 'let p = Path::new(".config/athanor/sulphur/input.toml");\n',
+            "system/b/src/join.rs": 'let p = home.join("athanor").join("sulphur");\n',
+            "system/c/src/split.rs": "let p = home\n    .join(\"athanor\")\n    .join(\"sulphur\");\n",
+            "system/d/src/fmt.rs": 'let p = format!("{xdg}/athanor/sulphur/bindings.toml");\n',
+            "system/e/src/slice.rs": 'let p: PathBuf = [home, "athanor", "sulphur"].iter().collect();\n',
+            "forge/specs/f/data/f.service": "[Service]\nReadWritePaths=%h/.config/athanor/sulphur\n",
+            "forge/specs/g/data/g.service.d/10-x.conf": "[Service]\nReadWritePaths=%h/.config/athanor/sulphur/\n",
+            "forge/specs/h/data/h.path": "[Path]\nPathChanged=%h/.config/athanor/sulphur/input.toml\n",
+        }
+        for name, text in holes.items():
+            with self.subTest(name):
+                found, _ = problems({name: text})
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith(name + ":"), found)
+
+    def test_system_paths_and_comments_pass(self):
+        found, _ = problems(
+            {
+                "system/a/src/ok.rs": 'const L: &str = "/usr/share/athanor/sulphur/privileged-clients";\n'
+                "// home.join(\"athanor\").join(\"sulphur\") in a comment\n"
+                'const N: &str = "athanor/sulphurous";\n'
+                'const M: &str = "other-athanor/sulphur";\n',
+                "forge/specs/b/data/b.service": "[Service]\n# ~/.config/athanor/sulphur\n"
+                "ReadOnlyPaths=/etc/xdg/athanor/sulphur\n",
+            }
+        )
+        self.assertEqual(found, [])
+
+    def test_the_repository_passes(self):
+        found, _ = verify.preference_store_problems(verify.ROOT)
+        self.assertEqual(found, [])
+
     def test_a_row_with_two_writer_modules_or_none_fails(self):
         table = TABLE.replace(
             "`athanor_sulphur_client::keyboard`",

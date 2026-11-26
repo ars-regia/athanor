@@ -4564,8 +4564,15 @@ def check_boundary():
 STORE_CLIENT = "system/athanor-sulphur-client/"
 STORE_TABLE_DOC = "docs/architecture/doc_own_stack.md"
 STORE_TABLE_HEADER = re.compile(r"^\|\s*File\s*\|\s*Family\s*\|\s*Writer module\s*\|")
-# The store's directory in a string, not a system path such as /usr/share/athanor/sulphur.
-STORE_NAMED = re.compile(r"[\"'=]athanor/sulphur(?:/|[\"'\s]|$)")
+# The store's directory, named as the path components athanor/sulphur after anything but a
+# system root (format!("{xdg}/athanor/sulphur"), %h/.config/athanor/sulphur), or as the string
+# literals "athanor" and "sulphur" a few characters apart, across lines (a .join chain).
+STORE_PATH = re.compile(r"(?<![\w.-])athanor/sulphur(?![\w.-])")
+STORE_JOINED = re.compile(r"[\"']athanor[\"'][^\"']{0,60}?[\"']sulphur[\"']")
+# The token before a STORE_PATH match that makes it a system path, /usr/share/athanor/sulphur.
+STORE_SYSTEM_ROOT = re.compile(r"(?:^|[\s\"'=(,])/(?:usr|etc|run|var|opt|srv)/(?:[\w.-]+/)*$")
+# Rust source and the files of systemd that can name a directory (a drop-in is a .conf).
+STORE_SUFFIXES = (".rs", ".service", ".socket", ".timer", ".path", ".mount", ".conf")
 # Code outside the client that may name the store, and why.
 STORE_NAMERS = {
     "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/input_settings.rs":
@@ -4605,20 +4612,30 @@ def store_table(text):
     return rows, problems
 
 
+def store_namings(text, marker):
+    """The line numbers at which text, its comment lines starting with marker blanked, names
+    the preference store's directory."""
+    code = "\n".join("" if line.lstrip().startswith(marker) else line
+                     for line in text.split("\n"))
+    found = {code.count("\n", 0, m.start()) + 1 for m in STORE_JOINED.finditer(code)}
+    for m in STORE_PATH.finditer(code):
+        before = code[code.rfind("\n", 0, m.start()) + 1:m.start()]
+        if not STORE_SYSTEM_ROOT.search(before):
+            found.add(code.count("\n", 0, m.start()) + 1)
+    return sorted(found)
+
+
 def preference_store_problems(root):
     """(problems, notes) of the store's rules under root (ADR-0150 point 2)."""
     root = Path(root)
     problems, notes = [], []
     for base in BOUNDARY_DIRS:
-        for suffix in (".rs", ".service"):
+        for suffix in STORE_SUFFIXES:
             for path in walk(root / base, suffix):
                 relative = path.relative_to(root).as_posix()
                 if relative.startswith(STORE_CLIENT) or relative in STORE_NAMERS:
                     continue
-                marker = "//" if suffix == ".rs" else "#"
-                for i, line in enumerate(read(path).split("\n"), 1):
-                    if line.lstrip().startswith(marker) or not STORE_NAMED.search(line):
-                        continue
+                for i in store_namings(read(path), "//" if suffix == ".rs" else "#"):
                     problems.append(f"{relative}:{i} names the preference store's directory: "
                                     f"read and write it through athanor-sulphur-client (ADR-0150)")
     doc = root / STORE_TABLE_DOC
