@@ -22,7 +22,7 @@ pipeline and installation; the image is specified in
   (`doc_own_stack.md` decision 27), `src/screen_filter.rs` its colour filter (decision 28),
   `src/focus_theme.rs` the theme of the focus outline (decision 31), and
   `src/bindings/cosmic.rs` calls cosmic-settings-daemon for the volume, brightness and
-  screen-reader keys (decision 29).
+  screen-reader keys (decision 29). The first three leave as their families move to the preference store under `$XDG_CONFIG_HOME/athanor/sulphur/` (ADR-0150), which only `athanor-sulphur-client` writes.
 - **The polkit subject identifies the caller**, not the bus connection, and every action the
   code checks is declared in a `.policy` file (`verify.py polkit polkit-subject`).
 - **Dependency versions** come from `[workspace.dependencies]` in the root `Cargo.toml`.
