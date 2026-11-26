@@ -140,3 +140,47 @@ fn num_lock_is_off_by_default() {
     assert!(!keyboard.modifier_state().num_lock);
     run.stop();
 }
+/// `active_hint` turns the focus outline off and on without a restart; a malformed file keeps
+/// the last value, a refused key is skipped alone, and a file removed gives the default back.
+#[test]
+fn windows_toml_is_followed_live() {
+    let mut run = Running::start(None);
+    let file = settings_file("windows", "windows.toml");
+    let handle = run.event_loop.handle();
+    crate::window_settings::follow(&mut run.state, &handle, file.clone());
+    assert!(
+        run.state.focus_theme.outline().is_some(),
+        "no file: the outline is on"
+    );
+
+    write_raw(&file, "schema = 1\nactive_hint = false\n");
+    until(&mut run, "the hint off", |state| {
+        state.focus_theme.outline().is_none()
+    });
+
+    write_raw(&file, "schema = 1\nactive_hint = \n");
+    idle(&mut run);
+    assert!(
+        run.state.focus_theme.outline().is_none(),
+        "a malformed file changes nothing"
+    );
+
+    write_raw(
+        &file,
+        "schema = 1\nactive_hint = true\nedge_snap_threshold = 8\n",
+    );
+    until(&mut run, "the hint on", |state| {
+        state.focus_theme.outline().is_some()
+    });
+
+    write_raw(&file, "schema = 1\nactive_hint = false\n");
+    until(&mut run, "the hint off again", |state| {
+        state.focus_theme.outline().is_none()
+    });
+    std::fs::remove_file(&file).expect("removed");
+    until(&mut run, "the default", |state| {
+        state.focus_theme.outline().is_some()
+    });
+    run.stop();
+    std::fs::remove_dir_all(file.parent().expect("a directory")).expect("clean");
+}

@@ -61,6 +61,9 @@ pub struct FocusTheme {
     system: Vec<PathBuf>,
     dark: bool,
     pub(crate) enabled: bool,
+    /// `windows.toml`'s `active_hint` (`window_settings.rs`, decision 38); the outline is drawn
+    /// only while both it and `enabled` are on.
+    pub(crate) hint: bool,
     outline: Outline,
     edge: Edge,
 }
@@ -72,6 +75,7 @@ impl Default for FocusTheme {
             system: system_layers(),
             dark: true,
             enabled: true,
+            hint: true,
             outline: Outline {
                 width: FACTORY_WIDTH,
                 colour: FACTORY_ACCENT,
@@ -249,9 +253,9 @@ fn parse_divider(text: &str) -> Result<[f32; 4], Refused> {
 }
 
 impl FocusTheme {
-    /// With the setting on and a width, what a frame draws.
+    /// With the setting and `windows.toml`'s hint on and a width, what a frame draws.
     pub fn outline(&self) -> Option<Outline> {
-        (self.enabled && self.outline.width > 0).then_some(self.outline)
+        (self.enabled && self.hint && self.outline.width > 0).then_some(self.outline)
     }
 
     pub fn edge(&self) -> Edge {
@@ -583,6 +587,9 @@ mod tests {
         theme.enabled = false;
         assert_eq!(theme.outline(), None);
         theme.enabled = true;
+        theme.hint = false;
+        assert_eq!(theme.outline(), None);
+        theme.hint = true;
         theme.outline.width = 0;
         assert_eq!(theme.outline(), None);
     }

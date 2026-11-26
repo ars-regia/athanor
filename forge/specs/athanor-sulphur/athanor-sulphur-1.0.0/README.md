@@ -297,6 +297,9 @@ method by finger count, two-finger scrolling, tap and tap-and-drag on, drag lock
 is not TOML, has another schema, or is not a regular file of at most 64 KiB leaves the settings as
 they were, and a key that is unknown, of the wrong type or out of range is skipped alone; both
 are logged. While the touchpad key holds the touchpads off, it wins over their `state`.
+`athanor/sulphur/windows.toml` (`src/window_settings.rs`) is read and followed the same way. Of
+SE14's keys it holds only `active_hint`, on by default, which turns decision 31's focus outline
+off; every other key of SE14 is refused as unknown until the compositor applies it.
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
 granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
