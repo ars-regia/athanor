@@ -173,6 +173,8 @@ impl Osd {
         let name = match level.source {
             Source::Output => tr("Volume"),
             Source::Input => tr("Microphone"),
+            Source::Screen => tr("Brightness"),
+            Source::Keyboard => tr("Keyboard brightness"),
         };
         // `level.max` is 100 or 150, above `CEILING`'s full mark: always taken.
         let bar = ui.level(island, &name, value, CEILING, level.max)?;
