@@ -701,7 +701,7 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wgpu",
- "xkbcommon 0.8.0",
+ "xkbcommon 0.9.0",
  "yeslogic-fontconfig-sys",
  "zeroize",
 ]
