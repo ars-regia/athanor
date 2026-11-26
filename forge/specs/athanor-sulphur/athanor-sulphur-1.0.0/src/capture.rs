@@ -151,12 +151,15 @@ impl ImageCopyCaptureHandler for State {
     }
 
     /// Queued for the next frame of the outputs, which paces a client capturing continuously.
+    /// On DRM an output draws only when something asks it to, so the frame asks: an output
+    /// where nothing changes would otherwise never draw, and never answer it.
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
         if self.lock.is_some() {
             frame.fail(CaptureFailureReason::Stopped);
             return;
         }
         self.captures.push((session.clone(), frame));
+        self.request_redraw();
     }
 
     fn frame_aborted(&mut self, frame: FrameRef) {
