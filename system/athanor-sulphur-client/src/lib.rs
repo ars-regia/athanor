@@ -12,6 +12,8 @@ mod connection;
 mod cosmic_config;
 pub mod favorites;
 pub mod idle;
+pub mod import;
+pub mod input;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
 pub mod keyboard;
@@ -23,9 +25,11 @@ pub mod model;
 pub mod outputs;
 mod protocols;
 pub mod shortcuts;
+pub mod store;
 pub mod theme;
 mod unit;
 mod windows;
+pub mod window_management;
 mod workspace_tiling;
 
 /// GLib's default main context has one owner at a time, and the tests of a binary run on

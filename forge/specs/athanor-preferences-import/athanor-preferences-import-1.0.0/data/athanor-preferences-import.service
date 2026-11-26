@@ -1,0 +1,35 @@
+[Unit]
+Description=Athanor import of the COSMIC preferences
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/decisions/0150-athanor-preference-store.md
+# ADR-0150 points 6 to 8: once per user, before the compositor reads the store. Wanted by
+# athanor-sulphur.service, not required: an import that fails or reaches its timeout writes no
+# record, the next session imports again, and the compositor starts all the same.
+Before=athanor-sulphur.service
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/athanor-preferences-import
+# The compositor waits for this unit: a stuck import costs the session at most five seconds.
+TimeoutStartSec=5s
+TimeoutStopSec=5s
+Slice=session.slice
+# $XDG_CONFIG_HOME/athanor/sulphur, the store's directory, which the import writes.
+ConfigurationDirectory=athanor/sulphur
+
+# No ProtectSystem=, ProtectHome=, PrivateTmp= or other namespacing property: in a per-user
+# manager they make a user namespace (systemd.exec(5), PrivateUsers=). The program confines
+# itself before it reads anything: Landlock allows writes beneath the store's directory only,
+# and denies TCP. The properties below are seccomp filters and the no_new_privs bit.
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# journald, over a Unix socket.
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=athanor-sulphur.service

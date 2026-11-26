@@ -80,9 +80,9 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 **Construction** (LP18 step 5, `:266`). The agent is built and judged with cosmic-osd masked, and enabled only in the retirement change.
 
 **The unit's class:**
-- *Guard* (`docs/architecture/doc_session.md:106`, SN6). Its values are `Restart=always`, `RestartSec=100ms`, `RestartSteps=5`, `RestartMaxDelaySec=30s` and `StartLimitIntervalSec=0`, and `RESTART_RESET=1` is sent after 60 s.
-- *Readiness* (`doc_session.md:91`). The agent is `Type=notify`, and is ready only once it is registered with polkit.
-- *Degraded mode* (`doc_session.md:128`, SN7). polkit finds no agent, and the session never falls back to another.
+- *Guard* (`docs/architecture/doc_session.md:107`, SN6). Its values are `Restart=always`, `RestartSec=100ms`, `RestartSteps=5`, `RestartMaxDelaySec=30s` and `StartLimitIntervalSec=0`, and `RESTART_RESET=1` is sent after 60 s.
+- *Readiness* (`doc_session.md:92`). The agent is `Type=notify`, and is ready only once it is registered with polkit.
+- *Degraded mode* (`doc_session.md:129`, SN7). polkit finds no agent, and the session never falls back to another.
 
 **The retirement** (`doc_osd.md:228`, OD15; `:262`, OD17 step 5). It is one change with this step: the only point where the two constructions are serial.
 
@@ -344,7 +344,7 @@ No placeholder is written: a part that cannot be built for real stops the work a
 | T9 | An over-long answer, or one with a newline, is split by the helper and counts two failures, or is truncated | none | The 510-byte, no-`\n`, no-NUL check before any write (D33), tested at 510 and 511 bytes. That 510 fits `PAM_MAX_RESP_SIZE` is unverified until P3 checks it against the forge's PAM headers. |
 | T10 | The helper's own copies of the password (`fgets` buffer, `strdup`) linger | TM7 | Root process, polkit's code, outside this tree. Reported, not patched; its lifetime ends with the helper's exit. |
 | T11 | The agent crashes or polkitd restarts, leaving the session without an agent | none | Guard (SN6); polkitd cancels the dead agent's requests (LP10); exit on owner change (section 1, item 5). Degraded: polkit finds no agent, fallback off (SN7). |
-| T12 | A failed registration leaves an unregistered agent that draws nothing | none | LP11: exit non-zero; readiness only after registration (`doc_session.md:91`). |
+| T12 | A failed registration leaves an unregistered agent that draws nothing | none | LP11: exit non-zero; readiness only after registration (`doc_session.md:92`). |
 | T13 | A core dump or ptrace exposes the password | TM1, TM2 | `RLIMIT_CORE` 0 before anything, non-dumpable after the connection (D42), before any secret exists, with Yama scope 1. Under a per-user manager a namespace directive would void both (#1558), so the unit has none, confinement is in process, and `verify.py`'s rule from #1558 keeps such directives out. P5's rig probe attaches from a same-uid process to the running agent and expects a refusal. Against tier 1 (TM1), unconfined code of the user, no guarantee is claimed. |
 | T14 | Text from details or the message spoofs the layout (newlines, bidi controls) | TM2 | Details can only come from a trusted caller. All displayed text passes `athanor_unit::text::line`, which strips hidden characters (`system/athanor-unit/src/text.rs#is_hidden`). |
 | T15 | The helper prints `SUCCESS` with no prompt, and the agent either reports a failure or shows the dialog as still waiting | none | A `SUCCESS` before any answer is a completion (section 1, item 2): the dialog closes and `BeginAuthentication` completes. The line is never the grant: polkitd decides on the root helper's report. Tested in P3 with a stub helper that answers `SUCCESS` at once. |

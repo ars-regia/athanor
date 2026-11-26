@@ -24,6 +24,8 @@ Requires:       systemd glib2 mesa-libEGL mesa-dri-drivers athanor-system-servic
 Requires:       athanor-system-config >= 1.0.0-74
 # The compositor starts xwayland-satellite on the first X11 client (doc_own_stack.md, OS4).
 Requires:       xwayland-satellite
+# The import of the COSMIC preferences into the store, which the compositor reads (ADR-0150).
+Requires:       athanor-preferences-import
 
 %description
 Athanor's own Wayland compositor on Smithay (doc_own_stack.md, milestone C1), the greeter's

@@ -4554,6 +4554,132 @@ def check_boundary():
     return r
 
 
+# --------------------------------------------------------------------------- #
+# preference-store — one crate names the store, and each of its files has one writer
+# --------------------------------------------------------------------------- #
+
+# ADR-0150 point 2: the store is $XDG_CONFIG_HOME/athanor/sulphur/, which only
+# athanor-sulphur-client names in code, and decision 38's table in doc_own_stack.md lists each
+# file of it with its one writer module of that crate.
+STORE_CLIENT = "system/athanor-sulphur-client/"
+STORE_TABLE_DOC = "docs/architecture/doc_own_stack.md"
+STORE_TABLE_HEADER = re.compile(r"^\|\s*File\s*\|\s*Family\s*\|\s*Writer module\s*\|")
+# The store's directory in a string, not a system path such as /usr/share/athanor/sulphur.
+STORE_NAMED = re.compile(r"[\"'=]athanor/sulphur(?:/|[\"'\s]|$)")
+# Code outside the client that may name the store, and why.
+STORE_NAMERS = {
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/input_settings.rs":
+        "the compositor's reader of input.toml (doc_own_stack.md, decision 38)",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/window_settings.rs":
+        "the compositor's reader of windows.toml (doc_own_stack.md, decision 38)",
+    "forge/specs/athanor-preferences-import/athanor-preferences-import-1.0.0/data/athanor-preferences-import.service":
+        "ConfigurationDirectory= of the import's unit, which makes the directory (ADR-0150 point 6)",
+}
+# A file of the store a writer module of the client names: `pub const FILE: &str = "input.toml";`.
+STORE_WRITER_FILE = re.compile(r'^pub const \w+: &str = "([\w-]+\.toml)";', re.M)
+STORE_MODULE = re.compile(r"^`athanor_sulphur_client::(\w+)`$")
+
+
+def store_table(text):
+    """(rows, problems): (file, [writer module]) for each row of decision 38's table of the
+    store's files, and each row this parse cannot read."""
+    rows, problems, inside = [], [], False
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if STORE_TABLE_HEADER.match(line):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.startswith("|"):
+            break
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if set(cells[0]) <= {"-", ":", " "}:
+            continue
+        file = re.fullmatch(r"`([\w-]+\.toml)`", cells[0])
+        if not file or len(cells) < 3:
+            problems.append(f"{STORE_TABLE_DOC}:{n}: a row of the store's table without a file `name.toml`")
+            continue
+        modules = re.findall(r"`[^`]*`", cells[2])
+        rows.append((file.group(1), modules, n))
+    return rows, problems
+
+
+def preference_store_problems(root):
+    """(problems, notes) of the store's rules under root (ADR-0150 point 2)."""
+    root = Path(root)
+    problems, notes = [], []
+    for base in BOUNDARY_DIRS:
+        for suffix in (".rs", ".service"):
+            for path in walk(root / base, suffix):
+                relative = path.relative_to(root).as_posix()
+                if relative.startswith(STORE_CLIENT) or relative in STORE_NAMERS:
+                    continue
+                marker = "//" if suffix == ".rs" else "#"
+                for i, line in enumerate(read(path).split("\n"), 1):
+                    if line.lstrip().startswith(marker) or not STORE_NAMED.search(line):
+                        continue
+                    problems.append(f"{relative}:{i} names the preference store's directory: "
+                                    f"read and write it through athanor-sulphur-client (ADR-0150)")
+    doc = root / STORE_TABLE_DOC
+    rows, unread = store_table(read(doc) if doc.is_file() else "")
+    problems += unread
+    if not rows and not unread:
+        problems.append(f"{STORE_TABLE_DOC}: no table of the store's files "
+                        f"(`| File | Family | Writer module |`, decision 38)")
+    tabled = {}
+    for file, modules, n in rows:
+        if file in tabled:
+            problems.append(f"{STORE_TABLE_DOC}:{n}: {file} is listed twice")
+        names = [STORE_MODULE.match(m) for m in modules]
+        if len(modules) != 1 or not names[0]:
+            problems.append(f"{STORE_TABLE_DOC}:{n}: {file} has {len(modules)} writer modules, "
+                            f"not one `athanor_sulphur_client::<module>`")
+            continue
+        tabled[file] = names[0].group(1)
+    written = {}
+    for path in sorted(walk(root / STORE_CLIENT / "src", ".rs")):
+        source = read(path).split("#[cfg(test)]")[0]
+        for file in STORE_WRITER_FILE.findall(source):
+            written.setdefault(file, []).append(path.stem)
+    for file, module in sorted(tabled.items()):
+        source = root / STORE_CLIENT / "src" / f"{module}.rs"
+        if not source.is_file():
+            notes.append(f"{file}: its writer module {module} is not built yet")
+            continue
+        others = sorted(set(written.get(file, [])) - {module})
+        writes = {f for f, ms in written.items() if module in ms}
+        if not writes:
+            # A module that predates its family's step, such as `shortcuts`, names no file yet.
+            notes.append(f"{file}: its writer module {module} does not write the store yet")
+        elif file not in writes:
+            problems.append(f"{STORE_CLIENT}src/{module}.rs: the writer of {file} in decision 38's "
+                            f"table does not name it")
+        if others:
+            problems.append(f"{file} has writer modules besides {module}: {', '.join(others)}")
+    for file, modules in sorted(written.items()):
+        for module in sorted(set(modules)):
+            if tabled.get(file) not in (None, module):
+                continue
+            if file not in tabled:
+                problems.append(f"{STORE_CLIENT}src/{module}.rs writes {file}, which decision 38's "
+                                f"table does not list")
+    return problems, notes
+
+
+@check("preference-store", "Only the compositor client names the preference store, and each of its files has one writer module")
+def check_preference_store():
+    r = Result()
+    problems, notes = preference_store_problems(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    for note in notes:
+        r.note(note)
+    for path, why in STORE_NAMERS.items():
+        r.note(f"names the store: {path}: {why}")
+    return r
+
+
 # A confined process that renders on the GPU through /dev/dri needs, on the -nvidia images,
 # the NVIDIA driver's nodes and /sys/module/nvidia as well, or GTK falls back to software
 # rendering (#535). A client whose unit sets GSK_RENDERER=cairo never renders on the GPU.
@@ -5457,8 +5583,9 @@ def check_services():
 # doc_session.md, SN12: every user unit Athanor ships for the session, with its crash class of
 # SN6, whether it connects to the compositor (SN3) and how the session starts it: through a
 # user preset under athanor-session.target, through D-Bus activation, by name in
-# athanor-session.target itself (the gate through Requires=, the others through Wants=), or by
-# its session's script alone.
+# athanor-session.target itself (the gate through Requires=, the others through Wants=), by
+# its session's script alone, or, before the compositor, through a user preset under
+# athanor-sulphur.service ("compositor-preset").
 SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
@@ -5486,7 +5613,11 @@ SESSION_UNITS = {
     # The own compositor (SN15): athanor-sulphur-session starts it and waits on it, and its
     # ExecStartPost= starts athanor-session.target, so it precedes the gate, which probes it.
     "athanor-sulphur.service": ("compositor", False, "script"),
+    # The import of the COSMIC preferences into the store, once per user, before the
+    # compositor reads it (ADR-0150 point 6); a step, as it runs once and never restarts.
+    "athanor-preferences-import.service": ("step", False, "compositor-preset"),
 }
+COMPOSITOR_UNIT = "athanor-sulphur.service"
 SESSION_TARGET = "athanor-session.target"
 # Shipped user units that are not session units, and why.
 NOT_SESSION_UNITS = {
@@ -5634,8 +5765,13 @@ def session_unit_problems(units, enabled):
             fail(unit, "binding", "no PartOf=graphical-session.target (doc_session.md, SN3)")
 
         wanted_by = unit_names(install, "WantedBy")
-        if wanted_by - {SESSION_TARGET}:
-            fail(unit, "install", f"WantedBy={' '.join(sorted(wanted_by))}, not {SESSION_TARGET} (doc_session.md, SN3)")
+        wanted_here = COMPOSITOR_UNIT if start == "compositor-preset" else SESSION_TARGET
+        if wanted_by - {wanted_here}:
+            fail(unit, "install", f"WantedBy={' '.join(sorted(wanted_by))}, not {wanted_here} (doc_session.md, SN3)")
+        if start == "compositor-preset" and (wanted_by != {COMPOSITOR_UNIT} or unit not in enabled):
+            fail(unit, "install", f"runs before the compositor, so WantedBy={COMPOSITOR_UNIT} and enabled by a user preset (ADR-0150 point 6)")
+        if start == "compositor-preset" and COMPOSITOR_UNIT not in unit_names(head, "Before"):
+            fail(unit, "order", f"runs before the compositor, so Before={COMPOSITOR_UNIT} (ADR-0150 point 6)")
         if start == "preset" and (wanted_by != {SESSION_TARGET} or unit not in enabled):
             fail(unit, "install", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset (doc_session.md, SN3)")
         if start == "activated" and install:
@@ -6799,7 +6935,7 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    ("doc_software.md", "forge/config/packages.json", "2-86", None, 1):
+    ("doc_software.md", "forge/config/packages.json", "2-88", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 # Another project's file that a document cites by a path a tracked file also ends with, each
