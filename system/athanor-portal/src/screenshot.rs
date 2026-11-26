@@ -28,6 +28,10 @@ use zbus::{ObjectPath, OwnedVariant as OwnedValue, Str};
 pub const VERSION: u32 = 2;
 /// How long a file in flight is kept: the frontend and the recorder read it within that time.
 pub const MAX_AGE: Duration = Duration::from_secs(3600);
+/// How many files in flight, and how many bytes of them, are kept at most (maintainer decision,
+/// 2026-11-26): before each new file, the oldest go until the others fit with room for it.
+pub const MAX_KEPT: usize = 32;
+pub const MAX_KEPT_BYTES: u64 = 256 * 1024 * 1024;
 /// How long a request waits for its turn and its outputs' pictures before it answers 2: the
 /// client waits two seconds for every output at once, and the rest is its connection.
 pub const CAPTURE_DEADLINE: Duration = Duration::from_secs(5);
@@ -350,18 +354,18 @@ pub fn write(dir: &Path, image: &Image, now: SystemTime) -> io::Result<PathBuf> 
     Ok(path)
 }
 
-/// Removes the files in flight beneath `dir` older than [`MAX_AGE`] at `now`: the regular files
-/// this module names, never a link, a directory or another name. Returns how many it removed;
-/// a file it cannot read or remove is logged and left.
-pub fn sweep(dir: &Path, now: SystemTime) -> usize {
+/// The files in flight beneath `dir`: the regular files this module names, never a link, a
+/// directory or another name, with their size and time. An entry it cannot read is logged and
+/// left out.
+fn in_flight(dir: &Path) -> Vec<(PathBuf, u64, SystemTime)> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
-            tracing::warn!(%error, dir = %dir.display(), "the screenshots in flight were not swept");
-            return 0;
+            tracing::warn!(%error, dir = %dir.display(), "the screenshots in flight were not read");
+            return Vec::new();
         }
     };
-    let mut removed = 0usize;
+    let mut files = Vec::new();
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -376,20 +380,55 @@ pub fn sweep(dir: &Path, now: SystemTime) -> usize {
             continue;
         }
         let path = entry.path();
-        let old = entry.metadata().is_ok_and(|meta| {
-            meta.file_type().is_file()
-                && meta.modified().is_ok_and(|modified| {
-                    now.duration_since(modified).is_ok_and(|age| age > MAX_AGE)
-                })
-        });
-        if !old {
-            continue;
-        }
-        match fs::remove_file(&path) {
-            Ok(()) => removed = removed.saturating_add(1),
+        match entry.metadata().and_then(|meta| Ok((meta.file_type(), meta.len(), meta.modified()?))) {
+            Ok((kind, len, modified)) if kind.is_file() => files.push((path, len, modified)),
+            Ok(_) => {}
             Err(error) => {
-                tracing::warn!(%error, path = %path.display(), "a screenshot in flight was not removed")
+                tracing::warn!(%error, path = %path.display(), "a screenshot in flight was not read")
             }
+        }
+    }
+    files
+}
+
+/// Removes `path`, logging a failure; `true` when it is gone.
+fn remove(path: &Path) -> bool {
+    match fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "a screenshot in flight was not removed");
+            false
+        }
+    }
+}
+
+/// Removes the files in flight beneath `dir` older than [`MAX_AGE`] at `now`. Returns how many
+/// it removed; a file it cannot remove is logged and left.
+pub fn sweep(dir: &Path, now: SystemTime) -> usize {
+    in_flight(dir)
+        .into_iter()
+        .filter(|(_, _, modified)| now.duration_since(*modified).is_ok_and(|age| age > MAX_AGE))
+        .filter(|(path, _, _)| remove(path))
+        .count()
+}
+
+/// Removes the oldest files in flight beneath `dir` until at most `files` of them, of at most
+/// `bytes` together, remain. Returns how many it removed; a file it cannot remove is logged,
+/// still counts, and the next oldest goes in its place.
+pub fn cap(dir: &Path, files: usize, bytes: u64) -> usize {
+    let mut kept = in_flight(dir);
+    kept.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+    let mut count = kept.len();
+    let mut total = kept.iter().fold(0u64, |sum, file| sum.saturating_add(file.1));
+    let mut removed = 0usize;
+    for (path, len, _) in kept {
+        if count <= files && total <= bytes {
+            break;
+        }
+        if remove(&path) {
+            count = count.saturating_sub(1);
+            total = total.saturating_sub(len);
+            removed = removed.saturating_add(1);
         }
     }
     removed
@@ -463,13 +502,14 @@ impl<H: Host> Screenshot<H> {
         }))
     }
 
-    /// Composes, sweeps and writes, off the runtime's thread: a layout of several outputs is
-    /// tens of megabytes to scale and encode.
+    /// Sweeps, caps, composes and writes, off the runtime's thread: a layout of several
+    /// outputs is tens of megabytes to scale and encode.
     async fn keep(&self, shots: Vec<Shot>) -> Result<PathBuf, String> {
         let dir = self.0.dir.clone();
         tokio::task::spawn_blocking(move || {
             let now = SystemTime::now();
             sweep(&dir, now);
+            cap(&dir, MAX_KEPT.saturating_sub(1), MAX_KEPT_BYTES);
             let image = compose(&shots)?;
             write(&dir, &image, now)
                 .map_err(|error| format!("the screenshot was not written: {error}"))
@@ -944,6 +984,44 @@ mod tests {
         assert!(!old.exists());
         assert!(other.exists() && target.exists() && fs::symlink_metadata(&link).is_ok());
         assert_eq!(sweep(&dir.join("absent"), hour_later), 0);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A file in flight of `len` bytes, `age` seconds old, named after its age.
+    fn aged(dir: &Path, age: u64, len: usize) -> PathBuf {
+        let path = dir.join(format!("{PREFIX}{age:04}{SUFFIX}"));
+        fs::write(&path, vec![0; len]).expect("write");
+        let file = fs::File::options().write(true).open(&path).expect("open");
+        file.set_modified(SystemTime::now() - Duration::from_secs(age))
+            .expect("mtime");
+        path
+    }
+
+    #[test]
+    fn the_cap_removes_the_oldest_files_beyond_the_count() {
+        let dir = dir("cap-count");
+        let files: Vec<_> = (0..35).map(|age| aged(&dir, age, 1)).collect();
+        let target = dir.join("target");
+        fs::write(&target, b"kept").expect("write");
+        symlink(&target, dir.join("screenshot-link.png")).expect("symlink");
+        fs::write(dir.join("notes.png"), b"kept").expect("write");
+        // Room for one more of MAX_KEPT: the four oldest of 35 go.
+        assert_eq!(cap(&dir, MAX_KEPT - 1, MAX_KEPT_BYTES), 4);
+        assert!(files[..31].iter().all(|file| file.exists()));
+        assert!(files[31..].iter().all(|file| !file.exists()));
+        assert_eq!(cap(&dir, MAX_KEPT - 1, MAX_KEPT_BYTES), 0);
+        assert_eq!(fs::read_dir(&dir).expect("dir").count(), 34);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_cap_removes_the_oldest_files_beyond_the_bytes() {
+        let dir = dir("cap-bytes");
+        let files: Vec<_> = (0..5).map(|age| aged(&dir, age, 10)).collect();
+        assert_eq!(cap(&dir, usize::MAX, 25), 3);
+        assert!(files[..2].iter().all(|file| file.exists()));
+        assert!(files[2..].iter().all(|file| !file.exists()));
+        assert_eq!(cap(&dir.join("absent"), 0, 0), 0);
         fs::remove_dir_all(&dir).ok();
     }
 
