@@ -13793,3 +13793,7 @@ mod slide;
 // Decision 38: `input.toml` and `windows.toml`.
 #[cfg(test)]
 mod settings;
+
+// Each output's position reaches its clients through xdg_output (doc_portal.md PT8).
+#[cfg(test)]
+mod positions;

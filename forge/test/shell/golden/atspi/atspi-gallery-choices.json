@@ -454,6 +454,31 @@
   "value": ""
  },
  {
+  "depth": 4,
+  "role": "button",
+  "name": "Open a terminal: Super+T",
+  "description": "",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "label",
+  "name": "Open a terminal: Super+T",
+  "description": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
   "depth": 2,
   "role": "grouping",
   "name": "",

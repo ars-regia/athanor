@@ -120,9 +120,11 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        // A shortcut capture keeps its label while it records: its prompt is announced.
         Kind::Button(label)
         | Kind::IconButton { label, .. }
-        | Kind::LabelledButton { label, .. } => {
+        | Kind::LabelledButton { label, .. }
+        | Kind::Shortcut(crate::shortcut::ShortcutCapture { label, .. }) => {
             let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.add_action(Action::Click);
