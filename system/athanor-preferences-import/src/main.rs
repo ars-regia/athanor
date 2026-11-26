@@ -37,10 +37,9 @@ fn main() -> ExitCode {
 
 fn run() -> Result<Ran, Box<dyn Error>> {
     let store = Store::from_env()?;
-    // The unit's ConfigurationDirectory= makes it; made here too for a run by hand.
-    std::fs::create_dir_all(store.dir())?;
-    // A dotfiles tree may link the directory: the grant names the directory it leads to.
-    let dir = std::fs::canonicalize(store.dir())?;
+    // The unit's ConfigurationDirectory= makes it; made here too for a run by hand. A dotfiles
+    // tree may link the directory: the grant names the directory it leads to.
+    let dir = store.dir_for_confinement()?;
     sandbox::ensure_single_threaded()?;
     sandbox::restrict_writes(&[dirs::own_dir(&dir)?], &[])?;
     sandbox::deny_tcp()?;

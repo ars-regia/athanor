@@ -91,18 +91,32 @@ impl Store {
         Store { dir }
     }
 
-    pub fn dir(&self) -> &Path {
+    /// Crate-private: a path handed out would let another crate write a file of the store
+    /// without the lock, the schema or the size bound.
+    pub(crate) fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Creates the store's directory if it is absent and returns its canonical path, a link
+    /// resolved. Only for confining a process to the directory (a Landlock grant); the store is
+    /// written through its family modules, never through this path.
+    pub fn dir_for_confinement(&self) -> Result<PathBuf, Error> {
+        self.create_dir()?;
+        fs::canonicalize(&self.dir).map_err(|err| Error::io(&self.dir, err))
+    }
+
+    fn create_dir(&self) -> Result<(), Error> {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o755)
+            .create(&self.dir)
+            .map_err(|err| Error::io(&self.dir, err))
     }
 
     /// Takes the store's lock, creating the directory and `.lock` if they are absent. Fails
     /// with `Error::Locked` once `LOCK_BOUND` has passed with the lock held elsewhere.
     pub fn lock(&self) -> Result<Locked<'_>, Error> {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o755)
-            .create(&self.dir)
-            .map_err(|err| Error::io(&self.dir, err))?;
+        self.create_dir()?;
         let path = self.dir.join(LOCK);
         let file = open(&path, true)?
             .ok_or_else(|| Error::io(&path, io::Error::from(io::ErrorKind::NotFound)))?;
@@ -511,6 +525,26 @@ pub(crate) mod tests {
             Store::at(dir.clone()).lock(),
             Err(Error::Link { .. })
         ));
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn the_directory_for_confinement_is_made_and_its_link_resolved() {
+        let dir = scratch("confine");
+        let store = dir.join("real/athanor/sulphur");
+        assert_eq!(
+            Store::at(store.clone())
+                .dir_for_confinement()
+                .expect("made"),
+            fs::canonicalize(&store).expect("canonical")
+        );
+        std::os::unix::fs::symlink(&store, dir.join("link")).expect("link");
+        assert_eq!(
+            Store::at(dir.join("link"))
+                .dir_for_confinement()
+                .expect("resolved"),
+            fs::canonicalize(&store).expect("canonical")
+        );
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
