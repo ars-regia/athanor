@@ -729,6 +729,71 @@ fn a_workspace_keeps_its_frame_when_it_is_left() {
     run.stop();
 }
 
+/// A tiled workspace that is left keeps its marks: the divider of a tiled window and the two
+/// lines of a confined one, tiled beside it, are drawn as on screen.
+#[test]
+fn a_tiled_workspace_keeps_its_marks_when_it_is_left() {
+    let mut run = Running::start(None);
+    let (mut local, manager) = overview(&mut run);
+    // The security context names the fixture's client, so its window goes once it is made.
+    let (fixture, _) = fixture_window(&run);
+    let (mut sandboxed, _sandboxed_toplevel) = super::marks::confined(&mut run);
+    assert!(run.state.minimise(&fixture));
+    let mut plain = Local::connect(&mut run, None);
+    let _plain_toplevel = plain.toplevel(&mut run);
+    let confined = window_of(&run, sandboxed.id.as_ref().expect("an id"));
+    let tiled = window_of(&run, plain.id.as_ref().expect("an id"));
+    let id = workspaces_of(&run, 0)[0];
+    for client in [&mut sandboxed, &mut plain] {
+        client.roundtrip(&mut run);
+        client.client.configure = None;
+    }
+    run.state.set_tiling(id, true);
+    sandboxed.redraw(&mut run);
+    plain.redraw(&mut run);
+    run.state.focus(&confined);
+    local.roundtrip(&mut run);
+    let geometry = |run: &Running, window| run.state.space.element_geometry(window).expect("mapped");
+    let (bordered, divided) = (geometry(&run, &confined), geometry(&run, &tiled));
+    assert!(
+        bordered.loc.x != divided.loc.x && bordered.size.w < OUTPUTS[0].width / 2,
+        "the two windows tiled side by side: {bordered:?} {divided:?}"
+    );
+    let handles = local.handles(&mut run, 0);
+    let shown = captured_workspace(&mut local, &mut run, &manager, &handles[0], 0);
+    assert!(run.state.activate_workspace(workspaces_of(&run, 0)[1]));
+    assert!(run.state.is_parked(&confined) && run.state.is_parked(&tiled));
+    let left = captured_workspace(&mut local, &mut run, &manager, &handles[0], 0);
+    let width = OUTPUTS[0].width;
+    let same = |x0: i32, y0: i32, x1: i32, y1: i32| {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                assert_eq!(
+                    pixel(&left, width, x, y),
+                    pixel(&shown, width, x, y),
+                    "({x}, {y}) once the workspace is left"
+                );
+            }
+        }
+    };
+    // The tiled window, not focused: its divider, just inside its geometry, and round it.
+    let (x, y, w, h) = (divided.loc.x, divided.loc.y, divided.size.w, divided.size.h);
+    same(x - 2, y - 2, x + w + 2, y + h + 2);
+    assert_ne!(
+        pixel(&left, width, x, y + h / 2),
+        pixel(&left, width, x + w / 2, y + h / 2),
+        "the divider on the tiled window's edge"
+    );
+    // The confined window, focused while shown: its two lines, inside the outline's ring.
+    let (x, y, w, h) = (bordered.loc.x, bordered.loc.y, bordered.size.w, bordered.size.h);
+    let middle = y + h / 2;
+    same(x - 3, middle, x + w + 3, middle + 1);
+    same(x + w / 2, y - 3, x + w / 2 + 1, y + h + 3);
+    assert_eq!(pixel(&left, width, x - 2, middle), super::marks::WHITE, "the white line");
+    assert_eq!(pixel(&left, width, x - 3, middle), super::marks::BLACK, "the black line");
+    run.stop();
+}
+
 /// A workspace of the second output is captured at that output's mode, its window at the
 /// output's scale.
 #[test]
