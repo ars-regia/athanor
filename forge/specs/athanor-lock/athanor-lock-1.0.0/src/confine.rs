@@ -9,8 +9,9 @@
 //! The confinement is in process because the lock's unit must keep the user manager's user
 //! namespace: the directives that would give it a private `/tmp`, a read-only system and a
 //! private network make one owned by the user, where every process of the same uid could attach
-//! to the lock (D43, #1558). The unit keeps the lines that do not, `SystemCallFilter=` (seccomp)
-//! and `RestrictAddressFamilies=AF_UNIX` among them.
+//! to the lock (D43, #1558). The unit keeps the lines that do not, among them
+//! `SystemCallArchitectures=native`, `SystemCallFilter=` (seccomp, which also refuses the
+//! metadata calls Landlock does not mediate) and `RestrictAddressFamilies=AF_UNIX`.
 //!
 //! The process stays dumpable here: Sulphur identifies a client when it connects by reading
 //! `/proc/<pid>/exe`, which the kernel refuses to a reader of the same uid without
@@ -43,8 +44,9 @@ pub fn confine(runtime_dir: Option<&OsStr>) -> Result<(), Box<dyn Error>> {
         dirs::own_dir(runtime_dir).map_err(|error| dirs::not_granted(runtime_dir, error))?;
     sandbox::ensure_single_threaded()?;
     sandbox::restrict_writes(&[runtime_dir], &[])?;
-    // In place of the unit's former `PrivateNetwork=yes` (D43): `RestrictAddressFamilies=AF_UNIX`
-    // refuses every other family, and these the TCP and abstract sockets a private network hid.
+    // In place of the unit's former `PrivateNetwork=yes` (D43): `RestrictAddressFamilies=AF_UNIX`,
+    // with `SystemCallArchitectures=native`, refuses every other family, and these the TCP and
+    // abstract sockets a private network hid.
     sandbox::deny_tcp()?;
     sandbox::deny_abstract_unix_sockets()?;
     // After Landlock, as the greeter's `forbid_core_dumps`: no core file by any path, the

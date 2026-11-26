@@ -32,6 +32,9 @@ Slice=session.slice
 # this unit to that. The lines below keep the host's user namespace (measured on systemd 262).
 # LP15: Wayland, the system and session buses and athanor-unlockd's socket are all Unix sockets.
 NoNewPrivileges=yes
+# Without it a 32-bit socketcall through int 0x80 is not filtered, and opened a UDP socket past
+# RestrictAddressFamilies=AF_UNIX (measured on systemd 262).
+SystemCallArchitectures=native
 SystemCallFilter=@system-service
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
