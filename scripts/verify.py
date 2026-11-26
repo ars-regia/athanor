@@ -3336,12 +3336,16 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
 # every name of them in the crate. workspaces.rs binds the workspace manager when a client
 # connects with `Client::connect` or `Client::connect_wayland`, so it counts for a target only
-# when a file outside the crate names `Client`, under any alias, and makes one of those calls
-# (another type's `::connect`, as athanor-idle's `Display::connect`, alone is not one): a
-# crate that reads only the crate's `idle` module, as athanor-idle does, binds nothing through it
-# (maintainer decision, 2026-11-07), and one that connects with
-# `Client::connect_without_workspaces`, as the portal's Screenshot backend does, never binds the
-# manager. connection.rs names no privileged global and counts for every target.
+# when the target's files outside the crate, taken together, name `Client`, under any alias,
+# and call a `::connect` or `::connect_wayland`, in the same file or in another, as an alias
+# declared in one file and called in another does. Each entry's calls must all match, each in
+# some file. Another type's `::connect` in a target that never names `Client`, as
+# athanor-idle's `Display::connect`, is not one: a crate that reads only the crate's `idle`
+# module, as athanor-idle does, binds nothing through it (maintainer decision, 2026-11-07).
+# One that connects with `Client::connect_without_workspaces` and calls no `::connect`, as the
+# portal's Screenshot backend does, never binds the manager; one that also calls another
+# type's `::connect` counts, the safe side. connection.rs names no privileged global and counts
+# for every target.
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -3361,8 +3365,7 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/workspaces.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"(?s)\bClient\b.*::\s*connect(?:_wayland)?\b(?!\s*::)"
-                         r"|::\s*connect(?:_wayland)?\b(?!\s*::).*\bClient\b"))}
+              (re.compile(r"\bClient\b"), re.compile(r"::\s*connect(?:_wayland)?\b(?!\s*::)")))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
@@ -3735,9 +3738,11 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         # `DecorationMode::Client` is no `Client` of athanor-sulphur-client; maintainer
         # decision, 2026-11-07).
         for where in [w for w in files if w.as_posix() in ON_DEMAND]:
-            owner, call = ON_DEMAND[where.as_posix()]
-            if not any(call.search(text) for other, text in files.items()
-                       if not other.is_relative_to(owner) and depends_on(root, other, owner)):
+            owner, calls = ON_DEMAND[where.as_posix()]
+            reach = [text for other, text in files.items()
+                     if not other.is_relative_to(owner) and depends_on(root, other, owner)]
+            if not all(any(call.search(text) for text in reach)
+                       for call in (calls if isinstance(calls, tuple) else (calls,))):
                 del files[where]
         layer = top_layer(files)
         for where, text in sorted(files.items()):

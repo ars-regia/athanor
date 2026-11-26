@@ -272,6 +272,43 @@ class AllowList(unittest.TestCase):
                 self.assertIn("/usr/bin/athanor-idle", out[0])
                 self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
+    def test_the_connection_counts_when_client_and_connect_are_in_different_files(self):
+        # The target's files are read together: an alias of Client declared in one file and
+        # connected through in another binds the workspace manager.
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
+        main = "mod alias;\nmod dial;\nfn main() { dial::run(); }\n"
+        self.package(
+            "athanor-idle",
+            dependency,
+            {
+                "src/main.rs": main,
+                "src/alias.rs": "pub type Shell = athanor_sulphur_client::Client;\n",
+                "src/dial.rs": "pub fn run() { crate::alias::Shell::connect_wayland(c); }\n",
+            },
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("/usr/bin/athanor-idle", out[0])
+        self.assertIn("ext_foreign_toplevel_list_v1", out[0])
+        # A target that connects without the workspaces in one file and calls another
+        # type's `connect` in another cannot be told from one that connects through an alias,
+        # so it counts: the safe side. The portal's Screenshot backend calls no `::connect`.
+        self.package(
+            "athanor-idle",
+            dependency,
+            {
+                "src/main.rs": main,
+                "src/alias.rs": "use athanor_sulphur_client::Client;\n"
+                "pub fn shot() { Client::connect_without_workspaces(&connection); }\n",
+                "src/dial.rs": "pub fn run() { Display::connect(); }\n",
+            },
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("ext_foreign_toplevel_list_v1", out[0])
+
     def test_a_disabled_optional_dependency_is_not_followed(self):
         self.write(
             "system/athanor-sal/Cargo.toml", '[package]\nname = "athanor-sal"\n'
