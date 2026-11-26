@@ -124,8 +124,10 @@ impl Store {
         }
     }
 
-    /// `change` merged into the file `name` under the lock (`Locked::update`).
-    pub fn update(
+    /// `change` merged into the file `name` under the lock (`Locked::update`). Crate-private:
+    /// each family's module is its file's one writer, and code outside this crate writes the
+    /// store only through those modules' typed setters (ADR-0150 point 4).
+    pub(crate) fn update(
         &self,
         name: &str,
         change: impl FnOnce(&Path, &mut Table) -> Result<(), Error>,
@@ -142,9 +144,22 @@ pub struct Locked<'a> {
 }
 
 impl Locked<'_> {
+    /// The path of the file `name`, which must be a plain file name ending in `.toml` and not
+    /// starting with a dot, so that no name reaches outside the directory or names `.lock`.
+    fn file(&self, name: &str) -> Result<PathBuf, Error> {
+        let stem = name.strip_suffix(".toml").unwrap_or_default();
+        if stem.is_empty() || stem.starts_with('.') || name.contains(['/', '\0']) {
+            return Err(Error::Refused {
+                path: self.store.dir.clone(),
+                reason: format!("{name:?} is not a file name of the store"),
+            });
+        }
+        Ok(self.store.dir.join(name))
+    }
+
     /// The table of the file `name`, its `schema` checked; `None` when it is absent.
     pub fn read(&self, name: &str) -> Result<Option<Table>, Error> {
-        let path = self.store.dir.join(name);
+        let path = self.file(name)?;
         let Some(file) = open(&path, false)? else {
             return Ok(None);
         };
@@ -183,12 +198,12 @@ impl Locked<'_> {
     /// Reads the file `name`, or starts it with `schema` alone, applies `change` and replaces
     /// the file whole. Every key and table `change` leaves alone keeps its value; comments and
     /// the order of the keys are not kept. Nothing is written when the read or `change` fails.
-    pub fn update(
+    pub(crate) fn update(
         &self,
         name: &str,
         change: impl FnOnce(&Path, &mut Table) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let path = self.store.dir.join(name);
+        let path = self.file(name)?;
         let mut table = self.read(name)?.unwrap_or_else(|| {
             let mut table = Table::new();
             table.insert("schema".to_owned(), Value::Integer(SCHEMA));
@@ -456,6 +471,35 @@ pub(crate) mod tests {
         assert!(matches!(set(&store, "a", 1), Err(Error::Link { .. })));
         assert_eq!(fs::read_to_string(&target).expect("read"), "schema = 1\n");
         assert!(fs::symlink_metadata(&file).expect("link").is_symlink());
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn a_name_that_is_not_a_plain_toml_file_name_is_refused() {
+        let dir = scratch("names");
+        let store = Store::at(dir.join("store"));
+        for name in [
+            "../f.toml",
+            "a/f.toml",
+            "/abs/f.toml",
+            ".toml",
+            "..toml",
+            ".lock",
+            "f",
+            "f.toml\0",
+            "",
+        ] {
+            let refused = store.update(name, |_, _| Ok(()));
+            assert!(matches!(refused, Err(Error::Refused { .. })), "{name:?}");
+            let read = store.lock().expect("lock").read(name);
+            assert!(matches!(read, Err(Error::Refused { .. })), "{name:?}");
+        }
+        let mut left: Vec<_> = fs::read_dir(&dir)
+            .expect("list")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["store"], "nothing is written beside the store");
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
