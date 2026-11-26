@@ -22,7 +22,17 @@ fn main() -> ExitCode {
         );
         Catalog::empty()
     });
-    let chooser = tree::build(&catalog, catalog.is_rtl());
+    // The direction is settled where every program settles it, with the same domain, as the
+    // programs of the shell do beside their own catalogue; unreadable, it is reported and the
+    // chooser runs left to right.
+    let rtl = athanor_i18n::is_rtl(DOMAIN).unwrap_or_else(|(path, error)| {
+        eprintln!(
+            "athanor-layout-chooser: the direction is left to right: {}: {error}",
+            path.display()
+        );
+        false
+    });
+    let chooser = tree::build(&catalog, rtl);
     let choices = chooser.choices;
     let on_event = move |_: &mut athanor_sal::Ui, event: Event| {
         if let Event::Selected(id) = event {

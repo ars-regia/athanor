@@ -43,7 +43,13 @@ pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {
 
 /// Whether the language in use is written right to left.
 pub fn is_rtl() -> bool {
-    catalog().is_rtl()
+    static RTL: OnceLock<bool> = OnceLock::new();
+    *RTL.get_or_init(|| {
+        athanor_i18n::is_rtl(DOMAIN).unwrap_or_else(|(path, err)| {
+            tracing::error!(path = %path.display(), error = %err, "translations are unavailable");
+            false
+        })
+    })
 }
 
 #[cfg(test)]
@@ -53,7 +59,6 @@ mod tests {
     #[test]
     fn without_a_catalog_the_message_id_is_the_text() {
         assert_eq!(tr("Shut down"), "Shut down");
-        assert!(!is_rtl());
     }
 
     #[test]

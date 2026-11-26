@@ -30,5 +30,11 @@ pub fn tr(msgid: &str) -> String {
 }
 
 pub fn is_rtl() -> bool {
-    catalog().is_rtl()
+    static RTL: OnceLock<bool> = OnceLock::new();
+    *RTL.get_or_init(|| {
+        athanor_i18n::is_rtl(DOMAIN).unwrap_or_else(|(path, err)| {
+            tracing::error!(path = %path.display(), error = %err, "translations are unavailable");
+            false
+        })
+    })
 }
