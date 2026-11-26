@@ -821,7 +821,7 @@ mod tests {
     /// draws on the overlay layer; athanor-idle blanks the outputs and draws its fade
     /// (doc_session_daemons.md, SD22). Then the upstream clients of doc_session.md revision 4,
     /// SN12 and SN15, which no crate of the tree builds: the locker and cosmic-osd.
-    const SHELL_CLIENTS: [(&str, &str, &[&str]); 9] = [
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 10] = [
         (
             "athanor-bar",
             "athanor-bar.service",
@@ -901,12 +901,49 @@ mod tests {
             "app-athanor-com.system76.CosmicSettings*@.service",
             &["zwlr_output_manager_v1"],
         ),
+        (
+            "athanor-xdg-desktop-portal-athanor",
+            "xdg-desktop-portal-athanor.service",
+            &[
+                "ext_output_image_capture_source_manager_v1",
+                "ext_image_copy_capture_manager_v1",
+            ],
+        ),
     ];
 
     /// Crates that draw on the top or overlay layer without a line: the compositor itself, and
     /// the greeter, which runs on cosmic-comp in greetd's session until it moves
     /// (doc_own_stack.md, section 6, step 5).
     const OUTSIDE_THE_LIST: [&str; 2] = ["athanor-sulphur", "athanor-greeter-ui"];
+
+    /// The clients installed outside `/usr/bin`, by crate, with their executable, which must be
+    /// the one their unit starts: the portal's backend (doc_portal.md, PT3).
+    const LIBEXEC_CLIENTS: [(&str, &str, &str); 1] = [(
+        "athanor-xdg-desktop-portal-athanor",
+        "/usr/libexec/xdg-desktop-portal-athanor",
+        "../../athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0/xdg-desktop-portal-athanor.service",
+    )];
+
+    /// Where the client `name` of `SHELL_CLIENTS` is installed.
+    fn executable(name: &str) -> PathBuf {
+        LIBEXEC_CLIENTS
+            .iter()
+            .find(|(client, _, _)| *client == name)
+            .map_or_else(|| PathBuf::from(format!("/usr/bin/{name}")), |(_, path, _)| PathBuf::from(path))
+    }
+
+    #[test]
+    fn a_client_outside_usr_bin_is_the_executable_its_unit_starts() {
+        for (client, path, unit) in LIBEXEC_CLIENTS {
+            let unit = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(unit))
+                .expect("unit");
+            assert!(
+                unit.lines().any(|line| line == format!("ExecStart={path}")),
+                "{client}: its unit does not start {path}"
+            );
+            assert!(SHELL_CLIENTS.iter().any(|(name, _, _)| *name == client), "{client}");
+        }
+    }
 
     /// Every `.rs` file under `dir`.
     fn sources(dir: &Path, found: &mut Vec<PathBuf>) {
@@ -972,11 +1009,7 @@ mod tests {
                     .iter()
                     .map(|interface| Privilege::named(interface).expect("privileged"))
                     .collect::<Vec<_>>();
-                (
-                    PathBuf::from(format!("/usr/bin/{name}")),
-                    unit.to_string(),
-                    privileges,
-                )
+                (executable(name), unit.to_string(), privileges)
             })
             .collect();
         assert_eq!(shipped.0, expected);

@@ -23,3 +23,6 @@
 # Settings waits at start-up on cosmic-randr, which waits for this global (#880); the launcher
 # starts Settings and each of its pages in a unit of its own. The line leaves with cosmic-settings.
 /usr/bin/cosmic-randr app-athanor-com.system76.CosmicSettings*@.service zwlr_output_manager_v1
+# The portal's backend (doc_portal.md, PT8): every output's picture for a screenshot. No line
+# marks it a trusted prompt (PT15).
+/usr/libexec/xdg-desktop-portal-athanor xdg-desktop-portal-athanor.service ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
