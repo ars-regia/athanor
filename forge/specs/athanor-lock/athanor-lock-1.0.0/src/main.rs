@@ -1,5 +1,5 @@
-//! The session lock of doc_lock_and_prompts.md (LP2). It starts in the order of LP15 and of the
-//! plan of LP18 step 2 (task 5): the locale, the confinement while the process has one thread,
+//! The session lock of doc_lock_and_prompts.md (LP2). It installs athanor-unit's panic hook first,
+//! then starts in the order of LP15 and of the plan of LP18 step 2 (task 5): the locale, the confinement while the process has one thread,
 //! the logind thread, then Sal's loop, whose `start` makes the process non-dumpable once the
 //! compositor has identified it (maintainer decision, 2026-11-21). This build locks nothing yet: it does not drive the state
 //! machine, which waits for the screen (task 6), and says so. It ends non-zero on logind's fatal
@@ -18,6 +18,7 @@ use calloop::ping::Ping;
 use tokio::sync::mpsc::UnboundedSender;
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     // The time locale of this thread, which draws the screen and formats its dates.
     if let Err(error) = athanor_i18n::use_time_locale() {
         eprintln!(

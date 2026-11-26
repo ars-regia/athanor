@@ -318,11 +318,13 @@ impl Catalog {
 }
 
 /// Whether the program of `domain` is drawn right to left: by the language of the catalog
-/// [`Catalog::load`] gives it, the override included, the rule of [`Catalog::is_rtl`]. A
-/// catalog that cannot be read is the error of [`Catalog::load`]: the caller logs it and, as
-/// the program does with no catalog, draws English, left to right. Sulphur's workspace slide
-/// settles its direction here by the bar's domain, so the slide and the bar's strip never
-/// disagree.
+/// [`Catalog::load`] gives it, the override included, the rule of [`Catalog::is_rtl`]. Every
+/// program settles its direction here, with its own domain, and none calls
+/// [`Catalog::is_rtl`] itself (`verify.py i18n-direction`), so two programs never disagree.
+/// A catalog that cannot be read is the error of [`Catalog::load`]: the caller logs it and,
+/// as the program does with no catalog, draws English, left to right. Sulphur's workspace
+/// slide settles its direction by the bar's domain, so the slide and the bar's strip follow
+/// the same catalog.
 pub fn is_rtl(domain: &str) -> Result<bool, (PathBuf, Error)> {
     Catalog::load(domain).map(|catalog| catalog.is_rtl())
 }

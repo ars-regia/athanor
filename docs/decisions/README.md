@@ -267,3 +267,5 @@ confirmed by the status of ADR-Y.
 | ADR-0146 | 0146 | [The merge queue builds the specs, not the kernel or the shell, and the shell is covered by a push alert](0146-merge-queue-builds-the-specs-only.md) | accepted | process, build |
 | ADR-0147 | 0147 | [The keyring prompter is in 1.0, and colour management and HDR come after it](0147-keyring-prompter-in-1-0-colour-after.md) | accepted | security, shell, process, docs |
 | ADR-0148 | 0148 | [Release 1.0 ships no noexec mount, and fs-verity only if btrfs takes it without a migration](0148-no-noexec-mounts-in-1-0.md) | accepted | security, kernel, platform |
+| ADR-0149 | 0149 | [The forge's userspace binaries keep their symbols in a signed debuginfo artifact next to the image, never on it](0149-userspace-debuginfo-artifact.md) | accepted | build, signing, docs |
+| ADR-0150 | 0150 | [One Athanor preference store before release 1.0, in place of the COSMIC stores](0150-athanor-preference-store.md) | accepted | shell, session, security, storage |

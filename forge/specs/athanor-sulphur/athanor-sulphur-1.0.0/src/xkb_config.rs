@@ -74,14 +74,18 @@ impl fmt::Display for Refused {
     }
 }
 
-/// The file: under `$XDG_CONFIG_HOME` when it is absolute, else `$HOME/.config`, as
-/// cosmic-config resolves it.
+/// The file, under the configuration root.
 pub fn path() -> Option<PathBuf> {
-    let root = std::env::var_os("XDG_CONFIG_HOME")
+    Some(root()?.join(RELATIVE))
+}
+
+/// The configuration root: `$XDG_CONFIG_HOME` when it is absolute, else `$HOME/.config`, as
+/// cosmic-config resolves it.
+pub(crate) fn root() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|root| root.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(root.join(RELATIVE))
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
 }
 
 /// Reads the record cosmic-config writes (`ron::ser::to_string_pretty` of cosmic-comp-config's

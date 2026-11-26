@@ -266,7 +266,7 @@ impl State {
     {
         match event {
             InputEvent::TouchDown { event } => {
-                let named = output_name(&event.device());
+                let named = self.touch_named(&event.device());
                 let location = self
                     .touch_location(named.as_deref(), |panel| event.position_transformed(panel));
                 if let Some(location) = location {
@@ -274,7 +274,7 @@ impl State {
                 }
             }
             InputEvent::TouchMotion { event } => {
-                let named = output_name(&event.device());
+                let named = self.touch_named(&event.device());
                 let location = self
                     .touch_location(named.as_deref(), |panel| event.position_transformed(panel));
                 if let Some(location) = location {
@@ -288,6 +288,16 @@ impl State {
             InputEvent::TouchFrame { .. } => self.touch_frame(),
             _ => {}
         }
+    }
+}
+
+impl State {
+    /// The output `device` spans: the one `input.toml` maps it to when that output is shown,
+    /// else the one libinput names.
+    fn touch_named<D: 'static>(&self, device: &D) -> Option<String> {
+        self.mapped_output(device)
+            .map(|output| output.name())
+            .or_else(|| output_name(device))
     }
 }
 

@@ -6744,8 +6744,9 @@ LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?
 # `S/src/a.rs:12` cites `forge/specs/x/x-1.0.0/src/a.rs:12` (#1428).
 PATH_ABBREVIATION = re.compile(r"\(`([^`\s]+)`, below `([^`\s/]+)`\)")
 # What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
-# `cosmic-osd.service`), or a bare snake_case or `::` path.
-CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
+# `cosmic-osd.service`), a backticked `Key=value` setting (`ProtectSystem=strict`, #1548), or a
+# bare snake_case or `::` path.
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*=[^`\s]+(?=`)|(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
 FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
 CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
 # The length from which a range is too long for one citation: such a range holds almost any word, so it proves nothing.
@@ -6815,9 +6816,18 @@ def holds_token(text, token, quoted=False):
     """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
     inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open. With
     `quoted` (a JSON file) the token must be a whole string: `"cosmic-settings"`, not
-    `cosmic-settings-daemon` or `cosmic-osd.service`."""
+    `cosmic-settings-daemon` or `cosmic-osd.service`. A `Key=value` token is held as written and
+    whole: not after a word character or `-`, and followed by whitespace, the end of the text or
+    another character than a word character, `-`, `.`, `/`, `:`, `,` or `=`. So
+    `ProtectSystem=strict` is not held by `ProtectSystem=strictly` or `ProtectSystem=full`,
+    `WantedBy=a.target` not by `WantedBy=a.target.wants`, `Foo=bar` not by `Foo=bar,baz` or
+    `Foo=bar:baz`, and `CapabilityBoundingSet=CAP_A` is held by `CapabilityBoundingSet=CAP_A CAP_B`.
+    A comment that holds the whole setting holds it too (#1553).
+    """
     if quoted:
         return f'"{token}"' in text
+    if "=" in token:
+        return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w./:,=-])", text) is not None
     word = re.escape(token.rsplit("::", 1)[-1])
     return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
 
@@ -6851,13 +6861,12 @@ def diff_hunks(root, base):
 CITATION_SPAN = re.compile(r"`([^`\s]*):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*`")
 
 
-def without_citation_numbers(line, tracked):
+def without_citation_numbers(line, tracked, cited=False):
     """LINE with the numbers of its citations blanked: a span whose path is a tracked file, and a short
     `:N` that follows such a span on the line. Any other `:N` (`fedora:43`, `quay.io:443`) is text.
     A `:N` after a tracked file is read as that file's citation, as the grammar says, so a change of
-    such a span alone (a port after `src/x.rs:120`) is not an edit."""
-    cited = False
-
+    such a span alone (a port after `src/x.rs:120`) is not an edit. With CITED, LINE is read as
+    the rest of a line that cites a tracked file before it."""
     def blank(m):
         nonlocal cited
         if m[1] and not any(f == m[1] or f.endswith("/" + m[1]) for f in tracked):
@@ -7478,7 +7487,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                         continue
             quoted = path.endswith(".json")
             def usable(items):
-                return [i for i in sorted(items) if not FILE_LIKE.search(i[2]) and i[2] not in own
+                # a setting is a token whole, though its value names a file (`WantedBy=a.target`)
+                return [i for i in sorted(items) if ("=" in i[2] or not FILE_LIKE.search(i[2])) and i[2] not in own
                         and holds_token(body, i[2], quoted)]
 
             tokens = usable(found)
@@ -8353,17 +8363,43 @@ def refused_base_text(root, base, path):
     return shown.stdout
 
 
-def refused_scan_docs(root, pattern, kept, scope):
+def refused_blank(text, tracked, pattern, cited=False):
+    """TEXT as refused-names matches a kept entry: a symbol citation of a tracked file
+    (`path#name`, as symbol-citations reads it) is read as a line citation of that file, and the
+    numbers of the line citations are blanked (without_citation_numbers). A citation that moves
+    from `path:N` to `path#name` keeps its entry; one of another file, or a changed word outside
+    the citations, does not. The symbol's name is not compared: any `#name` of the file is the
+    same citation, so `#foo` that becomes `#bar` keeps the entry, and symbol-citations checks that
+    the file defines it. A symbol that names a refused name (`#adw::Dialog`, a PATTERN match)
+    stays as written, so the name is still a hit.
+    """
+    def symbol(m):
+        cite = SYMBOL_CITATION.fullmatch(m[1])
+        if cite and cite[1] and any(f == cite[1] or f.endswith("/" + cite[1]) for f in tracked) \
+                and not refused_line_names(cite[2], pattern):
+            return f"`{cite[1]}:0`"
+        return m[0]
+
+    return without_citation_numbers(CODE_TOKEN.sub(symbol, text), tracked, cited)
+
+
+def refused_scan_docs(root, pattern, kept, scope, tracked):
     """(problems, notes, used, hits) of the specifications under ROOT/docs/architecture: the
     problems of their sections, the notes (a draft, a document with no Status line), the
     (document, text) of the KEPT entries that a normative sentence holds, and {(document, name):
     sentences} for the sentences that still name a refused name once the kept text is taken
-    out."""
+    out. A kept text matches a sentence with the numbers of the citations of TRACKED files blanked
+    in both, as line-citations reads an edit, and a symbol citation of a tracked file read as a
+    line citation of it (refused_blank), so a citation placed again with the same words keeps its
+    entry (#1548). A kept text is blanked both as a line of
+    its own and as the rest of a line that cites a tracked file before it, so a fragment that
+    starts at a `:N` matches the sentence it was cut from."""
     problems, notes, kept_texts = [], [], {}
     history, registers = refused_history(scope[0]), scope[1]
     for doc, names, text, _ in kept:
         for name in names.split(","):
-            kept_texts.setdefault((doc, name), []).append(text)
+            kept_texts.setdefault((doc, name), []).append((text, {refused_blank(text, tracked, pattern, c)
+                                                                   for c in (False, True)}))
     used, hits = set(), {}
     for path in sorted((root / "docs/architecture").glob("*.md")):
         if path.name in registers:
@@ -8379,11 +8415,11 @@ def refused_scan_docs(root, pattern, kept, scope):
                             "so its refused names cannot be checked")
         for _, sentence in found:
             for name in refused_line_names(sentence, pattern):
-                rest = sentence
-                for text in kept_texts.get((path.name, name), []):
-                    if text in rest:
+                rest = refused_blank(sentence, tracked, pattern)
+                for text, blanks in kept_texts.get((path.name, name), []):
+                    for blank in (b for b in blanks if b in rest):
                         used.add((path.name, text))
-                        rest = rest.replace(text, " ")
+                        rest = rest.replace(blank, " ")
                 if name in refused_line_names(rest, pattern):
                     hits[(path.name, name)] = hits.get((path.name, name), 0) + 1
     return problems, notes, used, hits
@@ -8419,12 +8455,16 @@ def refused_names_report(root=None, base=None, today=None):
         scope = parse_refused_scope(read(root / REFUSED_NAMES_SCOPE))
     except (OSError, ValueError) as err:
         return [f"{REFUSED_NAMES_SCOPE}: {err}"], []
+    listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        return [f"git ls-files failed: {listed.stderr.strip()}"], []
+    tracked = {f for f in listed.stdout.split("\0") if f}
     problems = []
     for doc, names, text, _ in kept:
         for name in names.split(","):
             if name not in refused_line_names(text, pattern):
                 problems.append(f"{REFUSED_NAMES_KEPT}: {doc}: the text does not name `{name}`: {text}")
-    scanned, notes, used, hits = refused_scan_docs(root, pattern, kept, scope)
+    scanned, notes, used, hits = refused_scan_docs(root, pattern, kept, scope, tracked)
     problems += scanned
     problems += [f"{REFUSED_NAMES_KEPT}: {doc} {names}: the text no longer appears in a normative section: {text}"
                  for doc, names, text, _ in kept if (doc, text) not in used]
@@ -9526,9 +9566,6 @@ PANIC_HOOK_AFTER = {
     "athanor-greeter-ui": r"if\s+let\s+Err\(err\)\s*=\s*sandbox::ensure_single_threaded\(\)[^{]*"
                           r"apply_landlock_sandbox\(\)[^{]*forbid_core_dumps\(\)[^{]*\{[^{}]*\}\s*",
 }
-# athanor-lock does not depend on athanor-unit yet: the lock pull request (LP18 step 2) adds the
-# hook and removes this entry. The set only shrinks.
-PANIC_HOOK_PENDING = {"athanor-lock"}
 # What a hooked program may take from tracing_subscriber: a filter, and the trait that installs
 # the subscriber athanor_unit::journal builds. Any other subscriber writes the hook's report to
 # the journal without the `<3>` that sets its priority, and with colour codes.
@@ -9550,14 +9587,14 @@ def program_mains(crate_dir):
 def panic_hook_problems(root=None):
     """The shipped programs whose `main` does not start with PANIC_HOOK, or with what
     PANIC_HOOK_AFTER names and then PANIC_HOOK: every program of a workspace member that
-    experimental/EXEMPT does not list, but PANIC_HOOK_PENDING."""
+    experimental/EXEMPT does not list."""
     root = root or ROOT
     exempt_file = root / "experimental" / "EXEMPT"
     exempt = ({ln.strip() for ln in read(exempt_file).split("\n") if ln.strip() and not ln.startswith("#")}
               if exempt_file.exists() else set())
     problems = []
     for name, crate_dir in workspace_crates(root).items():
-        if name in exempt or name in PANIC_HOOK_PENDING:
+        if name in exempt:
             continue
         first = re.compile(r"\bfn\s+main\s*\(\s*\)[^{]*\{\s*" + PANIC_HOOK_AFTER.get(name, "") + re.escape(PANIC_HOOK))
         mains = program_mains(crate_dir)
@@ -9950,6 +9987,32 @@ MAIN_BRANCH_FILES = (
 MAIN_BRANCH_LINE = re.compile(
     r"branches:\s*\[[^\]]*(?<![\w-])main(?![\w-])[^\]]*\]|refs/heads/main(?![\w-])"
     r"""|^\s*-\s*['"]?main['"]?\s*(#.*)?$|ref_name\s*==\s*['"]main['"]""")
+
+
+DIRECTION_CALL = re.compile(r"\.\s*is_rtl\s*\(|\bCatalog\s*::\s*is_rtl\b")
+
+
+def direction_problems(relative_path, text):
+    """A program settles its text direction through `athanor_i18n::is_rtl(domain)`, the one place
+    that does; a `.is_rtl()` call on any receiver, or `Catalog::is_rtl`, anywhere but athanor-i18n
+    is a second source of the same fact. The text is read without comments, strings kept, so a
+    call split over lines or after a string holding `//` is found. Already formatted, with line
+    and reason."""
+    if relative_path.startswith("system/athanor-i18n/"):
+        return []
+    code = without_comments(text)
+    return [f"{relative_path}:{code.count(chr(10), 0, hit.start()) + 1} calls is_rtl on a catalog: "
+            f"settle the direction with athanor_i18n::is_rtl(domain)"
+            for hit in DIRECTION_CALL.finditer(code)]
+
+
+@check("i18n-direction", "No crate but athanor-i18n calls is_rtl on a catalog: programs use athanor_i18n::is_rtl")
+def check_i18n_direction():
+    r = Result()
+    for p in rust_files():
+        for problem in direction_problems(rel(p), read(p)):
+            r.fail(problem)
+    return r
 
 
 def main_branch_problems(files):
