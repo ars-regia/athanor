@@ -7482,7 +7482,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                         continue
             quoted = path.endswith(".json")
             def usable(items):
-                return [i for i in sorted(items) if not FILE_LIKE.search(i[2]) and i[2] not in own
+                # a setting is a token whole, though its value names a file (`WantedBy=a.target`)
+                return [i for i in sorted(items) if ("=" in i[2] or not FILE_LIKE.search(i[2])) and i[2] not in own
                         and holds_token(body, i[2], quoted)]
 
             tokens = usable(found)

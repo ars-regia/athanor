@@ -249,7 +249,7 @@ class Names(unittest.TestCase):
 
     def test_a_key_value_setting_is_a_token_held_as_written(self):
         # #1548: `ProtectSystem=strict` was no token, so a citation of it could not be placed again
-        unit = {"unit/a.service": "[Service]\nProtectSystem=strict\nProtectHome=yes\n# ProtectSystem off\n"}
+        unit = {"unit/a.service": "[Service]\nProtectSystem=strict\nProtectHome=yes\n# ProtectSystem off\nWantedBy=a.target\n"}
         cite = "The unit sets `ProtectSystem=strict` (`unit/a.service:{}`)."
         self.assertEqual(messages(cite.format(2), unit), [])
         for line in (3, 4):
@@ -258,6 +258,10 @@ class Names(unittest.TestCase):
                 self.assertEqual(len(out), 1, out)
                 self.assertIn("does not hold `ProtectSystem=strict`", out[0])
         self.assertFalse(verify.holds_token("ProtectSystem=strictly", "ProtectSystem=strict"))
+        # a setting whose value names a file is a token all the same
+        wanted = "The unit sets `WantedBy=a.target` (`unit/a.service:{}`)."
+        self.assertEqual(messages(wanted.format(5), unit), [])
+        self.assertEqual(len(messages(wanted.format(2), unit)), 1)
         # the bare words keep their reading: `strict`, the last of them, is the token
         bare = "The unit sets `ProtectSystem`=`strict` (`unit/a.service:{}`)."
         self.assertEqual(messages(bare.format(2), unit), [])
