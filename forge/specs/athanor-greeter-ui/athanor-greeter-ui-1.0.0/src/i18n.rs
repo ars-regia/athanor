@@ -43,7 +43,13 @@ pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {
 
 /// Whether the language in use is written right to left.
 pub fn is_rtl() -> bool {
-    catalog().is_rtl()
+    static RTL: OnceLock<bool> = OnceLock::new();
+    *RTL.get_or_init(|| {
+        athanor_i18n::is_rtl(DOMAIN).unwrap_or_else(|(path, err)| {
+            tracing::error!(path = %path.display(), error = %err, "translations are unavailable");
+            false
+        })
+    })
 }
 
 #[cfg(test)]
