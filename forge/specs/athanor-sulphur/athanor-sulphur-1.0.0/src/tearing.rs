@@ -182,8 +182,9 @@ pub fn tears(c: Conditions) -> bool {
 /// DRM backend passes what it draws the frame from, and the fixture what its frames are drawn
 /// from, so that both read the same state. The surface is
 /// the toplevel of the window that has the output whole (`marks::whole_on`), or else of the
-/// topmost window on the output; it is alone when no other window meets the output and no popup
-/// is shown. With no window, nothing asks.
+/// topmost window on the output; it is alone when no other window meets the output, no popup
+/// is shown and no workspace slide draws the workspace left beside it (`workspace::slide`).
+/// With no window, nothing asks.
 pub fn conditions<E: Element>(
     space: &Space<Window>,
     output: &Output,
@@ -223,7 +224,8 @@ pub fn conditions<E: Element>(
     let alone = on.len() == 1
         && crate::marks::whole_on(window, area)
         && popups.is_empty()
-        && PopupManager::popups_for_surface(&surface).next().is_none();
+        && PopupManager::popups_for_surface(&surface).next().is_none()
+        && !crate::workspace::slide::running(output);
     Conditions {
         asked: asks(&surface),
         alone,

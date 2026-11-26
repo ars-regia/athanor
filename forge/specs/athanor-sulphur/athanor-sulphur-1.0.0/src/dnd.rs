@@ -285,6 +285,6 @@ impl State {
 }
 
 /// `at` moved by `by`: a client's offsets add up without bound, so the sum saturates.
-fn moved(at: Point<i32, Logical>, by: Point<i32, Logical>) -> Point<i32, Logical> {
+pub(crate) fn moved(at: Point<i32, Logical>, by: Point<i32, Logical>) -> Point<i32, Logical> {
     Point::from((at.x.saturating_add(by.x), at.y.saturating_add(by.y)))
 }

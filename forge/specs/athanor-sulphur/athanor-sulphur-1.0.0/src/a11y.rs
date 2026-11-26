@@ -191,7 +191,7 @@ impl Dispatch2<AthanorA11yManagerV1, State> for A11yManagers {
                 delay,
             } => bounded(state.set_bounce_keys(on(active), delay)),
             Request::SetReducedMotion { active } => match active {
-                WEnum::Value(active) => state.bell.reduced_motion = on(active),
+                WEnum::Value(active) => state.set_reduced_motion(on(active)),
                 WEnum::Unknown(_) => refuse("no such active_state"),
             },
             Request::SetStickyKeys { .. }

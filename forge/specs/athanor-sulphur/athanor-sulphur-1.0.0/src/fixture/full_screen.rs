@@ -16,7 +16,7 @@ const BAR: i32 = 40;
 const OUTPUT: (i32, i32) = (OUTPUTS[0].width, OUTPUTS[0].height);
 
 /// A window of a new client, with the keyboard.
-fn window(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel, Window) {
+pub(super) fn window(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel, Window) {
     let mut local = Local::connect(run, None);
     let toplevel = local.toplevel(run);
     let window = window_of(run, local.id.as_ref().expect("an id"));
@@ -31,7 +31,7 @@ fn bar(run: &mut Running) -> (Local, wl_surface::WlSurface) {
 }
 
 /// Asks for `output`, or for none, and answers: the configure's width, height and states.
-fn enter(
+pub(super) fn enter(
     run: &mut Running,
     local: &mut Local,
     toplevel: &xdg_toplevel::XdgToplevel,

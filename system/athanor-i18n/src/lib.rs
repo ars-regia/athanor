@@ -317,6 +317,16 @@ impl Catalog {
     }
 }
 
+/// Whether the program of `domain` is drawn right to left: by the language of the catalog
+/// [`Catalog::load`] gives it, the override included, the rule of [`Catalog::is_rtl`]. A
+/// catalog that cannot be read is the error of [`Catalog::load`]: the caller logs it and, as
+/// the program does with no catalog, draws English, left to right. Sulphur's workspace slide
+/// settles its direction here by the bar's domain, so the slide and the bar's strip never
+/// disagree.
+pub fn is_rtl(domain: &str) -> Result<bool, (PathBuf, Error)> {
+    Catalog::load(domain).map(|catalog| catalog.is_rtl())
+}
+
 fn primary_language(locale: &str) -> &str {
     locale.split(['_', '.', '@']).next().unwrap_or(locale)
 }

@@ -19,6 +19,7 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
 use wl_drm_client::wl_drm;
 use super::marks::{at, clear_the_fixture, confined, frame, lock_the_session, paint, popup};
 use crate::tearing::Conditions;
+use crate::workspace::slide::{DURATION, advance};
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::utils::Physical;
 use wayland_protocols::wp::tearing_control::v1::client::{
@@ -416,6 +417,33 @@ fn another_window_on_the_output_refuses_the_tear() {
     let refused = conditions(&mut run, None);
     assert_eq!(refused, Conditions { alone: false, ..MET });
     assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// A workspace slide refuses the tear while it runs, as the workspace left is drawn beside
+/// the full-screen window coming back, and the tear comes back once it is over.
+#[test]
+fn a_workspace_slide_refuses_the_tear_until_it_is_over() {
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    // The fixture's window, set on the second output, joins a workspace there: on one of the
+    // first, the switch back would bring it back beside the full-screen window.
+    let second = workspaces_of(&run, 1);
+    assert!(run.state.move_window_to(&fixture, second[0]));
+    let _control = ask(&mut run, &mut local);
+    let before = conditions(&mut run, None);
+    assert!(crate::tearing::tears(before), "before the switch");
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.activate_workspace(list[1]));
+    advance(DURATION);
+    assert!(run.state.activate_workspace(list[0]));
+    let refused = conditions(&mut run, None);
+    assert!(refused.asked && !refused.alone, "{refused:?}");
+    assert!(!crate::tearing::tears(refused), "during the slide");
+    advance(DURATION);
+    let after = conditions(&mut run, None);
+    assert!(crate::tearing::tears(after), "once it is over");
     run.stop();
 }
 

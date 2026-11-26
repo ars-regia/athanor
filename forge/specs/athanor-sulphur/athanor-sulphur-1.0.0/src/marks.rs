@@ -10,6 +10,7 @@
 //! window at a fractional offset, they land a pixel apart (#918). The divider lies inside the
 //! window's geometry, where decision 31 places no mark, as the maintainer chose on 2026-11-04.
 
+use crate::dnd::moved;
 use crate::focus_theme::{Edge, Outline};
 use crate::state::{full_screen_area, inset, laid_out, unconfined};
 use smithay::backend::renderer::element::memory::{
@@ -300,6 +301,8 @@ pub struct Marks {
     pub blurred: crate::background_effect::Regions,
     /// The drag icons and where each goes (`State::drawn_drag_icons`).
     pub drag: Vec<(WlSurface, Point<i32, Logical>)>,
+    /// The workspace slides under way (`workspace/slide.rs`).
+    pub slides: Vec<crate::workspace::slide::Shown>,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,
@@ -970,6 +973,7 @@ fn window_elements<R>(
     elements: &mut Vec<Stacked<R>>,
     window: &Window,
     located: Rectangle<i32, Logical>,
+    shift: Point<i32, Logical>,
     marks: &Marks,
     place: &Place,
 ) where
@@ -979,6 +983,8 @@ fn window_elements<R>(
     let Some(toplevel) = window.toplevel() else {
         return;
     };
+    // A workspace slide draws the window `shift` from its place, its black with it.
+    let located = Rectangle::new(moved(located.loc, shift), located.size);
     let surface = toplevel.wl_surface();
     let offset = window.geometry().loc;
     let drawn_at = located.loc - offset;
@@ -1066,9 +1072,10 @@ fn window_elements<R>(
             let backdrop = states.data_map.get_or_insert(|| Backdrop(Id::new()));
             backdrop.0.clone()
         });
+        let backdrop = Rectangle::new(moved(place.output.loc, shift), place.output.size);
         elements.push(Stacked::Line(SolidColorRenderElement::new(
             id,
-            place.physical(place.output),
+            place.physical(backdrop),
             CommitCounter::default(),
             Color32F::new(0.0, 0.0, 0.0, 1.0),
             Kind::Unspecified,
@@ -1179,6 +1186,8 @@ where
         .into_iter()
         .partition(|layer| layer.layer() == Layer::Overlay);
     let lifted = lifted(marks.focused.as_ref(), space, output);
+    let slide = marks.slides.iter().find(|shown| shown.output == *output);
+    let shift = |window: &Window| slide.map_or_else(Point::default, |shown| shown.shift(window));
     let places = space.output_geometry(output).map(|geometry| {
         // As `State::window_area_on`, which would take the map's lock again.
         let area = laid_out(output).map(|size| inset(geometry, size, map.non_exclusive_zone()));
@@ -1197,7 +1206,8 @@ where
     layers(renderer, overlay, &mut elements);
     if let Some((window, place)) = lifted.zip(places.as_ref()) {
         if let Some(located) = space.element_geometry(window) {
-            window_elements(renderer, &mut elements, window, located, marks, place);
+            let by = shift(window);
+            window_elements(renderer, &mut elements, window, located, by, marks, place);
         }
     }
     layers(renderer, top, &mut elements);
@@ -1207,8 +1217,13 @@ where
                 .element_bbox(window)
                 .is_some_and(|bbox| place.output.overlaps(bbox));
             if let Some(located) = space.element_geometry(window).filter(|_| overlaps) {
-                window_elements(renderer, &mut elements, window, located, marks, place);
+                let by = shift(window);
+                window_elements(renderer, &mut elements, window, located, by, marks, place);
             }
+        }
+        // The workspaces left, out of the space, below the one activated.
+        for (window, located, by) in slide.iter().flat_map(|shown| shown.leaving.iter().rev()) {
+            window_elements(renderer, &mut elements, window, *located, *by, marks, place);
         }
     }
     layers(renderer, lower, &mut elements);
