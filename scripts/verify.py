@@ -6092,10 +6092,24 @@ SEPARATED_UNIT_KEYS = {
     }),
     "Install": frozenset({"WantedBy"}),
 }
-# Filters that systemd installs for the architectures of SystemCallArchitectures= alone: without
-# `native`, a 32-bit socketcall made through int 0x80 opened a UDP socket past
-# RestrictAddressFamilies=AF_UNIX, measured on systemd 262 (#1558).
-SECCOMP_FILTER_KEYS = ("RestrictAddressFamilies", "SystemCallFilter")
+# The filter each separated unit keeps once its drop-ins apply, the lock's of LP15
+# (doc_lock_and_prompts.md): the native architecture alone, since systemd installs a filter for
+# the architectures of SystemCallArchitectures= alone and, without `native`, a 32-bit socketcall
+# made through int 0x80 opened a UDP socket past RestrictAddressFamilies=AF_UNIX, measured on
+# systemd 262 (#1558); the local socket family alone; and the system-service set, less the
+# calls that Landlock does not mediate. A separated unit that needs another filter records it
+# here. The three keys are lists that accumulate, an empty assignment resetting them
+# (systemd.exec(5)), so a drop-in may not reset one.
+SEPARATED_FILTER = {
+    "SystemCallArchitectures": frozenset({"native"}),
+    "RestrictAddressFamilies": frozenset({"AF_UNIX"}),
+    "SystemCallFilter": frozenset({"@system-service"}),
+}
+SEPARATED_REFUSED_CALLS = frozenset({
+    "@chown", "chmod", "fchmod", "fchmodat", "fchmodat2", "utime", "utimes", "utimensat",
+    "futimesat", "setxattr", "lsetxattr", "fsetxattr", "setxattrat", "removexattr",
+    "lremovexattr", "fremovexattr", "removexattrat",
+})
 
 
 def separated_unit_dirs(unit):
@@ -6190,29 +6204,44 @@ def separated_unit_dropins(root, units, separated=SEPARATED_USER_UNITS):
 
 def separated_unit_problems(units, dropins=None, separated=SEPARATED_USER_UNITS):
     """A separated unit that no spec ships; or that, its drop-ins (separated_unit_dropins)
-    merged, sets a key outside SEPARATED_UNIT_KEYS, or a seccomp filter without
-    SystemCallArchitectures=native alone."""
+    merged, sets a key outside SEPARATED_UNIT_KEYS, or does not keep SEPARATED_FILTER: its
+    architectures and families those alone, its system calls those allowed by lines that all
+    come before the first refusal, with every call of SEPARATED_REFUSED_CALLS refused after
+    them; and a drop-in that resets a key of SEPARATED_FILTER."""
     problems = []
     for unit in separated:
         if unit not in units:
             problems.append(f"{unit}: listed in SEPARATED_USER_UNITS and shipped by no spec under forge/specs")
             continue
         merged = units[unit] + "".join("\n" + dropin for _, dropin in (dropins or {}).get(unit, ()))
-        architectures, filters = set(), set()
+        lists = {key: [] for key in SEPARATED_FILTER}
         for section, key, value in unit_assignments(merged):
             if key not in SEPARATED_UNIT_KEYS.get(section, ()):
                 problems.append(f"{unit}: [{section}] {key}={value} is not measured for separated units: measure that it keeps the host's user namespace under the user manager, where a namespace of the user's lets a process of the same uid attach, and add it to SEPARATED_UNIT_KEYS (doc_lock_and_prompts.md D43)")
-            # Both are lists that accumulate, and an empty assignment resets (systemd.exec(5)).
-            elif key == "SystemCallArchitectures":
-                architectures = architectures | set(value.split()) if value else set()
-            elif key in SECCOMP_FILTER_KEYS:
-                (filters.add if value else filters.discard)(key)
-        if filters and architectures != {"native"}:
-            problems.append(f"{unit}: sets {'= and '.join(sorted(filters))}= without SystemCallArchitectures=native alone, so a 32-bit call through int 0x80 escapes the filter, as a socketcall escaped RestrictAddressFamilies=AF_UNIX (doc_lock_and_prompts.md LP15)")
+            elif key in lists:
+                lists[key] = lists[key] + [value] if value else []
+        for where, dropin in (dropins or {}).get(unit, ()):
+            for _, key, value in unit_assignments(dropin):
+                if key in lists and not value:
+                    problems.append(f"{where}: resets {key}= of {unit} with an empty assignment, which drops the unit's filter (doc_lock_and_prompts.md LP15); add to the list, or change the unit")
+        architectures = {word for value in lists["SystemCallArchitectures"] for word in value.split()}
+        if architectures != SEPARATED_FILTER["SystemCallArchitectures"]:
+            problems.append(f"{unit}: filters its calls without SystemCallArchitectures=native alone, so a 32-bit call through int 0x80 escapes the filter, as a socketcall escaped RestrictAddressFamilies=AF_UNIX (doc_lock_and_prompts.md LP15)")
+        families = lists["RestrictAddressFamilies"]
+        if any(value.startswith("~") for value in families) or \
+                {word for value in families for word in value.split()} != SEPARATED_FILTER["RestrictAddressFamilies"]:
+            problems.append(f"{unit}: RestrictAddressFamilies= is {' then '.join(families) or 'unset'} once its drop-ins apply, not AF_UNIX alone (doc_lock_and_prompts.md LP15)")
+        calls = lists["SystemCallFilter"]
+        allowed = [value for value in calls if not value.startswith("~")]
+        refused = {word.split(":")[0] for value in calls if value.startswith("~") for word in value[1:].split()}
+        if calls[:len(allowed)] != allowed or not refused >= SEPARATED_REFUSED_CALLS or \
+                {word for value in allowed for word in value.split()} != SEPARATED_FILTER["SystemCallFilter"]:
+            missing = ", ".join(sorted(SEPARATED_REFUSED_CALLS - refused)) or "none"
+            problems.append(f"{unit}: SystemCallFilter= is not @system-service alone, then refusals of every call Landlock does not mediate, once its drop-ins apply (refusals missing: {missing}); a call allowed after a refusal is allowed again (doc_lock_and_prompts.md LP15)")
     return problems
 
 
-@check("separated-units", "A per-user unit kept apart from the user's other processes sets only keys measured to keep the host's user namespace, its filters on the native architecture (D43)")
+@check("separated-units", "A per-user unit kept apart from the user's other processes sets only keys measured to keep the host's user namespace, and keeps the filter of LP15 (D43)")
 def check_separated_units():
     r = Result()
     units, problems = shipped_user_units(ROOT)

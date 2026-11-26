@@ -15,7 +15,16 @@ LOCK = "athanor-lock.service"
 SHIPPED = SCRIPT.parents[1] / "forge/specs/athanor-lock/athanor-lock-1.0.0/data" / LOCK
 SPEC = "athanor-lock/athanor-lock.spec"
 DATA = "athanor-lock/athanor-lock-1.0.0/data"
-KEPT = "NoNewPrivileges=yes\nSystemCallArchitectures=native\nSystemCallFilter=@system-service\nRestrictRealtime=yes\nRestrictSUIDSGID=yes\nLockPersonality=yes\nRestrictAddressFamilies=AF_UNIX\n"
+REFUSALS = next(
+    line + "\n"
+    for line in SHIPPED.read_text().splitlines()
+    if line.startswith("SystemCallFilter=~")
+)
+KEPT = (
+    "NoNewPrivileges=yes\nSystemCallArchitectures=native\nSystemCallFilter=@system-service\n"
+    + REFUSALS
+    + "RestrictRealtime=yes\nRestrictSUIDSGID=yes\nLockPersonality=yes\nRestrictAddressFamilies=AF_UNIX\n"
+)
 
 
 def unit(lines):
@@ -100,20 +109,78 @@ class SeparatedUnitsTest(unittest.TestCase):
             without,
             without + "SystemCallArchitectures=native x86\n",
             KEPT + "SystemCallArchitectures=\n",
-            "RestrictAddressFamilies=AF_UNIX\n",
         ):
             with self.subTest(lines=lines):
                 found = problems({LOCK: unit(lines)})
                 self.assertEqual(len(found), 1, found)
                 self.assertIn("without SystemCallArchitectures=native", found[0])
-        # No filter, no requirement; and a filter reset by an empty assignment needs none.
-        self.assertEqual(problems({LOCK: unit("NoNewPrivileges=yes\n")}), [])
+
+    def test_a_unit_without_the_filter_fails(self):
+        # Each of the three lists is required; a reset in the unit itself empties it.
+        for lines in (
+            "NoNewPrivileges=yes\n",
+            "SystemCallArchitectures=native\nSystemCallArchitectures=\n"
+            "SystemCallFilter=@system-service\nSystemCallFilter=\n"
+            "RestrictAddressFamilies=AF_UNIX\nRestrictAddressFamilies=\n",
+        ):
+            with self.subTest(lines=lines):
+                found = problems({LOCK: unit(lines)})
+                self.assertEqual(len(found), 3, found)
+
+    def test_the_shipped_filter_widened_or_cut_fails(self):
+        # The negative control on the real unit: each change keeps every key LP15 names
+        # and breaks one of its values.
+        text = SHIPPED.read_text()
+        for old, new in (
+            ("RestrictAddressFamilies=AF_UNIX\n", "RestrictAddressFamilies=AF_UNIX AF_INET\n"),
+            ("RestrictAddressFamilies=AF_UNIX\n", "RestrictAddressFamilies=AF_UNIX\nRestrictAddressFamilies=AF_NETLINK\n"),
+            ("RestrictAddressFamilies=AF_UNIX\n", "RestrictAddressFamilies=~AF_INET\n"),
+            (REFUSALS, ""),
+            (" chmod:EPERM", ""),
+            (" removexattrat:EPERM", ""),
+            ("SystemCallFilter=@system-service\n", "SystemCallFilter=@system-service @mount\n"),
+            (REFUSALS, REFUSALS + "SystemCallFilter=chmod\n"),
+            ("SystemCallFilter=@system-service\n", "SystemCallFilter=~@mount\n"),
+        ):
+            with self.subTest(new=new):
+                self.assertEqual(text.count(old), 1)
+                found = problems({LOCK: text.replace(old, new)})
+                self.assertEqual(len(found), 1, found)
+
+    def test_a_drop_in_that_changes_the_filter_fails(self):
+        for dropin in (
+            "[Service]\nRestrictAddressFamilies=AF_INET\n",
+            "[Service]\nSystemCallFilter=@mount\n",
+            "[Service]\nSystemCallArchitectures=x86\n",
+        ):
+            with self.subTest(dropin=dropin):
+                found = problems(
+                    {LOCK: unit(KEPT)}, {f"athanor-lock/{LOCK}.d/50-x.conf": dropin}
+                )
+                self.assertEqual(len(found), 1, found)
+        # An added refusal narrows the filter, and passes.
         self.assertEqual(
             problems(
-                {LOCK: unit("SystemCallFilter=@system-service\nSystemCallFilter=\n")}
+                {LOCK: unit(KEPT)},
+                {f"athanor-lock/{LOCK}.d/50-x.conf": "[Service]\nSystemCallFilter=~@mount\n"},
             ),
             [],
         )
+
+    def test_a_drop_in_that_resets_a_filter_fails(self):
+        # Even when it sets the same values again: the reset is what the unit cannot see.
+        for key, again in (
+            ("SystemCallArchitectures", "SystemCallArchitectures=native\n"),
+            ("RestrictAddressFamilies", "RestrictAddressFamilies=AF_UNIX\n"),
+            ("SystemCallFilter", "SystemCallFilter=@system-service\n" + REFUSALS),
+        ):
+            with self.subTest(key=key):
+                found = problems(
+                    {LOCK: unit(KEPT)},
+                    {f"athanor-lock/{LOCK}.d/50-x.conf": f"[Service]\n{key}=\n{again}"},
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(f"resets {key}=", found[0])
 
     def test_the_shipped_unit_without_its_native_line_fails(self):
         # The negative control on the real unit.
@@ -133,20 +200,22 @@ class SeparatedUnitsTest(unittest.TestCase):
     def test_drop_ins_apply_in_file_name_order_across_directories(self):
         # systemd sorts every drop-in of a unit by file name, whatever its directory or
         # spec; a walk in directory order would read these two the other way round.
-        on = "[Service]\nSystemCallArchitectures=native\n"
-        off = "[Service]\nSystemCallArchitectures=\n"
+        # An allowed call after a refusal is allowed again.
+        without = unit(KEPT.replace(REFUSALS, ""))
+        allow = "[Service]\nSystemCallFilter=@system-service\n"
+        refuse = "[Service]\n" + REFUSALS
         self.assertEqual(
             problems(
-                {LOCK: unit(KEPT)},
-                {"zz/service.d/10-off.conf": off, f"aa/{LOCK}.d/90-on.conf": on},
+                {LOCK: without},
+                {"zz/service.d/10-allow.conf": allow, f"aa/{LOCK}.d/90-refuse.conf": refuse},
             ),
             [],
         )
         self.assertEqual(
             len(
                 problems(
-                    {LOCK: unit(KEPT)},
-                    {f"aa/{LOCK}.d/10-on.conf": on, "zz/service.d/90-off.conf": off},
+                    {LOCK: without},
+                    {f"aa/{LOCK}.d/10-refuse.conf": refuse, "zz/service.d/90-allow.conf": allow},
                 )
             ),
             1,
