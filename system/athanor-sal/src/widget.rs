@@ -349,6 +349,10 @@ pub enum Kind {
     /// A raised button that shows only an icon and turns on and off by itself, as a mute
     /// button; it raises [`Event::Toggled`]. Add it with [`Ui::icon_toggle`].
     IconToggle(crate::icon_toggle::IconToggle),
+    /// A raised button that, activated, records the next key combination, as Settings'
+    /// shortcuts do (doc_settings.md SL5); it raises [`Event::Recorded`]. Add it with
+    /// [`Ui::shortcut_capture`].
+    Shortcut(crate::shortcut::ShortcutCapture),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
     /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
@@ -748,6 +752,7 @@ impl Widget {
                     | Kind::Switch { .. }
                     | Kind::Tile(_)
                     | Kind::IconToggle(_)
+                    | Kind::Shortcut(_)
                     | Kind::Slider(_)
                     | Kind::DropDown(_)
                     | Kind::Field(_)
@@ -781,6 +786,9 @@ pub enum Event {
     /// Enter was pressed in a single-line field, as GTK's `GtkEntry::activate`: the form it
     /// belongs to may submit. A text area breaks the line instead.
     Activated(WidgetId),
+    /// A shortcut capture recorded a combination, which it now holds; ask [`Ui::shortcut`]
+    /// which. A recording cancelled raises nothing.
+    Recorded(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
     Window(WindowButton),
     /// The secondary button was pressed on a widget, or Shift+F10 or the Menu key with the
@@ -1008,6 +1016,9 @@ pub struct Ui {
     pub(crate) focus: Option<WidgetId>,
     /// The focus given without its ring, until a key is pressed: see [`Ui::focus_quietly`].
     pub(crate) quiet_focus: Option<WidgetId>,
+    /// The key that ended a shortcut capture's combination, by its raw code, while it is held:
+    /// it does not repeat into the widgets ([`Ui::record_repeat`]).
+    pub(crate) held_back: Option<u32>,
     pub(crate) text: TextContext,
     pub(crate) title_bar: Option<WidgetId>,
     /// A modal dialog's widgets: see [`Ui::set_dialog`].
@@ -1075,6 +1086,7 @@ impl Ui {
             stale_popup: false,
             focus: None,
             quiet_focus: None,
+            held_back: None,
             text: TextContext::default(),
             title_bar: None,
             modal: false,
@@ -1651,6 +1663,7 @@ impl Ui {
             | Kind::Tile(crate::tile::Tile { title: t, .. })
             | Kind::LabelledButton { label: t, .. }
             | Kind::IconToggle(crate::icon_toggle::IconToggle { label: t, .. })
+            | Kind::Shortcut(crate::shortcut::ShortcutCapture { label: t, .. })
             | Kind::List { name: t, .. }
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
@@ -2209,6 +2222,8 @@ impl Ui {
             return;
         }
         self.end_composition();
+        // A shortcut capture the focus leaves stops recording, as at Escape.
+        self.stop_recording();
         self.focus = to;
         self.quiet_focus = None;
     }
@@ -2586,7 +2601,19 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Button(text) | Kind::Toggle { label: text, radio: false, .. } => {
+            // A shortcut capture shows its prompt while it records.
+            Kind::Button(text)
+            | Kind::Toggle { label: text, radio: false, .. }
+            | Kind::Shortcut(crate::shortcut::ShortcutCapture {
+                label: text,
+                recording: None,
+                ..
+            })
+            | Kind::Shortcut(crate::shortcut::ShortcutCapture {
+                prompt: text,
+                recording: Some(_),
+                ..
+            }) => {
                 let layout = self.text.layout(text, size, rtl, &style);
                 // GTK's box: the minimum height inside the outline, the outline outside it.
                 let h = (layout.height() + pad).max(control_min);
@@ -2957,6 +2984,10 @@ impl Ui {
             | Kind::LabelledButton { .. }
             | Kind::DropDown(_) => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
+            Kind::Shortcut(_) => {
+                self.start_recording(id);
+                None
+            }
             Kind::Check { ref mut active, .. }
             | Kind::Switch { ref mut active, .. }
             | Kind::Tile(crate::tile::Tile { ref mut active, .. })

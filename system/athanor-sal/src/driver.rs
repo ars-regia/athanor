@@ -279,7 +279,8 @@ pub trait Application {
     /// [`Key::SelectLeft`] or [`Key::SelectRight`], and Ctrl with an arrow as the arrow, with
     /// `modifiers.ctrl`: only a calendar reads it apart. The other keys reach neither this call nor
     /// the widgets: the function keys but Shift+F10, Ctrl with any other letter, and the other
-    /// keys that type nothing, such as Insert.
+    /// keys that type nothing, such as Insert. A shortcut capture that records
+    /// ([`crate::Ui::shortcut_capture`]) takes every key, these included, before this call.
     fn key(
         &mut self,
         _shell: &mut Shell,
@@ -2988,6 +2989,15 @@ impl App {
         let Some(id) = self.shell.find(wl).map(|surface| surface.id) else {
             return;
         };
+        // A shortcut capture that records stops as its window, or the dialog over it, loses the
+        // keyboard, as when the focus leaves it.
+        if !focused {
+            for s in [id, self.shell.dialogs.topmost(id)] {
+                if let Some(surface) = self.shell.get_mut(s) {
+                    surface.dirty |= surface.ui.keyboard_left();
+                }
+            }
+        }
         self.application.keyboard(&mut self.shell, id, focused);
         self.draw_dirty();
     }
@@ -2998,9 +3008,49 @@ impl App {
         self.keyboard_focus.map(|id| self.shell.dialogs.topmost(id))
     }
 
+    /// The surface a key goes to: an open menu's, whichever of the application's surfaces the
+    /// compositor sends it to, or else [`App::key_target`]'s; none while a dialog blocks it.
+    fn key_receiver(&self) -> Option<SurfaceId> {
+        let target = match self.shell.popup {
+            Some(open) if open.menu => Some(open.surface),
+            _ => self.key_target(),
+        };
+        target.filter(|&id| !self.shell.dialogs.blocked(id))
+    }
+
+    /// Hands a key pressed or released to a shortcut capture that records on the surface it
+    /// goes to, before it is read as a [`Key`]: the function keys and Ctrl with any letter,
+    /// which no other widget takes, included (doc_settings.md SL5). Whether the capture took it,
+    /// and neither the application nor the other widgets see it.
+    fn record(&mut self, event: &KeyEvent, pressed: bool) -> bool {
+        let modifiers = KeyModifiers::from(self.modifiers);
+        let Some(id) = self.key_receiver() else {
+            return false;
+        };
+        let Some(ui) = self.shell.ui_mut(id) else {
+            return false;
+        };
+        let taken = if pressed {
+            ui.record_press(event.raw_code, event.keysym, modifiers)
+        } else {
+            ui.record_release(event.raw_code, event.keysym)
+        };
+        let Some(event) = taken else {
+            return false;
+        };
+        self.changed(id, event);
+        true
+    }
+
     /// A key held down: as pressed again, with the serial of its press, which the repeat does
     /// not carry, except the keys that act once per press.
     fn repeat(&mut self, event: KeyEvent) {
+        // A shortcut capture that records takes no repeat, nor the widgets that of the key that
+        // ended its combination.
+        let receiver = self.key_receiver().and_then(|id| self.shell.ui(id));
+        if receiver.is_some_and(|ui| ui.record_repeat(event.raw_code)) {
+            return;
+        }
         let focused = self
             .key_target()
             .and_then(|id| self.shell.ui(id))
@@ -3016,6 +3066,9 @@ impl App {
     }
 
     fn key(&mut self, event: KeyEvent) {
+        if self.record(&event, true) {
+            return;
+        }
         let mut key = match event.keysym {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
@@ -3062,11 +3115,7 @@ impl App {
         }
         // An open menu takes the keys, whichever of the application's surfaces the compositor
         // sends them to, and a blocked window's topmost dialog takes them from it.
-        let target = match self.shell.popup {
-            Some(open) if open.menu => Some(open.surface),
-            _ => self.key_target(),
-        };
-        let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
+        let Some(id) = self.key_receiver() else {
             return forget(&mut key);
         };
         // A key shows the ring, the application's hook's too (AX8's `:focus-visible`).
@@ -3534,8 +3583,9 @@ impl KeyboardHandler for App {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: KeyEvent,
+        event: KeyEvent,
     ) {
+        self.record(&event, false);
     }
 
     fn update_modifiers(
