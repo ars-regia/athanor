@@ -305,7 +305,7 @@ area = "shell"
 status = "specified"
 spec = "doc_osd.md"
 item = "OD17"
-purpose = "The Athanor on-screen display: the volume and microphone keys' overlay on Sal"
+purpose = "The Athanor on-screen display: the volume, microphone and brightness keys' overlay on Sal"
 
 [[component]]
 path = "forge/specs/athanor-recovery"
