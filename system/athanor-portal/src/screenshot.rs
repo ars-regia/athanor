@@ -33,8 +33,8 @@ pub const MAX_AGE: Duration = Duration::from_secs(3600);
 pub const CAPTURE_DEADLINE: Duration = Duration::from_secs(5);
 const PREFIX: &str = "screenshot-";
 const SUFFIX: &str = ".png";
-/// The largest image composed: a side, and its RGBA bytes, so that a layout of absurd
-/// coordinates is refused rather than allocated.
+/// The largest image composed: a side, and its RGBA bytes. A layout larger than that at the
+/// highest scale is composed at the scale that fits it.
 const MAX_SIDE: u32 = 16384;
 const MAX_BYTES: u64 = 16384 * 8192 * 4;
 
@@ -186,9 +186,10 @@ impl Image {
 }
 
 /// The outputs as one image, in the layout's logical coordinates at the highest output scale
-/// (spike S6): the image covers the bounding box of the outputs, each output is scaled to its
-/// place, and what no output covers is transparent. An output that overlaps another, as a
-/// mirror does, is drawn over it in the order given.
+/// (spike S6), or the lower scale that fits the image within [`MAX_SIDE`] and [`MAX_BYTES`]
+/// (maintainer decision, 2026-11-26): the image covers the bounding box of the outputs, each
+/// output is scaled to its place, and what no output covers is transparent. An output that
+/// overlaps another, as a mirror does, is drawn over it in the order given.
 // ponytail: nearest-neighbour scaling of the outputs below the highest scale, until spike S6
 // measures whether a filtered scale reads better in a mixed-scale layout.
 pub fn compose(shots: &[Shot]) -> Result<Image, String> {
@@ -222,10 +223,21 @@ pub fn compose(shots: &[Shot]) -> Result<Image, String> {
     if shots.is_empty() {
         return Err("no output was captured".to_owned());
     }
+    let (wide, high) = (
+        right.saturating_sub(left) as f64,
+        bottom.saturating_sub(top) as f64,
+    );
+    // Rounding adds at most half a pixel to each side, so at most one side's length to the
+    // pixels: the budget leaves that room.
+    let pixels = (MAX_BYTES / 4) as f64 - f64::from(MAX_SIDE) - 1.0;
+    let scale = scale
+        .min(f64::from(MAX_SIDE) / wide)
+        .min(f64::from(MAX_SIDE) / high)
+        .min((pixels / (wide * high)).sqrt());
     let side = |logical: i64| (logical as f64 * scale).round();
     let (width, height) = (
-        side(right.saturating_sub(left)),
-        side(bottom.saturating_sub(top)),
+        side(right.saturating_sub(left)).max(1.0),
+        side(bottom.saturating_sub(top)).max(1.0),
     );
     if width > f64::from(MAX_SIDE)
         || height > f64::from(MAX_SIDE)
@@ -753,6 +765,36 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_wider_than_the_largest_side_is_composed_at_the_scale_that_fits() {
+        // Two 4K outputs at scale 1 and a 2880×1800 panel at scale 2: 9120 logical pixels
+        // wide, 18240 at the highest scale.
+        let shots = [
+            shot(0, 0, (3840, 2160), (3840, 2160), |_, _| [255, 0, 0, 255]),
+            shot(3840, 0, (3840, 2160), (3840, 2160), |_, _| [0, 255, 0, 255]),
+            shot(7680, 0, (1440, 900), (2880, 1800), |_, _| [0, 0, 255, 255]),
+        ];
+        let image = compose(&shots).expect("composed");
+        assert_eq!((image.width, image.height), (16384, 3880));
+        let at = |x: u32, y: u32| {
+            let i = ((y * image.width + x) * 4) as usize;
+            &image.rgba[i..i + 4]
+        };
+        assert_eq!(at(0, 0), [255, 0, 0, 255]);
+        assert_eq!(at(8000, 0), [0, 255, 0, 255]);
+        assert_eq!(at(16383, 0), [0, 0, 255, 255]);
+        // Below the panel, nothing.
+        assert_eq!(at(16383, 3879), [0, 0, 0, 0]);
+        // A layout too large on both sides fits the bytes as well: 20000 pixels a side at
+        // scale 2, 16384 within the side, and fewer still within the bytes.
+        let square = [
+            shot(0, 0, (1, 1), (2, 2), |_, _| [255; 4]),
+            shot(9999, 9999, (1, 1), (1, 1), |_, _| [255; 4]),
+        ];
+        let image = compose(&square).expect("composed");
+        assert!(u64::from(image.width) * u64::from(image.height) * 4 <= MAX_BYTES);
+    }
+
+    #[test]
     fn a_transform_that_is_not_one_of_the_eight_is_refused() {
         let mut odd = shot(0, 0, (2, 1), (2, 1), |_, _| [255, 0, 0, 255]);
         odd.transform = 9;
@@ -821,11 +863,16 @@ mod tests {
         let mut short = shot(0, 0, (1, 1), (1, 1), |_, _| [0; 4]);
         short.bytes.truncate(2);
         assert!(compose(&[short]).is_err());
+    }
+
+    #[test]
+    fn a_layout_of_far_outputs_is_composed_at_least_one_pixel_high() {
         let far = [
             shot(0, 0, (1, 1), (1, 1), |_, _| [0; 4]),
             shot(100_000, 0, (1, 1), (1, 1), |_, _| [0; 4]),
         ];
-        assert!(compose(&far).is_err());
+        let image = compose(&far).expect("composed");
+        assert_eq!((image.width, image.height), (16384, 1));
     }
 
     #[test]
