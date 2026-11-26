@@ -26,6 +26,13 @@ fn main() {
     let base =
         Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("confine-{}", std::process::id()));
     let (runtime, outside) = (base.join("runtime"), base.join("outside"));
+    // The rig keeps its target and a container numbers its processes from 1 again, so a run
+    // can meet the directory, and the bound socket, of an earlier run with the same pid.
+    match fs::remove_dir_all(&base) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("remove {}: {e}", base.display()),
+    }
     fs::create_dir_all(&runtime).expect("mkdir runtime");
     fs::create_dir_all(&outside).expect("mkdir outside");
 
