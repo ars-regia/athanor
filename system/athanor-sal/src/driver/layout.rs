@@ -1,14 +1,17 @@
 //! The active keyboard layout's name, which a trusted surface shows where a password is typed
 //! (doc_lock_and_prompts.md, LP14): the names come from the `wl_keyboard` keymap and the group
-//! from its modifiers, as the compositor sends them. Switching the group is not Sal's.
+//! from its modifiers, as the compositor sends them. Switching the group is not Sal's. The
+//! keymap also names the key a shortcut capture records, by its first level (doc_settings.md
+//! SL5).
 
 use xkbcommon::xkb;
 
-/// The names of the keymap's layouts, and the group the compositor last made effective.
-#[derive(Debug, Default)]
+/// The keymap, the names of its layouts, and the group the compositor last made effective.
+#[derive(Default)]
 pub(crate) struct Layouts {
     names: Vec<String>,
     group: u32,
+    keymap: Option<xkb::Keymap>,
 }
 
 impl Layouts {
@@ -18,8 +21,8 @@ impl Layouts {
         // xkbcommon 0.8 builds the keymap text and the layout names with
         // `str::from_utf8_unchecked`, so a byte that is not UTF-8 is refused here. libxkbcommon
         // writes the text, so it holds no NUL, on which `new_from_string` would panic.
-        self.names = if text.contains('\0') || std::str::from_utf8(text.as_bytes()).is_err() {
-            Vec::new()
+        self.keymap = if text.contains('\0') || std::str::from_utf8(text.as_bytes()).is_err() {
+            None
         } else {
             let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
             xkb::Keymap::new_from_string(
@@ -28,6 +31,10 @@ impl Layouts {
                 xkb::KEYMAP_FORMAT_TEXT_V1,
                 xkb::KEYMAP_COMPILE_NO_FLAGS,
             )
+        };
+        self.names = self
+            .keymap
+            .as_ref()
             .map(|keymap| {
                 (0..keymap.num_layouts())
                     .map(|index| {
@@ -36,8 +43,7 @@ impl Layouts {
                     })
                     .collect()
             })
-            .unwrap_or_default()
-        };
+            .unwrap_or_default();
         self.active() != before
     }
 
@@ -54,6 +60,21 @@ impl Layouts {
         let before = self.active();
         *self = Self::default();
         before.is_some()
+    }
+
+    /// The keysym the key `raw_code`, a Wayland key code, gives at the first level of the
+    /// effective layout, as with no modifier held: Shift+1 is `1` and not `exclam`. `keysym`,
+    /// the one the key gave, before a keymap, or for a key with no single keysym there.
+    pub(crate) fn base(&self, raw_code: u32, keysym: xkb::Keysym) -> xkb::Keysym {
+        let Some(keymap) = &self.keymap else {
+            return keysym;
+        };
+        // xkb numbers a key 8 above the Linux input code that wl_keyboard sends.
+        let key = xkb::Keycode::new(raw_code.saturating_add(8));
+        match keymap.key_get_syms_by_level(key, self.group, 0) {
+            [one] => *one,
+            _ => keysym,
+        }
     }
 
     /// The effective group and its name; `None` before a keymap, or for a layout it names not.
@@ -84,6 +105,71 @@ mod tests {
     }};
 }};"#
         )
+    }
+
+    /// A keymap of two layouts whose keys give another symbol with Shift, as a compositor sends
+    /// it.
+    fn shifted() -> Layouts {
+        let text = r#"xkb_keymap {
+    xkb_keycodes "test" {
+        minimum = 8; maximum = 255; <AE01> = 10; <TAB> = 23; <AC01> = 38; <AC10> = 47;
+    };
+    xkb_types "test" {
+        type "TWO_LEVEL" {
+            modifiers = Shift; map[Shift] = Level2;
+            level_name[Level1] = "Base"; level_name[Level2] = "Shift";
+        };
+    };
+    xkb_compat "test" { };
+    xkb_symbols "test" {
+        name[Group1] = "English (US)";
+        name[Group2] = "French";
+        key <AE01> { type = "TWO_LEVEL", [ 1, exclam ], [ ampersand, 1 ] };
+        key <TAB> { type = "TWO_LEVEL", [ Tab, ISO_Left_Tab ], [ Tab, ISO_Left_Tab ] };
+        key <AC01> { type = "TWO_LEVEL", [ a, A ], [ q, Q ] };
+        key <AC10> { type = "TWO_LEVEL", [ semicolon, colon ], [ m, M ] };
+    };
+};"#;
+        let mut layouts = Layouts::default();
+        assert!(layouts.keymap(text));
+        layouts
+    }
+
+    /// A shortcut records the key's first level, so that Shift+1 is `1` with Shift and not
+    /// `exclam` (doc_settings.md SL5); the keys are the keymap's Wayland codes, 8 below xkb's.
+    #[test]
+    fn a_key_is_named_by_its_first_level_whatever_shift_made_of_it() {
+        let layouts = shifted();
+        let keys = [
+            (2, xkb::Keysym::exclam, xkb::Keysym::_1),
+            (15, xkb::Keysym::ISO_Left_Tab, xkb::Keysym::Tab),
+            (39, xkb::Keysym::colon, xkb::Keysym::semicolon),
+            (30, xkb::Keysym::A, xkb::Keysym::a),
+        ];
+        for (raw, pressed, base) in keys {
+            assert_eq!(layouts.base(raw, pressed), base, "{pressed:?}");
+            assert_eq!(layouts.base(raw, base), base, "{base:?} unshifted");
+        }
+    }
+
+    #[test]
+    fn the_first_level_is_the_effective_layouts() {
+        let mut layouts = shifted();
+        assert!(layouts.group(1));
+        assert_eq!(layouts.base(30, xkb::Keysym::Q), xkb::Keysym::q);
+        assert_eq!(layouts.base(2, xkb::Keysym::_1), xkb::Keysym::ampersand);
+    }
+
+    #[test]
+    fn without_a_keymap_or_a_symbol_a_key_keeps_the_one_it_gave() {
+        assert_eq!(
+            Layouts::default().base(2, xkb::Keysym::exclam),
+            xkb::Keysym::exclam
+        );
+        assert_eq!(shifted().base(80, xkb::Keysym::F12), xkb::Keysym::F12);
+        let mut cleared = shifted();
+        assert!(cleared.clear());
+        assert_eq!(cleared.base(2, xkb::Keysym::exclam), xkb::Keysym::exclam);
     }
 
     fn us_it() -> Layouts {

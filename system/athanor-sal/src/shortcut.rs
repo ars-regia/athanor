@@ -18,7 +18,8 @@ use xkbcommon::xkb;
 pub struct Shortcut {
     /// The modifiers held.
     pub modifiers: KeyModifiers,
-    /// The xkb name of the key, in lower case for a letter: Shift+A is `a` with Shift. `None`
+    /// The xkb name of the key, by its first level in the effective layout, and in lower case
+    /// for a letter: Shift+A is `a` with Shift, Shift+1 is `1` and Shift+Tab is `Tab`. `None`
     /// for a modifier alone.
     pub key: Option<String>,
 }

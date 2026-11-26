@@ -3020,10 +3020,12 @@ impl App {
 
     /// Hands a key pressed or released to a shortcut capture that records on the surface it
     /// goes to, before it is read as a [`Key`]: the function keys and Ctrl with any letter,
-    /// which no other widget takes, included (doc_settings.md SL5). Whether the capture took it,
-    /// and neither the application nor the other widgets see it.
+    /// which no other widget takes, included (doc_settings.md SL5). The key is the keysym of its
+    /// first level in the effective layout, whatever the modifiers made of it. Whether the
+    /// capture took it, and neither the application nor the other widgets see it.
     fn record(&mut self, event: &KeyEvent, pressed: bool) -> bool {
         let modifiers = KeyModifiers::from(self.modifiers);
+        let keysym = self.shell.layouts.base(event.raw_code, event.keysym);
         let Some(id) = self.key_receiver() else {
             return false;
         };
@@ -3031,9 +3033,9 @@ impl App {
             return false;
         };
         let taken = if pressed {
-            ui.record_press(event.raw_code, event.keysym, modifiers)
+            ui.record_press(event.raw_code, keysym, modifiers)
         } else {
-            ui.record_release(event.raw_code, event.keysym)
+            ui.record_release(event.raw_code, keysym)
         };
         let Some(event) = taken else {
             return false;
