@@ -9,10 +9,14 @@ areas: [build, signing, docs]
 
 # 0149. The forge's userspace binaries keep their symbols in a signed debuginfo artifact next to the image, never on it
 
-**Accepted** by the maintainer with the pull request that records it. The maintainer took
-decision 1 on 2026-11-26, for the last item of #1352; decisions 2 to 8 are the proposals of this
-record that carry it out, approved with it. Nothing of it is implemented before that approval
-(ADR-0074).
+**Accepted** by the maintainer with the pull request that records it. The maintainer took decision
+1 on 2026-11-26, for the last item of #1352: every forge RPM build produces split debuginfo, kept
+as a signed OCI artifact. Decisions 2 to 8 are the proposals of this record that carry it out.
+Five choices among them are recommendations, open for the maintainer's choice when they approve
+the record, and each is marked as such where it is made: `-g1` for the C packages (decision 2), a
+`-debuginfo` repository per package (decision 3), the image-version key and its producer (decision
+6), the retention (decision 7) and the changes to shipped binaries (decision 8). Nothing of it is
+implemented before that approval (ADR-0074).
 
 ## Context
 
@@ -77,7 +81,10 @@ What the forge does today, read on `iso-v0` at c774a2056:
      so no `.gnu_debugdata` section enters a shipped binary and no source package is made (the
      image's `org.opencontainers.image.revision` label names the commit that holds the sources).
      `%_optflags` gains `-g1`, the line tables of gcc and clang alike, and `%_ldflags` gains
-     `-Wl,--build-id=sha1`.
+     `-Wl,--build-id=sha1`. `-g1` for the C packages is a recommendation of this record, open for
+     the maintainer's choice when they approve it: their debuginfo has no consumer until core
+     dumps or a crash handler are decided (decision 6), and without it they keep their build IDs
+     and get no line tables.
    - `custom_packages` in `forge/config/packages.json` names 37 packages. One, `kernel-forge`, is
      built by the kernel's own workflows (`EXTERNAL_PACKAGES` of
      `forge/scripts/dag_orchestrator.py`) and has `azoth-debuginfo`. Of the 36 specs the DAG
@@ -134,6 +141,9 @@ What the forge does today, read on `iso-v0` at c774a2056:
    `dag_package.sh` copies each directory into its own image, so the package image, and through
    it the tier repository, holds the shipped RPMs only; the filter of `system/Containerfile`
    stays as a second guard.
+   - A repository per package, rather than one shared by every package, is a recommendation of
+     this record, open for the maintainer's choice when they approve it: each then shares its
+     package image's lifecycle.
    - The job of `call-dag-compile.yml` pushes
      `<registry>/<owner>/athanor-forge-<package>-debuginfo`, a `FROM scratch` image of those RPMs
      with the same `tier.content.sha256` label, signs and attests it keyless with
@@ -205,9 +215,9 @@ What the forge does today, read on `iso-v0` at c774a2056:
      only it holds: an RPM is built before the image and cannot know them. The file then differs
      from the one `athanor-base-config` installs, and `rpm -V athanor-base-config` reports it, as
      `doc_system_image.md` section 8 accepts for `vmlinuz`. The key (`IMAGE_VERSION` or
-     `BUILD_ID`) and its producer are open choices for the maintainer, settled by the revision of
-     the specifications (Consequences); decision 4's `<image>-<version>` tag and step 2 below rest
-     on that key.
+     `BUILD_ID`) and its producer are a recommendation of this record, open for the maintainer's
+     choice when they approve it, and the revision of the specifications (Consequences) writes the
+     choice; decision 4's `<image>-<version>` tag and step 2 below rest on that key.
    - **The panic hook prints the build ID.** The crash report of SN8 then holds that
      `IMAGE_VERSION` and the last 50 journal lines of the failed run, and a long backtrace
      can push the `install at` line out of them. The hook therefore ends its output, after the
@@ -236,25 +246,26 @@ What the forge does today, read on `iso-v0` at c774a2056:
 
    The revision of the specifications (Consequences) writes these steps and the hook's line into
    `doc_session.md`.
-7. **Retention follows the system images, not the kernel's two releases.** `athanor-debuginfo`
-   is kept while the janitor (`forge/scripts/clean_ghcr.sh`) keeps any system image whose digest
-   one of its tags names, with whatever signs it (the rule of the `athanor-system` packages,
-   `doc_update_trust.md` UT10). That is a rule of its own in the janitor, whose default keeps only
-   the two newest tagged versions of any other package, with a test under `forge/scripts/tests`
-   that an artifact naming a kept image survives. A machine on `stable` runs an image older than
-   the last two releases, and a report from it is only worth the artifact of its own image. The
-   package-level images of decision 3 follow their package images' rule and need no more.
-   **Storage** is an estimate, not a measurement. The 22 x86_64 forge RPMs on the maintainer's
-   desktop whose release carries a content hash (the four of `RELEASE_BY_HAND`, `cosmic-comp`
-   among them, are not counted) hold 81 ELF files, 55 of them eBPF objects of `athanor-tetragon`,
-   339 MiB stripped (measured on 2026-11-26), the exempt specs of decision 2 included, so an
-   upper bound on what is split; line tables under the RPM's zstd level 19 are estimated at tens
-   to a few hundred MiB per artifact, below the size of the system image it stands beside. The
-   registry stores that once for each kept image, the images of the last 90 days and every
-   promoted one (UT10), less what they share: with one layer for each debuginfo RPM, a package
-   unchanged between two image builds is one blob for both. The implementing pull request
-   measures the size per artifact and the total over the kept set, and records them in
-   `doc_build_system.md`.
+7. **Retention follows the system images, not the kernel's two releases.** This is a
+   recommendation of this record, open for the maintainer's choice when they approve it; the
+   alternative is the kernel's rule. `athanor-debuginfo` is kept while the janitor
+   (`forge/scripts/clean_ghcr.sh`) keeps any system image whose digest one of its tags names, with
+   whatever signs it (the rule of the `athanor-system` packages, `doc_update_trust.md` UT10). That
+   is a rule of its own in the janitor, whose default keeps only the two newest tagged versions of
+   any other package, with a test under `forge/scripts/tests` that an artifact naming a kept image
+   survives. A machine on `stable` runs an image older than the last two releases, and a report
+   from it is only worth the artifact of its own image. The package-level images of decision 3
+   follow their package images' rule and need no more. **Storage** is an estimate, not a
+   measurement. The 22 x86_64 forge RPMs on the maintainer's desktop whose release carries a
+   content hash (the four of `RELEASE_BY_HAND`, `cosmic-comp` among them, are not counted) hold 81
+   ELF files, 55 of them eBPF objects of `athanor-tetragon`, 339 MiB stripped (measured on
+   2026-11-26), the exempt specs of decision 2 included, so an upper bound on what is split; line
+   tables under the RPM's zstd level 19 are estimated at tens to a few hundred MiB per artifact,
+   below the size of the system image it stands beside. The registry stores that once for each
+   kept image, the images of the last 90 days and every promoted one (UT10), less what they share:
+   with one layer for each debuginfo RPM, a package unchanged between two image builds is one blob
+   for both. The implementing pull request measures the size per artifact and the total over the
+   kept set, and records them in `doc_build_system.md`.
 8. **The image gains nothing.** No package, file or byte of debug data is added to it: the
    debuginfo RPMs reach no tier repository, the shipped RPMs carry no `/usr/lib/.build-id` link
    and no `.gnu_debugdata`, and the binaries stay stripped. A shipped ELF file changes in three
@@ -262,7 +273,9 @@ What the forge does today, read on `iso-v0` at c774a2056:
    with its note header (computed, not measured), which ties it to its debug data; it is expected
    to gain a `.gnu_debuglink` section naming its `.debug` file, and to lose its `.comment`
    section, both from the strip that `find-debuginfo` runs. These two are expected behaviour, not
-   checked against debugedit's source, and the first build confirms them.
+   checked against debugedit's source, and the first build confirms them. Accepting these three
+   changes is a recommendation of this record, open for the maintainer's choice when they approve
+   it.
 
 ## Consequences
 
