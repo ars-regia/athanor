@@ -609,13 +609,14 @@ impl State {
     /// Keeps the input devices, each given `input.toml` as it is added; a touchpad added while
     /// the touchpad key has turned them off starts off (D16).
     fn track_devices(&mut self, event: &InputEvent<LibinputInputBackend>) {
+        let settings = self.input_settings();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
         match event {
             InputEvent::DeviceAdded { device } => {
                 let mut device = device.clone();
-                input_settings::apply(&mut device, &self.input_settings, drm.touchpads_off);
+                input_settings::apply(&mut device, &settings, drm.touchpads_off);
                 drm.devices.push(device);
             }
             InputEvent::DeviceRemoved { device } => {
@@ -627,17 +628,19 @@ impl State {
 
     /// `input.toml` applied again to every input device. Nested or headless, there is none.
     pub(crate) fn apply_input_settings(&mut self) {
+        let settings = self.input_settings();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
         for device in &mut drm.devices {
-            input_settings::apply(device, &self.input_settings, drm.touchpads_off);
+            input_settings::apply(device, &settings, drm.touchpads_off);
         }
     }
 
     /// The touchpad key (D16): every touchpad stops sending events, or starts again as the
     /// `state` of `input.toml` has it, for the session; cosmic-comp's setting of it is not read. Nested or headless, there is none.
     pub(crate) fn toggle_touchpads(&mut self) {
+        let settings = self.input_settings();
         let Backend::Drm(drm) = &mut self.backend else {
             tracing::debug!("no touchpads outside a session of the seat");
             return;
@@ -649,7 +652,7 @@ impl State {
             "the touchpad key"
         );
         for device in &drm.devices {
-            input_settings::switch(device, &self.input_settings, drm.touchpads_off);
+            input_settings::switch(device, &settings, drm.touchpads_off);
         }
     }
 

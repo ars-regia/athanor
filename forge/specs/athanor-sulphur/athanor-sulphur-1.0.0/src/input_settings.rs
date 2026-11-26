@@ -15,8 +15,10 @@ use smithay::reexports::input::{
     SendEventsMode, TapButtonMap,
 };
 use std::any::Any;
+use std::cell::Cell;
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use toml::{Table, Value};
 
 /// The file, under the configuration root.
@@ -588,7 +590,20 @@ fn watch(
     Ok(())
 }
 
+/// The settings last read, in the seat's user data as the workspace slide is in the output's,
+/// so that `State` gains no field and `state.rs` keeps the lines the documents cite.
+#[derive(Default)]
+struct Held(Cell<Rc<InputSettings>>);
+
 impl State {
+    /// `input.toml` as last read.
+    pub(crate) fn input_settings(&self) -> Rc<InputSettings> {
+        let held = &self.seat.user_data().get_or_insert(Held::default).0;
+        let settings = held.take();
+        held.set(Rc::clone(&settings));
+        settings
+    }
+
     /// Reads `path` and applies it to every device. An absent file gives the defaults; a
     /// refused one changes nothing.
     pub fn load_input_settings(&mut self, path: &Path) {
@@ -609,8 +624,12 @@ impl State {
                 return;
             }
         };
-        if settings != self.input_settings {
-            self.input_settings = settings;
+        if settings != *self.input_settings() {
+            self.seat
+                .user_data()
+                .get_or_insert(Held::default)
+                .0
+                .set(Rc::new(settings));
             self.apply_input_settings();
         }
     }
@@ -620,7 +639,7 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        let on = self.input_settings.num_lock.unwrap_or(false);
+        let on = self.input_settings().num_lock.unwrap_or(false);
         let modifiers = keyboard.modifier_state();
         if modifiers.num_lock != on {
             keyboard.set_modifier_state(smithay::input::keyboard::ModifiersState {
@@ -634,7 +653,7 @@ impl State {
     pub(crate) fn scroll_factor<D: 'static>(&self, device: &D) -> f64 {
         libinput(device)
             .and_then(|device| {
-                self.input_settings
+                self.input_settings()
                     .resolve(Class::of(device), &device.name())
                     .scroll_factor
             })
@@ -646,7 +665,7 @@ impl State {
     pub(crate) fn mapped_output<D: 'static>(&self, device: &D) -> Option<Output> {
         let device = libinput(device)?;
         let name = self
-            .input_settings
+            .input_settings()
             .resolve(Class::of(device), &device.name())
             .map_to_output?;
         self.space

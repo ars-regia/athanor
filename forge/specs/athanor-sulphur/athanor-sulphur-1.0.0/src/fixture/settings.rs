@@ -34,7 +34,7 @@ fn idle(run: &mut Running) {
 }
 
 fn mouse_speed(state: &State) -> Option<f64> {
-    state.input_settings.resolve(Class::Mouse, "a mouse").speed
+    state.input_settings().resolve(Class::Mouse, "a mouse").speed
 }
 
 /// A change is followed without a restart; a malformed or too large file leaves the last good
@@ -45,7 +45,7 @@ fn input_toml_is_followed_live() {
     let file = settings_file("input", "input.toml");
     let handle = run.event_loop.handle();
     input_settings::follow(&mut run.state, &handle, file.clone());
-    assert_eq!(run.state.input_settings, Default::default(), "no file");
+    assert_eq!(*run.state.input_settings(), Default::default(), "no file");
 
     write_raw(&file, "schema = 1\n[mouse]\nspeed = 0.5\n");
     until(&mut run, "the speed", |state| {
@@ -78,7 +78,7 @@ fn input_toml_is_followed_live() {
     );
     until(&mut run, "the other key", |state| {
         state
-            .input_settings
+            .input_settings()
             .resolve(Class::Mouse, "a mouse")
             .natural_scroll
             == Some(true)
@@ -91,7 +91,7 @@ fn input_toml_is_followed_live() {
 
     std::fs::remove_file(&file).expect("removed");
     until(&mut run, "the defaults", |state| {
-        state.input_settings == Default::default()
+        *state.input_settings() == Default::default()
     });
     run.stop();
     std::fs::remove_dir_all(file.parent().expect("a directory")).expect("clean");
