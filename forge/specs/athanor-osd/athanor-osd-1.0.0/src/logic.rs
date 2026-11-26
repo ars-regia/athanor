@@ -26,8 +26,8 @@ pub const ANNOUNCE_AFTER: Duration = Duration::from_millis(300);
 /// How long a command's target stands for the model's state, which has not caught up with it
 /// yet (OD6, "each key acts on the state it sees").
 pub const PENDING_FOR: Duration = Duration::from_secs(1);
-/// How long a key waits for the audio model's first settled state before it acts on the state
-/// as it is (OD13). The bound runs from the first key of a batch of held keys, not per restart.
+/// How long a key waits for the audio model's first settled state, or a brightness key for the
+/// battery model's first state, before it acts on the state as it is (OD13). The bound runs from the first key of a batch of held keys, not per restart.
 /// The unit restarts after 100 ms and the next key within 1 s of a kill shows its overlay
 /// (ST5), so the wait leaves about 400 ms for the start itself.
 pub const SETTLE_WAIT: Duration = Duration::from_millis(500);
@@ -211,6 +211,14 @@ pub struct Core {
     hold_until: Option<Instant>,
     /// The wait ended with the model still unsettled: no key waits again until it settles.
     gave_up: bool,
+    /// The battery model published a state, or the wait for its first ended: the brightness
+    /// keys no longer wait.
+    battery_known: bool,
+    /// Brightness keys that came before the battery model's first state, replayed in order
+    /// once it comes.
+    held_lights: Vec<Key>,
+    /// When the first held brightness key stops waiting for the battery model.
+    lights_until: Option<Instant>,
 }
 
 impl Core {
@@ -230,6 +238,9 @@ impl Core {
             held: Vec::new(),
             hold_until: None,
             gave_up: false,
+            battery_known: false,
+            held_lights: Vec::new(),
+            lights_until: None,
         }
     }
 
@@ -295,8 +306,9 @@ impl Core {
             .collect()
     }
 
-    /// A key: a brightness key at once; a volume key held while the audio model has not
-    /// settled (OD13), else carried out at once.
+    /// A key: a brightness key held until the battery model's first state, a volume key
+    /// while the audio model has not settled, each for at most [`SETTLE_WAIT`] (OD13), else
+    /// carried out at once.
     pub fn key(&mut self, key: Key, state: &AudioState, now: Instant) -> Vec<Effect> {
         if matches!(
             key,
@@ -306,7 +318,22 @@ impl Core {
                 | Key::KeyboardBrightnessDown
                 | Key::CycleKeyboardBrightness
         ) {
-            return self.light(key, state, now);
+            // An instant past the clock's end waits for nothing.
+            let until = now.checked_add(SETTLE_WAIT).unwrap_or(now);
+            if !self.battery_known && now < *self.lights_until.get_or_insert(until) {
+                if self.held_lights.len() < bus::KEYS {
+                    self.held_lights.push(key);
+                } else {
+                    tracing::warn!(
+                        ?key,
+                        "too many keys wait for the battery state; one is dropped"
+                    );
+                }
+                return Vec::new();
+            }
+            let mut effects = self.release_lights(state, now);
+            effects.extend(self.light(key, state, now));
+            return effects;
         }
         if self.holding(state, now) {
             if self.held.len() < bus::KEYS {
@@ -322,6 +349,17 @@ impl Core {
         let mut effects = self.release(state, now);
         effects.extend(self.act(key, state, now));
         effects
+    }
+
+    /// Replays the held brightness keys, in order, against the battery model's last state;
+    /// from now on no brightness key waits.
+    fn release_lights(&mut self, state: &AudioState, now: Instant) -> Vec<Effect> {
+        self.battery_known = true;
+        self.lights_until = None;
+        std::mem::take(&mut self.held_lights)
+            .into_iter()
+            .flat_map(|key| self.light(key, state, now))
+            .collect()
     }
 
     /// A key against a state: the commands it sends and the overlay it shows. No device to
@@ -463,6 +501,7 @@ impl Core {
             self.screen = None;
             self.keyboard = None;
         }
+        let mut effects = self.release_lights(audio, now);
         let reached = |pending: &Option<Pending>, device: &Option<Backlight>| {
             pending.as_ref().is_some_and(|p| {
                 device
@@ -484,16 +523,14 @@ impl Core {
             changed = Some(Source::Keyboard);
         }
         if let Some(source) = changed {
-            return self.show(source, audio, now).into_iter().collect();
+            effects.extend(self.show(source, audio, now));
+        } else if matches!(self.shown, Some(Source::Screen | Source::Keyboard)) {
+            effects.extend(
+                self.level(audio)
+                    .map(|level| Effect::View(View::Show(level))),
+            );
         }
-        match self.shown {
-            Some(Source::Screen | Source::Keyboard) => self
-                .level(audio)
-                .map(|level| Effect::View(View::Show(level)))
-                .into_iter()
-                .collect(),
-            _ => Vec::new(),
-        }
+        effects
     }
 
     /// A new state of the model: the targets it reached or refused are dropped, and the level
@@ -538,7 +575,8 @@ impl Core {
     /// an idle overlay holds no timer (OD13).
     pub fn deadline(&self) -> Option<Instant> {
         let hold = self.hold_until.filter(|_| !self.held.is_empty());
-        [self.hide_at, self.announce_at, hold]
+        let lights = self.lights_until.filter(|_| !self.held_lights.is_empty());
+        [self.hide_at, self.announce_at, hold, lights]
             .into_iter()
             .flatten()
             .min()
@@ -554,6 +592,13 @@ impl Core {
             );
             self.gave_up = true;
             effects = self.release(state, now);
+        }
+        if !self.held_lights.is_empty() && self.lights_until.is_some_and(|at| at <= now) {
+            tracing::warn!(
+                keys = self.held_lights.len(),
+                "the battery state did not come in time; the held brightness keys act on none"
+            );
+            effects.extend(self.release_lights(state, now));
         }
         if self.announce_at.is_some_and(|at| at <= now) {
             self.announce_at = None;
@@ -1176,6 +1221,36 @@ mod tests {
         assert!(!core
             .key(Key::BrightnessDown, &state(50.0, false), now)
             .is_empty());
+    }
+
+    #[test]
+    fn a_brightness_key_before_the_first_battery_state_waits_for_it_and_shows() {
+        let mut core = Core::new(false);
+        let now = Instant::now();
+        assert!(core.key(Key::BrightnessUp, &state(50.0, false), now).is_empty());
+        assert_eq!(core.deadline(), Some(now + SETTLE_WAIT));
+        let effects = core.observe_battery(
+            &lights(40, 0),
+            &state(50.0, false),
+            now + Duration::from_millis(200),
+        );
+        assert_eq!(battery_commands(&effects), [screen(45)]);
+        assert_eq!(shown(&effects), Some((Source::Screen, 40)));
+        assert!(core.held_lights.is_empty());
+
+        // Without a state in time, the held key acts on none, and no later key waits.
+        let mut core = Core::new(false);
+        assert!(core
+            .key(Key::BrightnessUp, &state(50.0, false), now)
+            .is_empty());
+        assert!(core
+            .tick(&state(50.0, false), now + SETTLE_WAIT)
+            .is_empty());
+        assert!(core.held_lights.is_empty());
+        assert_eq!(core.deadline(), None);
+        core.observe_battery(&lights(40, 0), &state(50.0, false), now + SETTLE_WAIT);
+        let effects = core.key(Key::BrightnessUp, &state(50.0, false), now + SETTLE_WAIT);
+        assert_eq!(battery_commands(&effects), [screen(45)]);
     }
 
     #[test]
