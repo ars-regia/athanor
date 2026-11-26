@@ -1,6 +1,6 @@
 # LP18 step 5, the polkit authentication agent: Implementation Plan
 
-**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The agent carries the user's password from Sal's field to polkit's helper, an authentication path (`AGENTS.md`, "Stop and ask before editing"), and LP8 requires the plan of "the agent's password path" to be approved before any code is written (`docs/architecture/doc_lock_and_prompts.md:118`). No code is written until then. *Amended 2026-11-26: the maintainer approved this plan as the basis for code from P1 to P4, which may now be built (maintainer decision, 2026-11-26).*
+**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The agent carries the user's password from Sal's field to polkit's helper, an authentication path (`AGENTS.md`, "Stop and ask before editing"), and LP8 requires the plan of "the agent's password path" to be approved before any code is written (`docs/architecture/doc_lock_and_prompts.md:118`). No code is written until then. *Amended 2026-11-26: the maintainer approved this plan as the basis for code from P1 to P4, which may now be built (maintainer decision, 2026-11-26). P1 does not depend on #1558 and is built first; P2 and P5 still wait for #1558's `verify.py` rule and rig probe, merged, as section 1 says.*
 
 **Decided on 2026-11-26.** The maintainer decided questions A1 and A2 (section 6) and the confinement rule of #1558, written below as decided.
 
