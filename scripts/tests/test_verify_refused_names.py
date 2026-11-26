@@ -578,13 +578,12 @@ class RefusedNames(unittest.TestCase):
         problems = self.problems()
         self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
 
-    CITED = (
-        "ADR-0141 removes libadwaita (`doc_shell.md` SH3, lines `:{}`) from the shell."
-    )
+    CITED = "ADR-0141 removes libadwaita (`athanor-session:{}`) from the shell."
 
     def placed_again(self, after):
         """The problems against the base of a kept sentence, entry unchanged, once the document's
         sentence reads AFTER."""
+        self.write("system/athanor-session", "one\n")
         self.write(DOC, APPROVED + f"## 2. Decisions\n\n{self.CITED.format('3-4')}\n")
         self.kept(text=self.CITED.format("3-4"))
         self.commit()
@@ -593,11 +592,26 @@ class RefusedNames(unittest.TestCase):
 
     def test_a_kept_sentence_whose_citation_is_placed_again_keeps_its_entry(self):
         # #1548: line-citations asks for a citation to be placed again on a changed citing line,
-        # and the only change that places it with the same words is one of its numbers.
-        self.assertEqual(self.placed_again(self.CITED.format("3, 4")), [])
-        self.assertEqual(
-            verify.refused_citations_blank("`quay.io:443`, `:3`"), "`quay.io:443`, `:N`"
-        )
+        # and the only change that places it with the same words is one of its numbers. The
+        # cited file, `system/athanor-session`, is tracked, written by its name alone, and has no
+        # extension.
+        self.assertEqual(self.placed_again(self.CITED.format("5")), [])
+
+    def test_a_span_that_cites_no_tracked_file_is_text(self):
+        # an image tag, a port and a socket address are not citations: a change of one is a
+        # change of the sentence
+        for span in ("quay.io/fedora/fedora-bootc:{}", "quay.io:{}", "unix:/run/athanor/osd.sock:{}"):
+            with self.subTest(span=span):
+                before = self.CITED.format("3-4").replace("`)", f"`, `{span.format(43)}`)")
+                self.write("system/athanor-session", "one\n")
+                self.write(DOC, APPROVED + f"## 2. Decisions\n\n{before}\n")
+                self.kept(text=before)
+                self.commit()
+                after = before.replace(span.format(43), span.format(44))
+                self.write(DOC, APPROVED + f"## 2. Decisions\n\n{after}\n")
+                problems = self.problems("HEAD")
+                self.assertEqual(len(problems), 2, problems)
+                self.assertTrue(any("no longer appears" in p for p in problems), problems)
 
     def test_a_reworded_kept_sentence_with_a_citation_still_fails(self):
         problems = self.placed_again(self.CITED.format("3, 4").replace("shell", "bar"))
