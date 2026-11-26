@@ -156,6 +156,7 @@ fn battery_page(rig: &mut Rig) {
                 level: 50,
             }),
             refused: 0,
+            ..Default::default()
         })
         .unwrap();
     settle();
