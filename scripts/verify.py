@@ -6861,13 +6861,12 @@ def diff_hunks(root, base):
 CITATION_SPAN = re.compile(r"`([^`\s]*):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*`")
 
 
-def without_citation_numbers(line, tracked):
+def without_citation_numbers(line, tracked, cited=False):
     """LINE with the numbers of its citations blanked: a span whose path is a tracked file, and a short
     `:N` that follows such a span on the line. Any other `:N` (`fedora:43`, `quay.io:443`) is text.
     A `:N` after a tracked file is read as that file's citation, as the grammar says, so a change of
-    such a span alone (a port after `src/x.rs:120`) is not an edit."""
-    cited = False
-
+    such a span alone (a port after `src/x.rs:120`) is not an edit. With CITED, LINE is read as
+    the rest of a line that cites a tracked file before it."""
     def blank(m):
         nonlocal cited
         if m[1] and not any(f == m[1] or f.endswith("/" + m[1]) for f in tracked):
@@ -8371,12 +8370,15 @@ def refused_scan_docs(root, pattern, kept, scope, tracked):
     sentences} for the sentences that still name a refused name once the kept text is taken
     out. A kept text matches a sentence with the numbers of the citations of TRACKED files blanked
     in both, as line-citations reads an edit (without_citation_numbers), so a citation placed
-    again with the same words keeps its entry (#1548)."""
+    again with the same words keeps its entry (#1548). A kept text is blanked both as a line of
+    its own and as the rest of a line that cites a tracked file before it, so a fragment that
+    starts at a `:N` matches the sentence it was cut from."""
     problems, notes, kept_texts = [], [], {}
     history, registers = refused_history(scope[0]), scope[1]
     for doc, names, text, _ in kept:
         for name in names.split(","):
-            kept_texts.setdefault((doc, name), []).append((text, without_citation_numbers(text, tracked)))
+            kept_texts.setdefault((doc, name), []).append((text, {without_citation_numbers(text, tracked, c)
+                                                                   for c in (False, True)}))
     used, hits = set(), {}
     for path in sorted((root / "docs/architecture").glob("*.md")):
         if path.name in registers:
@@ -8393,8 +8395,8 @@ def refused_scan_docs(root, pattern, kept, scope, tracked):
         for _, sentence in found:
             for name in refused_line_names(sentence, pattern):
                 rest = without_citation_numbers(sentence, tracked)
-                for text, blank in kept_texts.get((path.name, name), []):
-                    if blank in rest:
+                for text, blanks in kept_texts.get((path.name, name), []):
+                    for blank in (b for b in blanks if b in rest):
                         used.add((path.name, text))
                         rest = rest.replace(blank, " ")
                 if name in refused_line_names(rest, pattern):

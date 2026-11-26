@@ -597,6 +597,18 @@ class RefusedNames(unittest.TestCase):
         # extension.
         self.assertEqual(self.placed_again(self.CITED.format("5")), [])
 
+    def test_a_kept_fragment_that_starts_at_a_short_citation_keeps_its_entry(self):
+        # the `:N` of the fragment follows the sentence's `athanor-session:3`, which the fragment
+        # leaves out: the fragment is blanked as the rest of that line
+        line = "ADR-0141 cites `athanor-session:3`, and at `:{}` removes libadwaita from the shell."
+        self.write("system/athanor-session", "one\n")
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format(4)}\n")
+        self.kept(text="at `:4` removes libadwaita from the shell.")
+        self.commit()
+        self.assertEqual(self.problems("HEAD"), [])
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format(5)}\n")
+        self.assertEqual(self.problems("HEAD"), [])
+
     def test_a_span_that_cites_no_tracked_file_is_text(self):
         # an image tag, a port and a socket address are not citations: a change of one is a
         # change of the sentence
