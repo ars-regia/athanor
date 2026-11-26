@@ -6859,6 +6859,9 @@ def diff_hunks(root, base):
 
 # A backtick span that may cite lines: `path:120`, `path:3, 9-12`, or the short `:120`.
 CITATION_SPAN = re.compile(r"`([^`\s]*):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*`")
+# A span of CITATION_SPAN, or a `path/file.ext:N` outside backticks (group 2).
+CITATION_SPAN_OR_BARE = re.compile(
+    CITATION_SPAN.pattern + r"|(?<![\w./+`-])([\w.+-]+(?:/[\w.+-]+)*\.\w+):\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*")
 
 
 def without_citation_numbers(line, tracked, cited=False):
@@ -6869,6 +6872,12 @@ def without_citation_numbers(line, tracked, cited=False):
     the rest of a line that cites a tracked file before it."""
     def blank(m):
         nonlocal cited
+        if m[2]:
+            # A citation written without backticks, as `shell-features.md`'s tables write them.
+            if not any(f == m[2] or f.endswith("/" + m[2]) for f in tracked):
+                return m[0]
+            cited = True
+            return f"{m[2]}:N"
         if m[1] and not any(f == m[1] or f.endswith("/" + m[1]) for f in tracked):
             return m[0]
         if not m[1] and not cited:
@@ -6876,7 +6885,7 @@ def without_citation_numbers(line, tracked, cited=False):
         cited = True
         return f"`{m[1]}:N`"
 
-    return CITATION_SPAN.sub(blank, line)
+    return CITATION_SPAN_OR_BARE.sub(blank, line)
 
 
 def moved_ranges(ranges, hunks, same=None):
