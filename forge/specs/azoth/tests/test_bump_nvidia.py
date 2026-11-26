@@ -72,6 +72,8 @@ class NvidiaAvailability(unittest.TestCase):
         notes = []
         self.assertFalse(bump.nvidia_relock("open", "610.57.04", notes, verify=lambda b, v: "gone"))
         self.assertTrue(any("610.57.04" in n and "mirror" in n for n in notes))
+        self.assertTrue(any("only the pinned major" in n and "person's change" in n for n in notes))
+        self.assertFalse(any("moves the pin" in n for n in notes))
 
     def test_lock_verify_maps_exit_codes(self):
         for code, state in ((0, "ok"), (3, "gone"), (4, "stale")):
