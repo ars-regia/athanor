@@ -4,7 +4,7 @@
 //! fonts, the GL driver, glycin's loaders), so it restricts writes only (`restrict_writes`), by
 //! descriptor as well. The descriptors come from `dirs`, which checks each one it opens.
 //! Connecting to a bus socket is not a filesystem access Landlock mediates.
-//! A program that has no business on the network also calls `deny_tcp`.
+//! A program that has no business on the network also calls `deny_tcp` and `deny_abstract_unix_sockets`.
 
 use std::error::Error;
 use std::os::fd::AsFd;
@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::dirs::{Checked, CheckedNode};
 use landlock::{
     Access, AccessFs, AccessNet, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
-    RulesetAttr, RulesetCreatedAttr, ABI,
+    RulesetAttr, RulesetCreatedAttr, Scope, ABI,
 };
 
 /// Fails unless the calling process has exactly one thread: Landlock confines the calling
@@ -90,6 +90,19 @@ pub fn deny_tcp() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Denies connecting to an abstract Unix socket that a process outside the calling thread's
+/// Landlock domain created, to the calling thread and every thread and process it starts
+/// afterwards (Landlock ABI 6). Sockets bound to a path are not affected, nor are abstract
+/// sockets created inside the domain.
+pub fn deny_abstract_unix_sockets() -> Result<(), Box<dyn Error>> {
+    Ruleset::default()
+        .set_compatibility(CompatLevel::HardRequirement)
+        .scope(Scope::AbstractUnixSocket)?
+        .create()?
+        .restrict_self()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +135,38 @@ mod tests {
         .join()
         .expect("sandboxed thread");
         drop((listener, unix));
+        std::fs::remove_file(socket).expect("cleanup");
+    }
+
+    #[test]
+    fn deny_abstract_unix_sockets_refuses_outside_abstract_sockets_and_keeps_paths() {
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
+
+        let name = format!("athanor-unit-abstract-{}", std::process::id());
+        let address = SocketAddr::from_abstract_name(name.as_bytes()).expect("abstract name");
+        let outside = UnixListener::bind_addr(&address).expect("abstract bind before the scope");
+        assert!(
+            UnixStream::connect_addr(&address).is_ok(),
+            "the abstract socket answers before the scope"
+        );
+        let socket =
+            std::env::temp_dir().join(format!("athanor-unit-abstract-{}.sock", std::process::id()));
+        let unix = UnixListener::bind(&socket).expect("unix bind");
+        let path = socket.clone();
+        std::thread::spawn(move || {
+            deny_abstract_unix_sockets().expect("Landlock ABI 6 must be enforced, not skipped");
+            assert_eq!(
+                UnixStream::connect_addr(&address)
+                    .expect_err("an abstract socket from outside the domain is refused")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(UnixStream::connect(&path).is_ok(), "path sockets stay open");
+        })
+        .join()
+        .expect("sandboxed thread");
+        drop((outside, unix));
         std::fs::remove_file(socket).expect("cleanup");
     }
 

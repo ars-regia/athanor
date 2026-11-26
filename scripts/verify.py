@@ -6001,6 +6001,69 @@ def check_peer_exe():
     return r
 
 
+# The per-user units that must stay apart from the user's other processes (doc_lock_and_prompts.md
+# D43, #1558). Under the user manager a namespacing property puts the unit in a user namespace
+# the user owns, where every process of the same uid holds CAP_SYS_PTRACE, so a non-dumpable flag
+# and Yama's scope 1 no longer keep them from attaching. Such a unit confines itself in process.
+# The polkit agent's unit joins when it ships (LP11); the greeter has no unit of its own.
+SEPARATED_USER_UNITS = ("athanor-lock.service",)
+# Beyond NAMESPACING_PROPERTY: DelegateNamespaces= and NetworkNamespacePath=, measured on systemd
+# 262 to create a user namespace under the user manager, and LogNamespace= and IPCNamespacePath=,
+# which join or make a namespace of their own and which the user manager failed to run when measured.
+SEPARATION_NAMESPACING = re.compile(r"^(DelegateNamespaces|LogNamespace|NetworkNamespacePath|IPCNamespacePath)\s*=(.*)$")
+
+
+def separated_unit_texts(root, units, separated=SEPARATED_USER_UNITS):
+    """{unit: text} of each separated unit with every user drop-in that applies to it appended in
+    systemd's order, by file name (systemd.unit(5)): `<unit>.d`, each `<prefix>-.service.d` of its
+    name and the type-wide `service.d`, a file of the more specific directory replacing one of the
+    same name."""
+    texts = {}
+    for unit in separated:
+        if unit not in units:
+            continue
+        stem, kind = unit.rsplit(".", 1)
+        parts = stem.split("-")
+        dirs = [f"{unit}.d"] + [f"{'-'.join(parts[:n])}-.{kind}.d" for n in range(len(parts) - 1, 0, -1)] + [f"{kind}.d"]
+        found = {}
+        for conf in walk(root / "forge" / "specs", ".conf"):
+            if conf.parent.name in dirs and conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
+                rank = dirs.index(conf.parent.name)
+                if conf.name not in found or rank < found[conf.name][0]:
+                    found[conf.name] = (rank, conf)
+        texts[unit] = units[unit] + "".join("\n" + read(conf) for _, (_, conf) in sorted(found.items()))
+    return texts
+
+
+def separated_unit_problems(units, separated=SEPARATED_USER_UNITS):
+    """A separated unit that no spec ships, or whose last assignment of a namespacing property,
+    its drop-ins merged, turns the property on."""
+    problems = []
+    for unit in separated:
+        if unit not in units:
+            problems.append(f"{unit}: listed in SEPARATED_USER_UNITS and shipped by no spec under forge/specs")
+            continue
+        last = dict(unit_directives(units[unit]))
+        for key, value in sorted(last.items()):
+            line = f"{key}={value}"
+            if (NAMESPACING_PROPERTY.match(line) or SEPARATION_NAMESPACING.match(line)) and value.lower() not in NAMESPACING_OFF:
+                problems.append(f"{unit}: sets {line}, which puts it in a user namespace of the user's under the user manager, where a process of the same uid can attach to it; confine it in process instead (doc_lock_and_prompts.md D43)")
+    return problems
+
+
+@check("separated-units", "A per-user unit kept apart from the user's other processes sets no directive that gives it a user namespace (D43)")
+def check_separated_units():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    for problem in separated_unit_problems({**units, **separated_unit_texts(ROOT, units)}):
+        r.fail(problem)
+    for unit in SEPARATED_USER_UNITS:
+        r.note(f"separated: {unit}")
+    return r
+
+
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.
