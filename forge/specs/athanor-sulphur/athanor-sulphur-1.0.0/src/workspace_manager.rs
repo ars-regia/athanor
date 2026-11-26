@@ -16,7 +16,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::ExtWorkspaceHandleV1;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelWeakHandle};
 use smithay::wayland::image_capture_source::ImageCaptureSourceData;
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
@@ -298,6 +298,11 @@ fn workspace_of(handle: &ExtWorkspaceHandleV1) -> Option<WorkspaceId> {
         .map(crate::workspace::Handle::workspace)
 }
 
+/// `at` relative to `origin`, saturating at the coordinate bounds.
+fn relative(at: Point<i32, Logical>, origin: Point<i32, Logical>) -> Point<i32, Logical> {
+    Point::from((at.x.saturating_sub(origin.x), at.y.saturating_sub(origin.y)))
+}
+
 impl State {
     /// Sends `object` what changed of the workspace `id`'s pin and capabilities: every
     /// workspace can be pinned, and every one but the empty one kept last can move.
@@ -370,7 +375,7 @@ impl State {
                     area.overlaps(geometry).then(|| {
                         (
                             output.clone(),
-                            Rectangle::new(geometry.loc - area.loc, geometry.size),
+                            Rectangle::new(relative(geometry.loc, area.loc), geometry.size),
                         )
                     })
                 })
@@ -381,7 +386,7 @@ impl State {
             let area = self.space.output_geometry(&output)?;
             Some((
                 output,
-                Rectangle::new(at - area.loc, window.geometry().size),
+                Rectangle::new(relative(at, area.loc), window.geometry().size),
             ))
         });
         kept.into_iter().collect()

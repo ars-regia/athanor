@@ -803,7 +803,7 @@ impl State {
         let Some(at) = strip.list.iter().position(|kept| *kept == other) else {
             return false;
         };
-        strip.list.insert(if after { at + 1 } else { at }, id);
+        strip.list.insert(if after { at.saturating_add(1) } else { at }, id);
         strip.active = strip
             .list
             .iter()
