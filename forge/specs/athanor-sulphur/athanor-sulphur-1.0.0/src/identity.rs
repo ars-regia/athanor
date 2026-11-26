@@ -957,7 +957,9 @@ mod tests {
         }
     }
 
-    /// The crates under `forge/specs` whose sources contain one of `needles`.
+    /// The packages under `forge/specs` whose crates' sources contain one of `needles`, by the
+    /// package's name. A package's crate is any `*-1.0.0` directory of it with a `src`: the
+    /// portal's backend is `xdg-desktop-portal-athanor-1.0.0` in its package.
     fn crates_with(needles: &[&str]) -> Vec<String> {
         let specs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut crates = Vec::new();
@@ -968,12 +970,20 @@ mod tests {
                 .expect("name")
                 .to_string_lossy()
                 .into_owned();
-            let src = package.join(format!("{name}-1.0.0/src"));
-            if !src.is_dir() {
+            if !package.is_dir() {
                 continue;
             }
             let mut files = Vec::new();
-            sources(&src, &mut files);
+            for crate_dir in std::fs::read_dir(&package).expect("package") {
+                let src = crate_dir.expect("entry").path().join("src");
+                let versioned = src
+                    .parent()
+                    .and_then(Path::file_name)
+                    .is_some_and(|dir| dir.to_string_lossy().ends_with("-1.0.0"));
+                if versioned && src.is_dir() {
+                    sources(&src, &mut files);
+                }
+            }
             let uses = files.iter().any(|file| {
                 let text = std::fs::read_to_string(file).expect("source");
                 needles.iter().any(|needle| text.contains(needle))
@@ -991,6 +1001,12 @@ mod tests {
         let found = crates_with(&["Layer::Top", "Layer::Overlay", "Client::connect"]);
         // The scan must see the clients it is about, or it proves nothing.
         assert!(found.iter().any(|name| name == "athanor-bar"), "{found:?}");
+        assert!(
+            found
+                .iter()
+                .any(|name| name == "athanor-xdg-desktop-portal-athanor"),
+            "{found:?}"
+        );
         for name in found {
             assert!(
                 OUTSIDE_THE_LIST.contains(&name.as_str())
