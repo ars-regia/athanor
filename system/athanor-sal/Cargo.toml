@@ -8,7 +8,7 @@ description = "Athanor's own widget toolkit: Wayland driver, widgets, text on Pa
 [dependencies]
 accesskit = "0.25"
 accesskit_unix = "0.24"
-parley = "0.12"
+parley = "0.13"
 # Asks fontconfig for the font GTK draws Latin text with (text/fontconfig.rs). The version fontique
 # already links, so no crate enters the tree.
 yeslogic-fontconfig-sys = "6.0.1"
