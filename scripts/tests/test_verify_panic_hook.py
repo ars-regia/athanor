@@ -84,13 +84,8 @@ class PanicHookTest(unittest.TestCase):
             "fmt/src/main.rs", "global/src/main.rs", "imported/src/log.rs", "renamed/src/log.rs",
         ])
 
-    def test_the_pending_set_only_shrinks(self):
-        self.assertLessEqual(verify.PANIC_HOOK_PENDING, {"athanor-lock"})
-
-    def test_an_exempt_or_pending_crate_is_not_checked(self):
-        pending = sorted(verify.PANIC_HOOK_PENDING)[0]
-        crates = {"exp": ("", {"src/main.rs": "fn main() {}\n"}),
-                  pending: ("", {"src/main.rs": "fn main() {}\n"})}
+    def test_an_exempt_crate_is_not_checked(self):
+        crates = {"exp": ("", {"src/main.rs": "fn main() {}\n"})}
         self.assertEqual(self.problems(crates, exempt="# c\nexp\n"), [])
 
 

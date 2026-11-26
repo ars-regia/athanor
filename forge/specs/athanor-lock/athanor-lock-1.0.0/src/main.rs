@@ -18,6 +18,7 @@ use calloop::ping::Ping;
 use tokio::sync::mpsc::UnboundedSender;
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     // The time locale of this thread, which draws the screen and formats its dates.
     if let Err(error) = athanor_i18n::use_time_locale() {
         eprintln!(

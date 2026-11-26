@@ -9128,9 +9128,6 @@ PANIC_HOOK_AFTER = {
     "athanor-greeter-ui": r"if\s+let\s+Err\(err\)\s*=\s*sandbox::ensure_single_threaded\(\)[^{]*"
                           r"apply_landlock_sandbox\(\)[^{]*forbid_core_dumps\(\)[^{]*\{[^{}]*\}\s*",
 }
-# athanor-lock does not depend on athanor-unit yet: the lock pull request (LP18 step 2) adds the
-# hook and removes this entry. The set only shrinks.
-PANIC_HOOK_PENDING = {"athanor-lock"}
 # What a hooked program may take from tracing_subscriber: a filter, and the trait that installs
 # the subscriber athanor_unit::journal builds. Any other subscriber writes the hook's report to
 # the journal without the `<3>` that sets its priority, and with colour codes.
@@ -9152,14 +9149,14 @@ def program_mains(crate_dir):
 def panic_hook_problems(root=None):
     """The shipped programs whose `main` does not start with PANIC_HOOK, or with what
     PANIC_HOOK_AFTER names and then PANIC_HOOK: every program of a workspace member that
-    experimental/EXEMPT does not list, but PANIC_HOOK_PENDING."""
+    experimental/EXEMPT does not list."""
     root = root or ROOT
     exempt_file = root / "experimental" / "EXEMPT"
     exempt = ({ln.strip() for ln in read(exempt_file).split("\n") if ln.strip() and not ln.startswith("#")}
               if exempt_file.exists() else set())
     problems = []
     for name, crate_dir in workspace_crates(root).items():
-        if name in exempt or name in PANIC_HOOK_PENDING:
+        if name in exempt:
             continue
         first = re.compile(r"\bfn\s+main\s*\(\s*\)[^{]*\{\s*" + PANIC_HOOK_AFTER.get(name, "") + re.escape(PANIC_HOOK))
         mains = program_mains(crate_dir)
