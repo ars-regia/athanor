@@ -168,6 +168,7 @@ those links is #1380, not yet decided. The store must not depend on it.
      `ConfigurationDirectory=athanor/sulphur` as its one writable path, as the launcher's unit
      grants its one write, which also makes the directory exist before any confined
      application starts; it reads `$XDG_CONFIG_HOME/cosmic`.
+     *Amended on 2026-11-27 (proposed, to be approved by the maintainer with the pull request that records it):* the unit does not set `ProtectSystem=strict` or `ProtectHome=read-only`, which under the user manager put the service in a user namespace that the user owns (#1558), as `doc_session.md` SN3 states as amended on 2026-11-26; Landlock, which the binary applies to itself through `athanor_unit::sandbox` before it reads anything, is what limits its writes to the store's directory, and its reads stay open, since a followed link may lead anywhere.
    - **It never hangs the sign-in.** Each source is opened with `O_RDONLY | O_NONBLOCK |
      O_CLOEXEC` and refused unless `fstat` reports a regular file, and its read stops at the
      reader's size bound whatever `st_size` says, so a FIFO or a device under
