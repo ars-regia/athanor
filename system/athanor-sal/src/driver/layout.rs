@@ -113,6 +113,7 @@ mod tests {
         let text = r#"xkb_keymap {
     xkb_keycodes "test" {
         minimum = 8; maximum = 255; <AE01> = 10; <TAB> = 23; <AC01> = 38; <AC10> = 47;
+        <KP1> = 87;
     };
     xkb_types "test" {
         type "TWO_LEVEL" {
@@ -125,9 +126,10 @@ mod tests {
         name[Group1] = "English (US)";
         name[Group2] = "French";
         key <AE01> { type = "TWO_LEVEL", [ 1, exclam ], [ ampersand, 1 ] };
-        key <TAB> { type = "TWO_LEVEL", [ Tab, ISO_Left_Tab ], [ Tab, ISO_Left_Tab ] };
+        key <TAB> { type = "TWO_LEVEL", [ Tab, ISO_Left_Tab ] };
         key <AC01> { type = "TWO_LEVEL", [ a, A ], [ q, Q ] };
         key <AC10> { type = "TWO_LEVEL", [ semicolon, colon ], [ m, M ] };
+        key <KP1> { type = "TWO_LEVEL", [ KP_End, KP_1 ] };
     };
 };"#;
         let mut layouts = Layouts::default();
@@ -158,6 +160,25 @@ mod tests {
         assert!(layouts.group(1));
         assert_eq!(layouts.base(30, xkb::Keysym::Q), xkb::Keysym::q);
         assert_eq!(layouts.base(2, xkb::Keysym::_1), xkb::Keysym::ampersand);
+    }
+
+    /// Tab is defined in the first layout only: in the second, xkb brings the group back into
+    /// the key's range, so Shift+Tab is still `Tab` and not `ISO_Left_Tab`.
+    #[test]
+    fn a_key_missing_from_the_effective_layout_is_named_by_the_one_it_has() {
+        let mut layouts = shifted();
+        assert!(layouts.group(1));
+        assert_eq!(
+            layouts.base(15, xkb::Keysym::ISO_Left_Tab),
+            xkb::Keysym::Tab
+        );
+    }
+
+    /// The keypad's first level is its navigation symbol, so with NumLock on, KP_1 is recorded
+    /// as `KP_End`: a shortcut on the keypad's 1 is the same with NumLock on or off.
+    #[test]
+    fn a_keypad_digit_is_recorded_as_its_navigation_key_with_numlock_on() {
+        assert_eq!(shifted().base(79, xkb::Keysym::KP_1), xkb::Keysym::KP_End);
     }
 
     #[test]
