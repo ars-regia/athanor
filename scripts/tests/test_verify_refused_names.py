@@ -626,6 +626,12 @@ class RefusedNames(unittest.TestCase):
         self.assertTrue(any("no longer appears" in p for p in problems), problems)
         self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
 
+    def test_a_refused_name_in_a_symbol_citation_is_a_hit(self):
+        self.write("src/x.rs", "one\n")
+        problems = self.under("2. Decisions", "The dialog is `src/x.rs#adw::Dialog`.")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("names `adw`", problems[0])
+
     def test_a_span_that_cites_no_tracked_file_is_text(self):
         # an image tag, a port and a socket address are not citations: a change of one is a
         # change of the sentence

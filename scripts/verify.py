@@ -8363,15 +8363,20 @@ def refused_base_text(root, base, path):
     return shown.stdout
 
 
-def refused_blank(text, tracked, cited=False):
+def refused_blank(text, tracked, pattern, cited=False):
     """TEXT as refused-names matches a kept entry: a symbol citation of a tracked file
     (`path#name`, as symbol-citations reads it) is read as a line citation of that file, and the
     numbers of the line citations are blanked (without_citation_numbers). A citation that moves
-    from `path:N` to `path#name` keeps its entry; one of another file, or a changed word, does not.
+    from `path:N` to `path#name` keeps its entry; one of another file, or a changed word outside
+    the citations, does not. The symbol's name is not compared: any `#name` of the file is the
+    same citation, so `#foo` that becomes `#bar` keeps the entry, and symbol-citations checks that
+    the file defines it. A symbol that names a refused name (`#adw::Dialog`, a PATTERN match)
+    stays as written, so the name is still a hit.
     """
     def symbol(m):
         cite = SYMBOL_CITATION.fullmatch(m[1])
-        if cite and cite[1] and any(f == cite[1] or f.endswith("/" + cite[1]) for f in tracked):
+        if cite and cite[1] and any(f == cite[1] or f.endswith("/" + cite[1]) for f in tracked) \
+                and not refused_line_names(cite[2], pattern):
             return f"`{cite[1]}:0`"
         return m[0]
 
@@ -8393,7 +8398,7 @@ def refused_scan_docs(root, pattern, kept, scope, tracked):
     history, registers = refused_history(scope[0]), scope[1]
     for doc, names, text, _ in kept:
         for name in names.split(","):
-            kept_texts.setdefault((doc, name), []).append((text, {refused_blank(text, tracked, c)
+            kept_texts.setdefault((doc, name), []).append((text, {refused_blank(text, tracked, pattern, c)
                                                                    for c in (False, True)}))
     used, hits = set(), {}
     for path in sorted((root / "docs/architecture").glob("*.md")):
@@ -8410,7 +8415,7 @@ def refused_scan_docs(root, pattern, kept, scope, tracked):
                             "so its refused names cannot be checked")
         for _, sentence in found:
             for name in refused_line_names(sentence, pattern):
-                rest = refused_blank(sentence, tracked)
+                rest = refused_blank(sentence, tracked, pattern)
                 for text, blanks in kept_texts.get((path.name, name), []):
                     for blank in (b for b in blanks if b in rest):
                         used.add((path.name, text))
