@@ -428,7 +428,9 @@ fn rearm(file: &File) -> io::Result<()> {
 }
 
 /// The levels this model wrote to the backlight, each until the backlight's notification of
-/// it arrives, or [`COMMANDED_FOR`] after its command ended.
+/// it arrives, or [`COMMANDED_FOR`] after its command ended. Each command and each notification
+/// forgets the levels that stood longer, so a backlight that never notifies keeps only the
+/// writes of the last [`COMMANDED_FOR`].
 #[derive(Debug, Default)]
 struct Commanded {
     /// The level and when its command ended; `None` while it runs.
@@ -436,8 +438,16 @@ struct Commanded {
 }
 
 impl Commanded {
-    fn start(&mut self, level: u32) {
+    fn start(&mut self, level: u32, now: Instant) {
+        self.prune(now);
         self.levels.push_back((level, None));
+    }
+
+    /// Forgets the levels whose command ended [`COMMANDED_FOR`] or more before `now`.
+    fn prune(&mut self, now: Instant) {
+        self.levels.retain(|(_, ended)| {
+            ended.is_none_or(|ended| now.duration_since(ended) < COMMANDED_FOR)
+        });
     }
 
     /// The running command ended, carried out or refused.
@@ -450,9 +460,7 @@ impl Commanded {
     /// Whether a notification that found `level` is the one of a write of this model's. It
     /// takes that write, and the earlier ones, whose notifications the kernel folded into it.
     fn take(&mut self, level: u32, now: Instant) -> bool {
-        self.levels.retain(|(_, ended)| {
-            ended.is_none_or(|ended| now.duration_since(ended) < COMMANDED_FOR)
-        });
+        self.prune(now);
         match self
             .levels
             .iter()
@@ -619,7 +627,7 @@ async fn run(
         if running.is_none() {
             running = waiting.pop_front().map(|command| {
                 if let BatteryCommand::SetBrightness { raw, .. } = &command {
-                    commanded.start(*raw);
+                    commanded.start(*raw, Instant::now());
                 }
                 Box::pin(execute(connection.clone(), command)) as Running
             });
@@ -1057,31 +1065,43 @@ mod tests {
     fn a_notification_is_the_models_own_only_for_a_level_it_wrote() {
         let now = Instant::now();
         let mut commanded = Commanded::default();
-        commanded.start(40);
+        commanded.start(40, now);
         assert!(
             commanded.take(40, now),
             "the notification came before logind's reply"
         );
         assert!(!commanded.take(40, now), "a write is taken once");
-        commanded.start(30);
+        commanded.start(30, now);
         commanded.finish(now);
         assert!(!commanded.take(70, now), "another level is not the model's");
         assert!(commanded.take(30, now + Duration::from_millis(500)));
-        commanded.start(10);
+        commanded.start(10, now);
         commanded.finish(now);
-        commanded.start(20);
+        commanded.start(20, now);
         commanded.finish(now);
         assert!(commanded.take(20, now));
         assert!(
             !commanded.take(10, now),
             "the kernel folded the earlier write's notification into the later one"
         );
-        commanded.start(20);
+        commanded.start(20, now);
         commanded.finish(now);
         assert!(
             !commanded.take(20, now + COMMANDED_FOR),
             "a write stands for no notification after COMMANDED_FOR"
         );
+    }
+
+    #[test]
+    fn writes_with_no_notification_are_forgotten_on_the_next_command() {
+        let now = Instant::now();
+        let mut commanded = Commanded::default();
+        for i in 0..100 {
+            let at = now + COMMANDED_FOR * i;
+            commanded.start(i, at);
+            commanded.finish(at);
+        }
+        assert_eq!(commanded.levels.len(), 1, "only the last write stands");
     }
 
     /// A sysfs of one backlight at 50 of 100 and one keyboard backlight at 0 of 2.
