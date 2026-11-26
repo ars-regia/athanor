@@ -8363,21 +8363,37 @@ def refused_base_text(root, base, path):
     return shown.stdout
 
 
+def refused_blank(text, tracked, cited=False):
+    """TEXT as refused-names matches a kept entry: a symbol citation of a tracked file
+    (`path#name`, as symbol-citations reads it) is read as a line citation of that file, and the
+    numbers of the line citations are blanked (without_citation_numbers). A citation that moves
+    from `path:N` to `path#name` keeps its entry; one of another file, or a changed word, does not.
+    """
+    def symbol(m):
+        cite = SYMBOL_CITATION.fullmatch(m[1])
+        if cite and cite[1] and any(f == cite[1] or f.endswith("/" + cite[1]) for f in tracked):
+            return f"`{cite[1]}:0`"
+        return m[0]
+
+    return without_citation_numbers(CODE_TOKEN.sub(symbol, text), tracked, cited)
+
+
 def refused_scan_docs(root, pattern, kept, scope, tracked):
     """(problems, notes, used, hits) of the specifications under ROOT/docs/architecture: the
     problems of their sections, the notes (a draft, a document with no Status line), the
     (document, text) of the KEPT entries that a normative sentence holds, and {(document, name):
     sentences} for the sentences that still name a refused name once the kept text is taken
     out. A kept text matches a sentence with the numbers of the citations of TRACKED files blanked
-    in both, as line-citations reads an edit (without_citation_numbers), so a citation placed
-    again with the same words keeps its entry (#1548). A kept text is blanked both as a line of
+    in both, as line-citations reads an edit, and a symbol citation of a tracked file read as a
+    line citation of it (refused_blank), so a citation placed again with the same words keeps its
+    entry (#1548). A kept text is blanked both as a line of
     its own and as the rest of a line that cites a tracked file before it, so a fragment that
     starts at a `:N` matches the sentence it was cut from."""
     problems, notes, kept_texts = [], [], {}
     history, registers = refused_history(scope[0]), scope[1]
     for doc, names, text, _ in kept:
         for name in names.split(","):
-            kept_texts.setdefault((doc, name), []).append((text, {without_citation_numbers(text, tracked, c)
+            kept_texts.setdefault((doc, name), []).append((text, {refused_blank(text, tracked, c)
                                                                    for c in (False, True)}))
     used, hits = set(), {}
     for path in sorted((root / "docs/architecture").glob("*.md")):
@@ -8394,7 +8410,7 @@ def refused_scan_docs(root, pattern, kept, scope, tracked):
                             "so its refused names cannot be checked")
         for _, sentence in found:
             for name in refused_line_names(sentence, pattern):
-                rest = without_citation_numbers(sentence, tracked)
+                rest = refused_blank(sentence, tracked)
                 for text, blanks in kept_texts.get((path.name, name), []):
                     for blank in (b for b in blanks if b in rest):
                         used.add((path.name, text))

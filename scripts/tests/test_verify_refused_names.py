@@ -609,6 +609,23 @@ class RefusedNames(unittest.TestCase):
         self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format(5)}\n")
         self.assertEqual(self.problems("HEAD"), [])
 
+    def test_a_line_citation_cited_again_by_symbol_keeps_its_entry(self):
+        # #1133: `src/identity.rs:898` cited again as `src/identity.rs#SHELL_CLIENTS`
+        line = "ADR-0141: its line (`{}`) leaves libadwaita at the retirement step."
+        self.write("crate/src/identity.rs", "one\n")
+        self.write("crate/src/other.rs", "one\n")
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format('src/identity.rs:898')}\n")
+        self.kept(text=line.format("src/identity.rs:898"))
+        self.commit()
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format('src/identity.rs#SHELL_CLIENTS')}\n")
+        self.assertEqual(self.problems("HEAD"), [])
+        # a symbol of another file is another citation: the entry is unused and the sentence a hit
+        self.write(DOC, APPROVED + f"## 2. Decisions\n\n{line.format('src/other.rs#SHELL_CLIENTS')}\n")
+        problems = self.problems("HEAD")
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("no longer appears" in p for p in problems), problems)
+        self.assertTrue(any("names `libadwaita`" in p for p in problems), problems)
+
     def test_a_span_that_cites_no_tracked_file_is_text(self):
         # an image tag, a port and a socket address are not citations: a change of one is a
         # change of the sentence

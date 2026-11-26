@@ -9,8 +9,8 @@
 # after the number of a bold lead, as in `**OD15.`), and the REASON, written for this unit.
 # The text is taken out of the document before the names are counted, so a sentence added next to
 # it is still a hit. The numbers of line citations of tracked files (`path:N`, and a `:N` after one)
-# are blanked in both first, as line-citations reads them, so a citation placed again keeps its
-# entry (#1548). A sentence that says Athanor uses, ships, starts, writes or reads the name, or
+# are blanked in both first, as line-citations reads them, and a symbol citation of a tracked file
+# (`path#name`) counts as a line citation of it, so a citation placed again keeps its entry (#1548). A sentence that says Athanor uses, ships, starts, writes or reads the name, or
 # that it stays or is kept until something happens, belongs to forge/config/refused-names-allow.txt
 # under #1355 with an expiry; a sentence kept here has none. An entry fails when its text no
 # longer appears in a normative section, so a changed sentence must be read again. The list only
