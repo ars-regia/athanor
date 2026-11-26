@@ -652,6 +652,7 @@ dependencies = [
  "athanor-unit",
  "futures-util",
  "nix 0.32.0",
+ "png",
  "tokio",
  "tracing",
  "zbus 6.2.1",

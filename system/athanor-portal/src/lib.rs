@@ -6,6 +6,7 @@ pub mod bar;
 pub mod eis;
 pub mod input;
 pub mod remote_desktop;
+pub mod screenshot;
 pub mod settings;
 
 #[cfg(test)]
