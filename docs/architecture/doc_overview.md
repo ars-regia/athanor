@@ -688,9 +688,9 @@ captures does not hold under athanor-sulphur.
   refused while the session is locked (#1133; `doc_own_stack.md` OS16).
 - *Amended on 2026-11-26, with #1133, by the maintainer's decision of that day:* the frame follows the
   workspace's output, its mode and its transform, and never draws the pointer. The confined
-  border, the focus outline and the 1 px divider ring are drawn as on screen, never faked. A
-  workspace has no layer surface, so the frame is transparent behind its windows, and an empty
-  workspace gives a transparent frame, not a failure.
+  border, the focus outline and the 1 px divider ring are drawn as on screen, except that a workspace
+  that is left has no focus outline, since the session's focus is not on it. A workspace has no layer
+  surface, so the frame is transparent behind its windows, and an empty workspace gives a transparent frame.
 - Fixture test (`doc_own_stack.md` OS6): the overview's capture of the active workspace, taken while
   the overview is shown, holds the workspace's windows and not the overview's surface.
 

@@ -1368,7 +1368,7 @@ compositor and that the own compositor did not yet offer:
       are relative to that output, and a width or height of zero withdraws the window from it. A
       window on an inactive workspace or minimised reports the place it keeps, on the output of
       its workspace's group. The workspace events go only to a client that holds that handle. Its
-      request `move_to_workspace(ext_workspace_handle_v1, wl_output)` moves the window.
+      request `move_to_workspace(ext_workspace_handle_v1, wl_output)` moves the window. *Amended on 2026-11-26, with #1133 (maintainer decision, 2026-11-26):* `move_to_workspace` may move a window to another output's workspace, where it is centred; the output it names must be that workspace's own, and the request is refused only when it is not. *Amended on 2026-11-26, with #1133 (proposed, to be approved by the maintainer with the pull request that records it):* a window shown is sent its geometry on each output it overlaps, relative to that output; a window on an inactive workspace or minimised is sent, on its workspace's output, the place it comes back to: the place it keeps, or centred on that output when the output no longer shows that place, as the window comes back and as the workspace's frame draws it.
     - **Every request** is refused while the session is locked or paused, on a handle that went
       away and on a window neither minimised nor drawn and placed, with no protocol error and no
       change, as the requests of `athanor_toplevel_actions_v1` are. A minimised window and a
@@ -1381,9 +1381,9 @@ compositor and that the own compositor did not yet offer:
       after it is refused. `move_to_workspace` with an output that is not the workspace's own is
       refused and changes nothing. `athanor_workspace_window_v1` ends each change with `done`, as
       `athanor_toplevel_state_v1` does, and `athanor_workspace_v1` sends `removed` once its
-      workspace is gone, as `athanor_workspace_tiling_v1` does.
+      workspace is gone, as `athanor_workspace_tiling_v1` does. *Amended on 2026-11-26, with #1133 (proposed, to be approved by the maintainer with the pull request that records it):* `unpin` of an empty workspace leaves it to the next prune, which removes it as it removes any empty workspace.
     - **The client** binds that global only through one call, `Client::workspace_controls()`, as
-      `window_actions()` binds the actions interface, and only the overview makes it.
+      `window_actions()` binds the actions interface, and only the overview makes it. *Amended on 2026-11-26, with #1133 (proposed, to be approved by the maintainer with the pull request that records it):* `Client::workspace_controls()` does not exist yet: it comes with the overview, its only caller.
     - **The patches of `doc_overview.md` decisions 4 and 5 are not written.** The three-finger
       swipe and the reduced-motion switch are behaviour of the own compositor, register rows 3
       and 4: the swipe comes with the overview, and the switch once the own compositor has a slide
