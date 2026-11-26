@@ -4,7 +4,7 @@
 
 **Decided on 2026-11-26.** The maintainer decided questions A1 and A2 (section 6) and the confinement rule of #1558, written below as decided.
 
-**Depends on #1558.** #1558 confines the lock in process and removes from its unit the directives that create a user namespace under a per-user manager. It amends the approved text first (ADR-0074), the lock's confinement and the rule for this class of unit in `doc_lock_and_prompts.md`, LP11's unit lines (`:179`) among them. This plan follows that rule (section 3.2) and writes no code before the amendment is approved.
+**Depends on #1558.** #1558 confines the lock in process with Landlock and removes from its unit the directives that create a user namespace under a per-user manager. It amends the approved text first (ADR-0074), the lock's confinement and the rule for this class of unit in `doc_lock_and_prompts.md`, LP11's unit lines (`:179`) among them. This plan follows that rule (section 3.2) and writes no code before the amendment is approved.
 
 **Goal:** `athanor-polkit-agent`, a Sal client, is the session's polkit authentication agent on the forge's polkit 128. It is built, tested and judged on the reference laptop with cosmic-osd's unit masked there. It is enabled by preset only in cosmic-osd's retirement change, together with `athanor-osd` and the end-of-session dialogs. That change retires the own-allow entry `rpm cosmic-osd` (`forge/config/own-allow.txt`).
 
@@ -13,7 +13,7 @@
 - the helper client, on the main thread: the user and cookie lines, then the `athanor-auth` parser over `/run/polkit/agent-helper.socket`;
 - the screen: a Sal layer surface on the overlay layer, with Sal's trusted password field.
 
-**Tech stack:** Rust; `athanor-sal` without its `gpu` feature (LP15); `athanor-auth` (`system/athanor-auth`); `athanor-unit`; `zbus` and `nix` from the workspace; calloop through Sal. No new crate in `Cargo.lock`, except one that #1558 may add for the in-process seccomp filter, which the agent then uses as the lock does.
+**Tech stack:** Rust; `athanor-sal` without its `gpu` feature (LP15); `athanor-auth` (`system/athanor-auth`); `athanor-unit`; `zbus` and `nix` from the workspace; calloop through Sal. No new crate in `Cargo.lock`.
 
 **Spec:** `docs/architecture/doc_lock_and_prompts.md`, revision 4 with its amendments of 2026-11-19, 2026-11-20 and 2026-11-21:
 - LP1, LP2, LP8 (the wire protocol), LP10, LP11, LP13, LP14, LP15, LP17 and LP18 step 5;
@@ -26,8 +26,8 @@ Also `doc_osd.md` OD15 and OD17 step 5; `doc_session.md` SN6 and SN7; `doc_threa
 - **Sulphur alone.** The agent is built and tested on Sulphur only. D39 dropped cosmic-comp's session from the lock and the prompts (`doc_lock_and_prompts.md:427`).
 - **The password's path.** The password leaves the field only as a borrow (`system/athanor-sal/src/widget.rs#Ui::password_text`). It is copied once into an `athanor-auth` buffer (`system/athanor-auth/src/buffer.rs#Secret`), written to the helper's socket, and both are cleared at once (LP1). Nothing logs it, and no `Debug` shows it.
 - **No panics and least privilege.** No new `unwrap`, `expect` or `panic!` outside tests (`verify.py panics`). The unit sets `NoNewPrivileges=yes` (TM8, `verify.py services`).
-- **Confinement in process (#1558, maintainer decision, 2026-11-26).** The agent confines itself with Landlock and seccomp, as the lock does after #1558. Its unit carries no directive that creates a user namespace under a per-user manager.
-  - *Why.* In a user unit such a directive puts the service in a user namespace owned by the user (`uid_map 1000 1000 1`). A same-uid process then holds `CAP_SYS_PTRACE` there, and `PTRACE_ATTACH` succeeds against a non-dumpable process under Yama scope 1. `PrivateUsers=no` changes nothing (reproduced by the maintainer on 2026-11-26 with `ProtectSystem=strict`, `PrivateTmp=yes` and `NoNewPrivileges=yes`).
+- **Confinement (#1558, maintainer decision, 2026-11-26).** Its unit carries no directive that creates a user namespace under a per-user manager. The mount, network and IPC class is replaced in process by Landlock, `athanor-unit`'s `restrict_writes` and `deny_tcp`, as the lock's `confine.rs` does. seccomp is the unit's `SystemCallFilter=`, which keeps the host user namespace (section 3.2); it is not new in-process code.
+  - *Why.* In a user unit such a directive puts the service in a user namespace owned by the user (`uid_map 1000 1000 1`). A same-uid process then holds `CAP_SYS_PTRACE` there, and `PTRACE_ATTACH` succeeds against a non-dumpable process under Yama scope 1. `PrivateUsers=no` changes nothing (reproduced by the maintainer on 2026-11-26 with `ProtectSystem=strict`, `PrivateTmp=yes` and `NoNewPrivileges=yes`). Measured on the reference desktop on 2026-11-26 with `readlink /proc/self/ns/user`: a plain shell and a user unit with `NoNewPrivileges=yes`, `SystemCallFilter=@system-service`, `RestrictAddressFamilies=AF_UNIX`, `LockPersonality=yes`, `RestrictRealtime=yes` and `MemoryMax=100M` both gave 4026531837, the host's user namespace; a unit with `ProtectSystem=strict` alone gave a new one, 4026533449.
   - *The check.* The `verify.py` rule of #1558, which fails on such a directive in a unit of this class, covers this unit. A rig probe checks that a same-uid attach to the running agent is refused (P5).
 - **Review.** Every pull request of this plan touches an authentication path. It takes the two-person review of CT6 (`docs/operations/contributing.md`, CT6). Its reviewer checks it against a concrete failure scenario from section 4 below.
 - **What this plan does not edit.** `system/athanor-bus-api/src/polkit.rs` is stop-and-ask (`system/AGENTS.md`) and is not edited by this plan (section 6, A1, decided).
@@ -197,7 +197,7 @@ The session lookup is the lock's `our_session`. The first pull request moves it 
 1. `athanor_unit::panic::install()` (`system/athanor-unit/src/panic.rs#install`).
 2. The locale from `LANG`, for registration and PAM's messages (D32).
 3. `confine`, as the lock's `confine.rs` after #1558:
-   - `athanor_unit::sandbox::ensure_single_threaded`, then `restrict_writes` limited to `$XDG_RUNTIME_DIR`, then `deny_tcp`, then the seccomp filter that #1558 adds to `athanor-unit`'s sandbox, then `RLIMIT_CORE` 0. The sandbox has no seccomp today (`system/athanor-unit/src/sandbox.rs`: `ensure_single_threaded`, `restrict`, `restrict_writes`, `deny_tcp`), so this step waits for #1558;
+   - `athanor_unit::sandbox::ensure_single_threaded`, then `restrict_writes` limited to `$XDG_RUNTIME_DIR`, then `deny_tcp`, then `RLIMIT_CORE` 0, all of them functions `athanor-unit` already has (`system/athanor-unit/src/sandbox.rs`). The system-call filter is the unit's, below;
    - a failure is fatal: the agent never runs unconfined.
 4. Sal's event source; the bus thread is spawned after the confinement, so it inherits it.
 5. `athanor_sal::run_with`. In `Application::start`, after the connection, `set_dumpable(false)`, then a message to the bus thread to register. A failure of either is `Shell::fail`, which exits non-zero.
@@ -225,8 +225,9 @@ RestartSteps=5
 RestartMaxDelaySec=30s
 Slice=session.slice
 MemoryMax=96M
-# No directive that creates a user namespace under a per-user manager (#1558): the
-# confinement is in process.
+# No directive that creates a user namespace under a per-user manager (#1558). The
+# lines below keep the host user namespace (measured, 2026-11-26); files and the network
+# are confined in process with Landlock.
 NoNewPrivileges=yes
 SystemCallFilter=@system-service
 RestrictRealtime=yes
@@ -237,7 +238,7 @@ RestrictAddressFamilies=AF_UNIX
 WantedBy=athanor-session.target
 ```
 
-The block is provisional. Its sandbox lines are ones systemd applies through `prctl`, seccomp or the cgroup; which directives create a user namespace is decided by #1558's `verify.py` rule, not by this plan, and a line the rule flags leaves. Compared with the lock's unit today (`forge/specs/athanor-lock/athanor-lock-1.0.0/data/athanor-lock.service`), it drops `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateNetwork=yes`, `PrivateTmp=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes` and `RestrictSUIDSGID=yes`. What replaces them, and what does not:
+The block's sandbox lines are ones systemd applies through `prctl`, seccomp or the cgroup. Measured on the reference desktop on 2026-11-26 with `readlink /proc/self/ns/user`: a plain shell and a user unit with `NoNewPrivileges=yes`, `SystemCallFilter=@system-service`, `RestrictAddressFamilies=AF_UNIX`, `LockPersonality=yes`, `RestrictRealtime=yes` and `MemoryMax=100M` both gave 4026531837, the host's user namespace; a unit with `ProtectSystem=strict` alone gave a new one, 4026533449. The split this plan follows: `NoNewPrivileges=`, `SystemCallFilter=`, `RestrictAddressFamilies=`, `LockPersonality=`, `RestrictRealtime=` and `MemoryMax=` stay in the unit; the mount, network and IPC class (`ProtectSystem=`, `ProtectHome=`, `PrivateTmp=`, `PrivateDevices=`, the `Protect*=` directives that mount, `ReadWritePaths=`, `PrivateNetwork=` and `PrivateIPC=`) leaves it and is replaced in process. #1558's `verify.py` rule still decides the list, and a line it flags leaves. Compared with the lock's unit today (`forge/specs/athanor-lock/athanor-lock-1.0.0/data/athanor-lock.service`), it drops `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateNetwork=yes`, `PrivateTmp=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes` and `RestrictSUIDSGID=yes`. What replaces them, and what does not:
 - writes anywhere but `$XDG_RUNTIME_DIR`, in `/usr`, `/etc`, the home, `/tmp`, `/proc/sys` and the cgroup tree: refused by Landlock;
 - TCP: refused by `deny_tcp`; other families: `RestrictAddressFamilies=AF_UNIX`;
 - a setuid or setgid file: Landlock leaves nothing writable where one would matter, and `NoNewPrivileges=yes` stops an exec from gaining privilege;
@@ -305,7 +306,7 @@ The cookie is held in a zeroizing buffer too, since it is the request's capabili
 - The password crosses one borrow and one bounded zeroizing buffer, then the socket.
 - No core file, no input method, no paste, and no AT-SPI value set.
 - No attach by another process of the same user: non-dumpable, Yama scope 1, and no user namespace that the user owns (#1558), probed on the rig.
-- Landlock limits writes to `$XDG_RUNTIME_DIR` and denies TCP, seccomp limits the system calls, and the unit has no network family but `AF_UNIX`.
+- Landlock limits writes to `$XDG_RUNTIME_DIR` and denies TCP, the unit's `SystemCallFilter=` limits the system calls, and the unit has no network family but `AF_UNIX`.
 - Sulphur shows nothing but the lock while locked.
 
 **Absent, and said so:**
@@ -395,7 +396,7 @@ Each pull request merges on its own with its tests and leaves the agent disabled
 **P5. The surface.**
 - *Change.*
   - `ui` and `main`;
-  - the start order, with a test that the process is not dumpable after `start`, as the lock's, and a test that `confine` applies Landlock and seccomp or fails;
+  - the start order, with a test that the process is not dumpable after `start`, as the lock's, and a test that `confine` applies Landlock or fails;
   - the allow-list line in `privileged-clients`, `identity.rs` and `rig-privileged-clients`;
   - the rig scenes `surface`, `atspi` and `orca polkit-agent [it]`, with the goldens of section 3.7.
 - *Judgement.* The maintainer judges the build on the reference laptop with cosmic-osd masked (LP18 step 5, OD17).
