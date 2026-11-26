@@ -1357,7 +1357,7 @@ compositor and that the own compositor did not yet offer:
       wave 2c, in one stable version: the manager's request
       `get_capture_source(new_id ext_image_capture_source_v1, object ext_workspace_handle_v1)`
       gives the `ext-image-copy-capture-v1` source of one workspace, keyed as the objects below
-      and `athanor_workspace_tiling_manager_v1`'s are.
+      and `athanor_workspace_tiling_manager_v1`'s are. *Amended on 2026-11-26, with #1133, by the maintainer's decision of that day:* until the overview ships, no line of the allow-list holds this grant: it comes with the program that binds the global. A workspace's frame draws its windows, their dividers and the border of a confined window as on screen, leaves out its minimised windows, as the screen does, and has no focus outline once its workspace is left, since the session's focus is not on it.
     - **`athanor_workspace_v1`,** one per workspace, keyed by `ext_workspace_handle_v1`, carries
       the pinned state, the requests `pin`, `unpin`, `move_before` and `move_after`, and the
       capabilities `pin` and `move`, sent at once.
