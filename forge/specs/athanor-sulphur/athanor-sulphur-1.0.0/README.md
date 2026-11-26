@@ -305,7 +305,8 @@ follow-up of #1133 moves the hint to `windows.toml` alone, cosmic-comp's `active
 too and the outline is drawn only while both are on: `windows.toml` cannot turn it on over
 cosmic-comp's `false`.
 
-The keys and the values the two files accept, cosmic-comp's field names in snake_case
+The keys and the values the two files accept, snake_case names after COSMIC's fields, flattened
+from its nested settings
 (`doc_own_stack.md` decision 38). This table is the single list `athanor_sulphur_client::input`
 and `window_management` match.
 
