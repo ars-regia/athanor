@@ -69,7 +69,7 @@ zbus = { version = "6.2.1", features = ["tokio"] }
 
 # GUI, Display & Wayland Ecosystem
 gtk4 = { version = "0.11.4", features = ["v4_18"] }
-gtk4-layer-shell = "0.8.1"
+gtk4-layer-shell = "0.9.0"
 glib = "0.22.9"
 relm4 = "0.11.0"
 bitflags = "2"
