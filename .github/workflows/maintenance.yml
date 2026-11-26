@@ -63,7 +63,7 @@ jobs:
       # App's permissions, which are read-only; the action cannot request the Variables
       # permission by name, so narrowing the token here would drop it.
       - id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0 # zizmor: ignore[github-app]
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0 # zizmor: ignore[github-app]
         with:
           client-id: ${{ vars.SETTINGS_APP_CLIENT_ID }}
           private-key: ${{ secrets.SETTINGS_APP_PRIVATE_KEY }}
@@ -133,12 +133,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: ${{ matrix.language }}
           build-mode: none
 
-      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           category: /language:${{ matrix.language }}
 
