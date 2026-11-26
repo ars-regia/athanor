@@ -4,8 +4,9 @@
 //! its own (plan decision M3: the thread starts after Landlock).
 //!
 //! The thread finds the session through `Display` of `/org/freedesktop/login1/user/self` and
-//! checks that its `Type` is `wayland` and its `User` this process's uid (LP2). It subscribes
-//! to the session's `Lock` and `Unlock` and the Manager's `PrepareForSleep`, then reads the
+//! checks that its `Type` is `wayland` and its `User` this process's uid (LP2), with
+//! `athanor_unit::logind::our_session`, the lookup the polkit agent shares. It subscribes to
+//! the session's `Lock` and `Unlock` and the Manager's `PrepareForSleep`, then reads the
 //! session's `LockedHint` and reports it as [`Report::Ready`], for `Machine::start`. From then
 //! on it hands each signal to the main loop as an [`Event`] and serves the main loop's
 //! [`Call`]s: `SetLockedHint`, and the `sleep` inhibitor in `delay` mode of LP4.
@@ -25,12 +26,13 @@ use std::pin::Pin;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+use athanor_unit::logind::our_session;
 use calloop::ping::Ping;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use zbus::export::futures_core::Stream;
 use zbus::export::ordered_stream::{self, OrderedStreamExt};
 use zbus::proxy::CacheProperties;
-use zbus::{Connection, Message, OwnedFd, OwnedObjectPath};
+use zbus::{Connection, Message, OwnedFd};
 
 use crate::state::{Action, Event, Fatal};
 
@@ -89,24 +91,10 @@ trait Manager {
 }
 
 #[zbus::proxy(
-    interface = "org.freedesktop.login1.User",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1/user/self"
-)]
-trait User {
-    #[zbus(property)]
-    fn display(&self) -> zbus::Result<(String, OwnedObjectPath)>;
-}
-
-#[zbus::proxy(
     interface = "org.freedesktop.login1.Session",
     default_service = "org.freedesktop.login1"
 )]
 trait Session {
-    #[zbus(property, name = "Type")]
-    fn kind(&self) -> zbus::Result<String>;
-    #[zbus(property)]
-    fn user(&self) -> zbus::Result<(u32, OwnedObjectPath)>;
     #[zbus(property)]
     fn locked_hint(&self) -> zbus::Result<bool>;
     fn set_locked_hint(&self, locked: bool) -> zbus::Result<()>;
@@ -184,8 +172,12 @@ async fn run(
         return Ok(Some(Fatal::BusLost));
     };
 
-    let Some(path) = our_session(&query).await? else {
-        return Ok(Some(Fatal::NotOurSession));
+    let path = match our_session(&query).await? {
+        Ok(path) => path,
+        Err(refused) => {
+            eprintln!("<3>athanor-lock: {refused}");
+            return Ok(Some(Fatal::NotOurSession));
+        }
     };
     let manager = ManagerProxy::builder(&watch)
         .cache_properties(CacheProperties::No)
@@ -262,42 +254,6 @@ async fn connect(builder: zbus::connection::Builder<'static>) -> Option<Connecti
             None
         }
     }
-}
-
-/// The session of `Display`, if it is a Wayland session of this process's uid (LP2).
-async fn our_session(query: &Connection) -> zbus::Result<Option<OwnedObjectPath>> {
-    let user = UserProxy::builder(query)
-        .cache_properties(CacheProperties::No)
-        .build()
-        .await?;
-    let (id, path) = user.display().await?;
-    if id.is_empty() {
-        eprintln!("<3>athanor-lock: the user has no display session");
-        return Ok(None);
-    }
-    let session = SessionProxy::builder(query)
-        .path(path.clone())
-        .cache_properties(CacheProperties::No)
-        .build()
-        .await?;
-    let kind = session.kind().await?;
-    let (owner, _) = session.user().await?;
-    // The uid the bus took from the socket: `/proc/self` belongs to root once the process is
-    // not dumpable, as the lock makes itself once Sal has connected, while this thread runs.
-    let me = query
-        .unique_name()
-        .ok_or_else(|| zbus::Error::Failure("the connection has no unique name".into()))?;
-    let uid = zbus::fdo::DBusProxy::new(query)
-        .await?
-        .get_connection_unix_user(me.as_ref().into())
-        .await?;
-    if kind != "wayland" || owner != uid {
-        eprintln!(
-            "<3>athanor-lock: session {id} is of type {kind:?} and uid {owner}, not a Wayland session of uid {uid}"
-        );
-        return Ok(None);
-    }
-    Ok(Some(path))
 }
 
 /// The event of one of the three signals `run` subscribes to.
