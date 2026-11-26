@@ -36,6 +36,9 @@ NoNewPrivileges=yes
 # RestrictAddressFamilies=AF_UNIX (measured on systemd 262).
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
+# Landlock does not mediate a change of a file's mode, owner, times or extended attributes, and
+# the lock makes none: refused with EPERM, so a stray call fails instead of killing the guard.
+SystemCallFilter=~@chown:EPERM chmod:EPERM fchmod:EPERM fchmodat:EPERM fchmodat2:EPERM utime:EPERM utimes:EPERM utimensat:EPERM futimesat:EPERM setxattr:EPERM lsetxattr:EPERM fsetxattr:EPERM setxattrat:EPERM removexattr:EPERM lremovexattr:EPERM fremovexattr:EPERM removexattrat:EPERM
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
