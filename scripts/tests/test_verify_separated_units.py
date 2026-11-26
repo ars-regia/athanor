@@ -207,6 +207,26 @@ class SeparatedUnitsTest(unittest.TestCase):
         found = problems({LOCK: unit(KEPT + "ReadOnlyPaths=/etc \\\n  /usr\n")})
         self.assertEqual(len(found), 1, found)
 
+    def test_lines_are_read_as_systemd_reads_them(self):
+        # Each hides PrivateTmp=yes from a parser that joins on any trailing backslash, while
+        # systemd's conf-parser applies it.
+        for lines in (
+            "# a comment that ends in a backslash \\\nPrivateTmp=yes\n",
+            "Environment=A=b\\\\\nPrivateTmp=yes\n",
+            "Environment=A=b\\ \nPrivateTmp=yes\n",
+            "Environment=A=b\rPrivateTmp=yes\n",
+            "Environment=A=b\0PrivateTmp=yes\n",
+        ):
+            with self.subTest(lines=lines):
+                found = problems({LOCK: unit(KEPT + lines)})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("PrivateTmp=yes", found[0])
+        # A comment line inside a continued line is skipped, and the line goes on.
+        self.assertEqual(
+            verify.unit_lines("Environment=A=b \\\n# note\n  C=d\n"),
+            ["Environment=A=b    C=d", ""],
+        )
+
     def test_a_listed_unit_that_no_spec_ships_fails(self):
         found = problems({})
         self.assertEqual(len(found), 1, found)

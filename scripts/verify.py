@@ -5281,12 +5281,32 @@ HEREDOC = re.compile(
 )
 
 
+def unit_lines(text):
+    """The logical lines of a unit or drop-in, read as systemd's conf-parser reads them: lines
+    end at a newline, a carriage return or a NUL; a comment line is skipped, inside a continued
+    line too; and a line whose last character is a backslash that no backslash escapes continues
+    on the next, the backslash read as a space."""
+    lines, continued = [], None
+    for raw in re.split(r"\r\n|[\n\r\0]", text):
+        if raw.lstrip(" \t")[:1] in ("#", ";"):
+            continue
+        line = raw if continued is None else continued + raw
+        escaped = False
+        for char in line:
+            escaped = not escaped and char == "\\"
+        if escaped:
+            continued = line[:-1] + " "
+        else:
+            lines.append(line)
+            continued = None
+    return lines if continued is None else [*lines, continued]
+
+
 def unit_assignments(text):
     """(section, key, value) of every assignment of a unit or drop-in, in order; the section is
     None before the first header."""
     section, found = None, []
-    # A trailing backslash continues the line (systemd.syntax(7)): join before parsing.
-    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
+    for line in unit_lines(text):
         line = line.strip()
         if not line or line[0] in "#;":
             continue
