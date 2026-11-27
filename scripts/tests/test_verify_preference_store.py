@@ -91,6 +91,7 @@ class PreferenceStoreTest(unittest.TestCase):
             "system/p/src/double.rs": 'const P: &str = "athanor//sulphur";\n',
             "system/q/src/dot.rs": 'const P: &str = "athanor/./sulphur";\n',
             "forge/specs/r/data/r.service": "[Service]\nExecStart=cp x /etc/skel/.config/athanor/sulphur/\n",
+            "system/s/seed-skel.sh": "install -d /usr/etc/skel/.config/athanor/sulphur\n",
         }
         for name, text in holes.items():
             with self.subTest(name):

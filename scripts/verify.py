@@ -4575,9 +4575,10 @@ STORE_JOINED = re.compile(r"[\"'](?:[^\"'\n]*/)?athanor/?[\"'](?:[^\"']|[\"']/[\
                           r"[\"'](?:\.?/)*sulphur(?:/[^\"'\n]*)?[\"']")
 # The token before a STORE_PATH match that makes it a system path, /usr/share/athanor/sulphur:
 # the image's roots and /var's system directories, never /var/home, where Athanor's homes are,
-# nor /etc/skel, whose seed would be a second writer of a home's store.
+# nor /etc/skel or /usr/etc/skel, whose seed (bootc ships /etc's defaults from /usr/etc) would be
+# a second writer of a home's store.
 STORE_SYSTEM_ROOT = re.compile(
-    r"(?:^|[\s\"'=(,])/(?:usr|etc(?!/skel/)|run|opt|srv|var/(?:lib|cache|log|spool))/(?:[\w.-]+/)*$")
+    r"(?:^|[\s\"'=(,])/(?:usr(?!/etc/skel/)|etc(?!/skel/)|run|opt|srv|var/(?:lib|cache|log|spool))/(?:[\w.-]+/)*$")
 # The trees whose files the rule reads: the code's, and the rig's scripts under forge/test.
 STORE_DIRS = (*BOUNDARY_DIRS, "forge/test")
 # Systemd's files that can name a directory (a drop-in is a .conf), and shell scripts.
