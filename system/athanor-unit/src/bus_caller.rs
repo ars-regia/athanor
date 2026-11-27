@@ -20,6 +20,11 @@
 //!    override under `/etc`, `/run` or the user's configuration are refused;
 //! 5. after those reads both pidfds, the peer's and the manager's, still refer to running
 //!    processes, so neither pid compared above was reused.
+//!
+//! [`admit_pidfd`] runs steps 2 to 5 for a process that is no peer of the bus, known by a pidfd
+//! and its pid, such as a Wayland client by `SO_PEERPIDFD` (doc_own_stack.md OS4, #1560). Step 1
+//! has no equivalent there and needs none: the verified user's systemd places only the user's
+//! processes in its units.
 
 use std::future::Future;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -134,6 +139,30 @@ pub async fn admit(
         return Err(format!("user {:?} is not {ours}", credentials.uid));
     }
     let pidfd = pidfd_of(&credentials)?;
+    admit_process(questions, pidfd, credentials.pid, service, ours).await
+}
+
+/// `Ok` only when the process of `pidfd`, whose pid is `pid` in this process's pid namespace, is
+/// the main process of `service`, checked as steps 2 to 5 of the module say; the error says
+/// which check refused it. The caller reads `pid` from the pidfd itself.
+pub async fn admit_pidfd(
+    questions: &impl Questions,
+    pidfd: BorrowedFd<'_>,
+    pid: u32,
+    service: Service<'_>,
+) -> Result<(), String> {
+    let ours = nix::unistd::getuid().as_raw();
+    admit_process(questions, pidfd, Some(pid), service, ours).await
+}
+
+/// Steps 2 to 5 of the module for the process of `pidfd`, whose pid is `pid`.
+async fn admit_process(
+    questions: &impl Questions,
+    pidfd: BorrowedFd<'_>,
+    pid: Option<u32>,
+    service: Service<'_>,
+    ours: u32,
+) -> Result<(), String> {
     let manager = user_manager(questions, ours).await?;
     let systemd = Manager::User(&manager.name);
     let (path, unit) = questions.unit_by_pidfd(systemd, pidfd).await?;
@@ -141,10 +170,10 @@ pub async fn admit(
         return Err(format!("unit {unit} is not {}", service.unit));
     }
     let properties = questions.unit(systemd, &path).await?;
-    if properties.main_pid == 0 || credentials.pid != Some(properties.main_pid) {
+    if properties.main_pid == 0 || pid != Some(properties.main_pid) {
         return Err(format!(
-            "process {:?} is not the main process {} of {unit}",
-            credentials.pid, properties.main_pid
+            "process {pid:?} is not the main process {} of {unit}",
+            properties.main_pid
         ));
     }
     if properties.exec_start != [service.exec] {
@@ -668,5 +697,60 @@ mod tests {
         let mut fake = Fake::portal();
         fake.caller._writer = None;
         refused(&fake, "the process ended");
+    }
+
+    /// What `admit_pidfd` answers for the caller's process, known by its pidfd and `pid` alone.
+    fn by_pidfd(fake: &Fake, pid: u32) -> Result<(), String> {
+        now(admit_pidfd(fake, fake.caller.reader.as_fd(), pid, PORTAL))
+    }
+
+    #[test]
+    fn a_process_known_by_its_pidfd_in_the_image_s_unit_is_admitted() {
+        assert_eq!(by_pidfd(&Fake::portal(), PID), Ok(()));
+    }
+
+    /// A Wayland client is no peer of the bus: whatever the bus would say of the caller's name,
+    /// only the pidfd and the pid are asked about.
+    #[test]
+    fn a_process_known_by_its_pidfd_needs_no_peer_on_the_bus() {
+        let mut fake = Fake::portal();
+        fake.caller.uid = None;
+        fake.caller.pid = None;
+        fake.caller.pidfd = false;
+        assert_eq!(by_pidfd(&fake, PID), Ok(()));
+    }
+
+    #[test]
+    fn a_process_known_by_its_pidfd_is_checked_as_a_peer_is() {
+        let check = |fake: &Fake, pid: u32, why: &str| {
+            let error = by_pidfd(fake, pid).expect_err("refused");
+            assert!(error.contains(why), "{error}");
+        };
+        check(&Fake::portal(), PID + 1, "is not the main process");
+        for fragment in [
+            "/home/u/.config/systemd/user/xdg-desktop-portal-athanor.service",
+            "/run/user/1000/systemd/transient/xdg-desktop-portal-athanor.service",
+        ] {
+            let mut fake = Fake::portal();
+            fake.properties.fragment_path = fragment.into();
+            check(&fake, PID, "is defined by");
+        }
+        let mut overridden = Fake::portal();
+        overridden.properties.drop_in_paths.push(
+            "/home/u/.config/systemd/user/xdg-desktop-portal-athanor.service.d/x.conf".into(),
+        );
+        check(&overridden, PID, "has the drop-in");
+        let mut elsewhere = Fake::portal();
+        elsewhere.unit = "app-athanor-org.example.App@1.service";
+        check(&elsewhere, PID, "is not xdg-desktop-portal-athanor.service");
+        let mut other = Fake::portal();
+        other.properties.exec_start = vec!["/usr/bin/python3".into()];
+        check(&other, PID, "runs");
+        let mut impostor = Fake::portal();
+        impostor.manager_unit = "app-athanor-org.example.App@1.service".into();
+        check(&impostor, PID, "runs in");
+        let mut ended = Fake::portal();
+        ended.caller._writer = None;
+        check(&ended, PID, "the process ended");
     }
 }
