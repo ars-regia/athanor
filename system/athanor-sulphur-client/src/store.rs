@@ -91,8 +91,9 @@ impl Store {
         Store { dir }
     }
 
-    /// Crate-private: a path handed out would let another crate write a file of the store
-    /// without the lock, the schema or the size bound.
+    /// Crate-private, so the crate's writes go through `update`; the path is not secret, since
+    /// errors and `Debug` show it, and a crate that writes the directory itself, without the
+    /// lock, the schema or the size bound, is a matter for review.
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
     }
