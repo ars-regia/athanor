@@ -4605,6 +4605,8 @@ STORE_NAMERS = {
         "the compositor's reader of input.toml (doc_own_stack.md, decision 38)",
     "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/window_settings.rs":
         "the compositor's reader of windows.toml (doc_own_stack.md, decision 38)",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/user_bindings.rs":
+        "the compositor's reader of bindings.toml (doc_own_stack.md, decision 38)",
     "forge/specs/athanor-preferences-import/athanor-preferences-import-1.0.0/data/athanor-preferences-import.service":
         "ConfigurationDirectory= of the import's unit, which makes the directory (ADR-0150 point 6)",
 }

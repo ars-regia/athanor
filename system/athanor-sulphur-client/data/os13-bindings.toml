@@ -1,0 +1,404 @@
+# The default key bindings of the own compositor (doc_own_stack.md OS13), in the form of
+# bindings.toml (decision 38): the one copy that the import compares a user's COSMIC bindings
+# with, and that a test of athanor-sulphur compares with DEFAULTS of src/bindings.rs both ways.
+# The terminal switches, Ctrl+Alt+F1 to F12, are read from the keymap and are no rows.
+schema = 1
+# The keys no binding of the user's takes: the defaults no inhibitor takes (decision 30),
+# Super+Alt+A (AX14). The terminal switches, Ctrl+Alt with F1 to F12, are protected as well.
+protected = [
+    "Super+Escape",
+    "Super+Alt+Escape",
+    "Super+Alt+t",
+    "Ctrl+Alt+Tab",
+    "Super+Alt+s",
+    "Super+equal",
+    "Super+minus",
+    "Super+Alt+a",
+]
+
+[[binding]]
+keys = "Super+Escape"
+action = "system"
+system = "lock_screen"
+
+[[binding]]
+keys = "Super+Alt+Escape"
+action = "terminate"
+
+[[binding]]
+keys = "Super+Alt+t"
+action = "reveal"
+
+[[binding]]
+keys = "Super+q"
+action = "close"
+
+[[binding]]
+keys = "Alt+F4"
+action = "close"
+
+[[binding]]
+keys = "Super+space"
+action = "system"
+system = "input_source_switch"
+
+[[binding]]
+keys = "Ctrl+Alt+Tab"
+action = "focus_cycle"
+
+[[binding]]
+keys = "Super+c"
+action = "control_center"
+
+[[binding]]
+keys = "Super+a"
+action = "system"
+system = "launcher"
+
+[[binding]]
+keys = "XF86AudioMute"
+action = "system"
+system = "mute"
+
+[[binding]]
+keys = "XF86AudioMicMute"
+action = "system"
+system = "mute_mic"
+
+[[binding]]
+keys = "XF86AudioPlay"
+action = "system"
+system = "play_pause"
+
+[[binding]]
+keys = "XF86AudioNext"
+action = "system"
+system = "play_next"
+
+[[binding]]
+keys = "XF86AudioPrev"
+action = "system"
+system = "play_prev"
+
+[[binding]]
+keys = "Super+Shift+Escape"
+action = "system"
+system = "log_out"
+
+[[binding]]
+keys = "XF86PowerOff"
+action = "system"
+system = "power_off"
+
+[[binding]]
+keys = "XF86TouchpadToggle"
+action = "system"
+system = "touchpad_toggle"
+
+[[binding]]
+keys = "Super+Ctrl+XF86TouchpadToggle"
+action = "system"
+system = "touchpad_toggle"
+
+[[binding]]
+keys = "XF86AudioRaiseVolume"
+action = "system"
+system = "volume_raise"
+
+[[binding]]
+keys = "XF86AudioLowerVolume"
+action = "system"
+system = "volume_lower"
+
+[[binding]]
+keys = "XF86MonBrightnessUp"
+action = "system"
+system = "brightness_up"
+
+[[binding]]
+keys = "XF86MonBrightnessDown"
+action = "system"
+system = "brightness_down"
+
+[[binding]]
+keys = "Super+Alt+s"
+action = "system"
+system = "screen_reader"
+
+[[binding]]
+keys = "Super+1"
+action = "workspace"
+workspace = 1
+
+[[binding]]
+keys = "Super+2"
+action = "workspace"
+workspace = 2
+
+[[binding]]
+keys = "Super+3"
+action = "workspace"
+workspace = 3
+
+[[binding]]
+keys = "Super+4"
+action = "workspace"
+workspace = 4
+
+[[binding]]
+keys = "Super+5"
+action = "workspace"
+workspace = 5
+
+[[binding]]
+keys = "Super+6"
+action = "workspace"
+workspace = 6
+
+[[binding]]
+keys = "Super+7"
+action = "workspace"
+workspace = 7
+
+[[binding]]
+keys = "Super+8"
+action = "workspace"
+workspace = 8
+
+[[binding]]
+keys = "Super+9"
+action = "workspace"
+workspace = 9
+
+[[binding]]
+keys = "Super+0"
+action = "last_workspace"
+
+[[binding]]
+keys = "Super+Shift+1"
+action = "move_to_workspace"
+workspace = 1
+
+[[binding]]
+keys = "Super+Shift+2"
+action = "move_to_workspace"
+workspace = 2
+
+[[binding]]
+keys = "Super+Shift+3"
+action = "move_to_workspace"
+workspace = 3
+
+[[binding]]
+keys = "Super+Shift+4"
+action = "move_to_workspace"
+workspace = 4
+
+[[binding]]
+keys = "Super+Shift+5"
+action = "move_to_workspace"
+workspace = 5
+
+[[binding]]
+keys = "Super+Shift+6"
+action = "move_to_workspace"
+workspace = 6
+
+[[binding]]
+keys = "Super+Shift+7"
+action = "move_to_workspace"
+workspace = 7
+
+[[binding]]
+keys = "Super+Shift+8"
+action = "move_to_workspace"
+workspace = 8
+
+[[binding]]
+keys = "Super+Shift+9"
+action = "move_to_workspace"
+workspace = 9
+
+[[binding]]
+keys = "Super+Shift+0"
+action = "move_to_last_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Left"
+action = "previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Up"
+action = "previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+h"
+action = "previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+k"
+action = "previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Right"
+action = "next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Down"
+action = "next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+j"
+action = "next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+l"
+action = "next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+Left"
+action = "move_to_previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+Up"
+action = "move_to_previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+h"
+action = "move_to_previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+k"
+action = "move_to_previous_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+Right"
+action = "move_to_next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+Down"
+action = "move_to_next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+j"
+action = "move_to_next_workspace"
+
+[[binding]]
+keys = "Super+Ctrl+Shift+l"
+action = "move_to_next_workspace"
+
+[[binding]]
+keys = "Super+Left"
+action = "focus"
+direction = "left"
+
+[[binding]]
+keys = "Super+h"
+action = "focus"
+direction = "left"
+
+[[binding]]
+keys = "Super+Right"
+action = "focus"
+direction = "right"
+
+[[binding]]
+keys = "Super+l"
+action = "focus"
+direction = "right"
+
+[[binding]]
+keys = "Super+Up"
+action = "focus"
+direction = "up"
+
+[[binding]]
+keys = "Super+k"
+action = "focus"
+direction = "up"
+
+[[binding]]
+keys = "Super+Down"
+action = "focus"
+direction = "down"
+
+[[binding]]
+keys = "Super+j"
+action = "focus"
+direction = "down"
+
+[[binding]]
+keys = "Super+Shift+Left"
+action = "move"
+direction = "left"
+
+[[binding]]
+keys = "Super+Shift+h"
+action = "move"
+direction = "left"
+
+[[binding]]
+keys = "Super+Shift+Right"
+action = "move"
+direction = "right"
+
+[[binding]]
+keys = "Super+Shift+l"
+action = "move"
+direction = "right"
+
+[[binding]]
+keys = "Super+Shift+Up"
+action = "move"
+direction = "up"
+
+[[binding]]
+keys = "Super+Shift+k"
+action = "move"
+direction = "up"
+
+[[binding]]
+keys = "Super+Shift+Down"
+action = "move"
+direction = "down"
+
+[[binding]]
+keys = "Super+Shift+j"
+action = "move"
+direction = "down"
+
+[[binding]]
+keys = "Super+o"
+action = "toggle_orientation"
+
+[[binding]]
+keys = "Super+r"
+action = "resizing"
+direction = "outwards"
+
+[[binding]]
+keys = "Super+Shift+r"
+action = "resizing"
+direction = "inwards"
+
+[[binding]]
+keys = "Super+g"
+action = "toggle_window_floating"
+
+[[binding]]
+keys = "Super+equal"
+action = "zoom_in"
+
+[[binding]]
+keys = "Super+minus"
+action = "zoom_out"
+
+# Athanor's own one-time writes into COSMIC's files (the launcher's and the control center's,
+# ADR-0150 point 6): the defaults above in COSMIC's form, which the import does not import.
+[cosmic]
+system_actions = { launcher = "gdbus call --session --dest os.athanor.Launcher1 --object-path /os/athanor/Launcher1 --method os.athanor.Launcher1.Show" }
+
+[[cosmic.binding]]
+keys = "Super+c"
+action = "spawn"
+command = "busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 Toggle"
