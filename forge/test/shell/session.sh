@@ -17,6 +17,30 @@ if [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
         cat /repo/forge/test/shell/rig-privileged-clients
     } > /usr/share/athanor/sulphur/privileged-clients
     chmod 0644 /usr/share/athanor/sulphur/privileged-clients
+    # The compositor grants a line outside its transient ones only once the user's systemd says
+    # the client is the main process of the line's unit, defined in the image, and the system's
+    # systemd vouches for the user's (OS4, #1560). The rig has neither: a system bus at the fixed
+    # path the compositor asks, and fake_systemd.py --origin on both buses, answer for the units
+    # in-unit.sh and bar_session.py --unit make, from the list above.
+    install -d /run/dbus
+    printf '%s\n' '<busconfig><include>/usr/share/dbus-1/session.conf</include></busconfig>' > /tmp/rig-system-bus.conf
+    dbus-daemon --config-file=/tmp/rig-system-bus.conf --nofork \
+        --address=unix:path=/run/dbus/system_bus_socket &> "/out/${RIG_TAG:-scene}-system-bus.log" &
+    ready=/tmp/rig-fake-systemd.ready
+    for _ in $(seq 100); do
+        [ -S /run/dbus/system_bus_socket ] && break
+        sleep 0.1
+    done
+    python3 /repo/forge/test/shell/fake_systemd.py --origin /usr/share/athanor/sulphur/privileged-clients \
+        "/out/${RIG_TAG:-scene}-systemd.log" > "$ready" 2> "/out/${RIG_TAG:-scene}-fake-systemd.log" &
+    for _ in $(seq 100); do
+        grep -qx ready "$ready" && break
+        sleep 0.1
+    done
+    if ! grep -qx ready "$ready"; then
+        echo "session.sh: fake_systemd.py --origin did not start; see /out/${RIG_TAG:-scene}-fake-systemd.log" >&2
+        exit 1
+    fi
     exec /out/bin/athanor-sulphur --headless "$@" &> "/out/${RIG_TAG:-scene}-compositor.log"
 fi
 export COSMIC_BACKEND=winit

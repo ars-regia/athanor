@@ -1,10 +1,13 @@
 #!/usr/bin/python3
 """tray_e2e.py - package 2b.3's tray in a scene (doc_bar.md BR5, BR9, items 9, 11, 17): the bar
 as the host of the real athanor-shelld's watcher, with tray_item.py's two items, and the
-menu of the first open from the start (ATHANOR_BAR_OPEN=tray). Also checks the refusal path
-of notifications: athanor-shelld refuses the bar's List outside athanor-bar.service, so the
-notification button stays hidden (SH1). Runs as scene.sh's RIG_HOLD, with bar_session.py
---tray --respawn as the client. Prints one line per check and exits 1 if any fails.
+menu of the first open from the start (ATHANOR_BAR_OPEN=tray). Also checks the List of
+notifications (SH1). Without RIG_COMPOSITOR the bar runs outside athanor-bar.service, so
+athanor-shelld refuses its List and the notification button stays hidden. Under
+RIG_COMPOSITOR=athanor the bar runs as athanor-bar.service and fake_systemd.py answers for the
+unit as systemd would, so athanor-shelld serves the List and the button shows. Runs as
+scene.sh's RIG_HOLD, with bar_session.py --tray --respawn as the client. Prints one line per
+check and exits 1 if any fails.
 """
 
 import os
@@ -144,14 +147,32 @@ def main():
     check("a click on the item", press(app, Atspi, "Test item"))
     check("activates it", wait_for(logged("Activate 0 0"), 3))
 
-    check(
-        "athanor-shelld refused the bar's List here (not in athanor-bar.service)",
-        "refused the bar's List" in client_log.read_text(encoding="utf-8"),
-    )
-    check(
-        "a refused List hides the notification button (SH1)",
-        not buttons_matching(app, Atspi, re.compile(r"^Notifications")),
-    )
+    if os.environ.get("RIG_COMPOSITOR") == "athanor":
+        # The bar runs as athanor-bar.service and fake_systemd.py answers for the unit, as
+        # systemd would: athanor-shelld serves the List.
+        check(
+            "athanor-shelld served the bar's List in athanor-bar.service",
+            "listed 0 notifications from athanor-shelld"
+            in client_log.read_text(encoding="utf-8"),
+        )
+        check(
+            "a served List shows the notification button (SH1)",
+            wait_for(
+                lambda: bool(
+                    buttons_matching(app, Atspi, re.compile(r"^Notifications"))
+                ),
+                3,
+            ),
+        )
+    else:
+        check(
+            "athanor-shelld refused the bar's List here (not in athanor-bar.service)",
+            "refused the bar's List" in client_log.read_text(encoding="utf-8"),
+        )
+        check(
+            "a refused List hides the notification button (SH1)",
+            not buttons_matching(app, Atspi, re.compile(r"^Notifications")),
+        )
 
     old = int(SHELLD_PID_FILE.read_text(encoding="utf-8"))
     os.kill(old, signal.SIGKILL)
