@@ -56,7 +56,12 @@ impl Services {
     /// nothing calls it. A NetworkManager password is answered by the bar's agent when the bar
     /// runs.
     pub fn start(handle: &Handle, buses: &Buses, backlight_root: PathBuf) -> Services {
-        let battery = battery::spawn(handle, buses.clone(), backlight_root.clone());
+        let battery = battery::spawn(
+            handle,
+            buses.clone(),
+            backlight_root.clone(),
+            PathBuf::from(battery::LEDS_ROOT),
+        );
         let (network_state, network_commands, prompts) = network::spawn(handle, buses.clone());
         let (bluetooth_state, bluetooth_commands, requests) =
             bluetooth::spawn(handle, buses.clone());

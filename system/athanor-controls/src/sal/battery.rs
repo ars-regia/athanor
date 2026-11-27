@@ -329,6 +329,7 @@ mod tests {
                 level: 600,
             }),
             refused: 0,
+            ..Default::default()
         }
     }
 

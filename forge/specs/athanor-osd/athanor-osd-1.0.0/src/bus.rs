@@ -1,5 +1,7 @@
-//! `os.athanor.Osd1` (doc_osd.md OD4), with the methods of step 1: `VolumeUp`, `VolumeDown`,
-//! `ToggleMute` and `ToggleMicMute`. Any peer on the session bus may call; more than
+//! `os.athanor.Osd1` (doc_osd.md OD4), with the methods of steps 1 and 2: `VolumeUp`,
+//! `VolumeDown`, `ToggleMute`, `ToggleMicMute`, `BrightnessUp`, `BrightnessDown`,
+//! `KeyboardBrightnessUp`, `KeyboardBrightnessDown` and `CycleKeyboardBrightness`. Any peer on
+//! the session bus may call; more than
 //! [`logic::RATE_LIMIT`] calls a second from one sender are dropped, and each caller is logged
 //! once by its unique name and user. A method only hands its key
 //! to the core and returns: it awaits nothing, on any connection. The core's queue holds
@@ -57,6 +59,26 @@ impl Osd {
 
     fn toggle_mic_mute(&mut self, #[zbus(header)] header: Header<'_>) {
         self.key(Key::ToggleMicMute, &header);
+    }
+
+    fn brightness_up(&mut self, #[zbus(header)] header: Header<'_>) {
+        self.key(Key::BrightnessUp, &header);
+    }
+
+    fn brightness_down(&mut self, #[zbus(header)] header: Header<'_>) {
+        self.key(Key::BrightnessDown, &header);
+    }
+
+    fn keyboard_brightness_up(&mut self, #[zbus(header)] header: Header<'_>) {
+        self.key(Key::KeyboardBrightnessUp, &header);
+    }
+
+    fn keyboard_brightness_down(&mut self, #[zbus(header)] header: Header<'_>) {
+        self.key(Key::KeyboardBrightnessDown, &header);
+    }
+
+    fn cycle_keyboard_brightness(&mut self, #[zbus(header)] header: Header<'_>) {
+        self.key(Key::CycleKeyboardBrightness, &header);
     }
 }
 

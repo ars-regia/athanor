@@ -201,6 +201,7 @@ fn battery_state() -> BatteryState {
             level: 50,
         }),
         refused: 0,
+        ..Default::default()
     }
 }
 
