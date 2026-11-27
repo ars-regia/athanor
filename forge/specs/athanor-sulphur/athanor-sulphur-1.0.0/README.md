@@ -248,7 +248,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1`, `athanor_dock_overlap_manager_v1`, `athanor_material_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1`, `athanor_workspace_manager_v1`, `athanor_dock_overlap_manager_v1`, `athanor_material_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client outside a security context |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -266,6 +266,16 @@ on windows: the control center is granted the first, the bar, the dock and the l
 keyboard's layout group: the bar alone is granted it, for its input-source switch.
 `athanor_workspace_tiling_manager_v1` reads and sets whether each workspace is tiled (OS12): the
 bar alone is granted it, for its tiling switch.
+`athanor_workspace_manager_v1` (`athanor-workspace-v1.xml`, decision 32) is the overview's: it
+pins a workspace, which then stays when it empties, for the session and never on disk, and
+moves a workspace before or after another of its output's, never after the empty one kept last,
+which cannot move; it sends each window's workspace and its place on each output, and moves a
+window to a workspace of the output named, refusing any other; and it makes the
+`ext-image-copy-capture-v1` source of a workspace, whose frames are its output's mode with the
+workspace's windows and their marks over transparency, never the pointer nor a layer surface.
+Its requests do nothing while the session is locked, and the lock refuses its captures. No
+shipped binary binds it yet, so `data/privileged-clients` grants it to no one; the fixture's
+bar is its client.
 `athanor_dock_overlap_manager_v1` (`athanor-dock-overlap-v1.xml`, decision 35) tells the dock
 whether a mapped, not minimised window of the current workspace of its layer surface's output
 intersects the rectangle the dock sent, in that output's logical coordinates, whatever the
