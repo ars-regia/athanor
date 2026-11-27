@@ -318,10 +318,6 @@ class Check(unittest.TestCase):
         self.assertEqual(verify.check_symbol_citations().problems, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Signatures(unittest.TestCase):
     def test_a_function_runs_past_a_signature_line_followed_by_a_where_clause(self):
         # #1565: the `)` line that closes the arguments is not the end of the function.
@@ -347,3 +343,7 @@ class Signatures(unittest.TestCase):
             for n in names
         }
         self.assertEqual(found["draw"], (1, 6))
+
+
+if __name__ == "__main__":
+    unittest.main()
