@@ -12,7 +12,7 @@ use toml::{Table, Value};
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Argument {
     None,
-    /// `workspace`, a number from 0 to 255.
+    /// `workspace`, a number from 1 to 255.
     Workspace,
     /// `command`, a command line the compositor runs with `/bin/sh -c`.
     Command,
@@ -518,6 +518,7 @@ mod tests {
             "action = \"close\"",
             "keys = \"Super+q\"",
             "keys = \"Super+q\"\naction = \"explode\"",
+            "keys = \"Super+q\"\naction = \"workspace\"\nworkspace = 0",
             "keys = \"Super+q\"\naction = \"workspace\"\nworkspace = 256",
             "keys = \"Super+q\"\naction = \"focus\"\ndirection = \"sideways\"",
             "keys = \"Super+q\"\naction = \"spawn\"\ncommand = \"\"",
