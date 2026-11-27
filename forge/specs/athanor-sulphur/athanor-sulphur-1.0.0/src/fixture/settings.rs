@@ -1,4 +1,5 @@
-//! Decision 38: the user's `input.toml` and `windows.toml`, read at start and followed live.
+//! Decision 38: the user's `input.toml`, `windows.toml` and `bindings.toml`, read at start and
+//! followed live.
 //! The fixture has no libinput device (`devices.rs`), so these read what the compositor holds;
 //! a key reaching a device is the resolution `input_settings.rs` tests.
 
@@ -180,6 +181,72 @@ fn windows_toml_is_followed_live() {
     std::fs::remove_file(&file).expect("removed");
     until(&mut run, "the default", |state| {
         state.focus_theme.outline().is_some()
+    });
+    run.stop();
+    std::fs::remove_dir_all(file.parent().expect("a directory")).expect("clean");
+}
+
+/// `bindings.toml` is followed live: a user's command runs from its key as `/bin/sh -c`, a
+/// system action the user replaced runs the user's command while unlocked and the default
+/// while locked, where no binding of the user's acts; a malformed file keeps the last good set,
+/// and a change is followed.
+#[test]
+fn bindings_toml_is_followed_live() {
+    use crate::bindings::Action;
+    use crate::session_calls::{Job, SessionCalls, MUTE};
+    let mut run = Running::start(None);
+    let (calls, requests) = SessionCalls::detached();
+    run.state.session_calls = Some(calls);
+    let file = settings_file("bindings", "bindings.toml");
+    let handle = run.event_loop.handle();
+    crate::user_bindings::follow(&mut run.state, &handle, file.clone());
+    let (mut window, _) = focused_window(&mut run);
+    let super_t = [KEY_LEFTMETA, KEY_T];
+    let job = || requests.try_recv().ok().map(|request| request.job);
+
+    write_raw(
+        &file,
+        "schema = 1\n[system_actions]\nmute = \"my-mute\"\n\
+         [[binding]]\nkeys = \"Super+t\"\naction = \"spawn\"\ncommand = \"foot\"\n",
+    );
+    until(&mut run, "the user's bindings", |state| {
+        state.user_bindings.command(1) == Some("foot")
+    });
+    acts(&mut window, &mut run, &super_t, Some(Action::Spawn(1)), "Super+t");
+    assert_eq!(job(), Some(Job::Shell("foot".to_owned())));
+    acts(&mut window, &mut run, &[KEY_MUTE], Some(Action::Spawn(0)), "mute");
+    assert_eq!(job(), Some(Job::Shell("my-mute".to_owned())));
+
+    write_raw(&file, "schema = 1\n[[binding]\n");
+    idle(&mut run);
+    assert_eq!(
+        run.state.user_bindings.command(1),
+        Some("foot"),
+        "a malformed file changes nothing"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_MUTE],
+        Some(Action::Run(&MUTE)),
+        "locked, mute",
+    );
+    assert_eq!(job(), Some(Job::Run(&MUTE)), "the default, not the user's command");
+    reaches(&mut locker, &mut run, &super_t, "locked, Super+t");
+    assert_eq!(job(), None);
+
+    write_raw(
+        &file,
+        "schema = 1\n[[binding]]\nkeys = \"Super+t\"\naction = \"spawn\"\ncommand = \"kitty\"\n",
+    );
+    until(&mut run, "the change", |state| {
+        state.user_bindings.command(0) == Some("kitty")
+    });
+    std::fs::remove_file(&file).expect("removed");
+    until(&mut run, "the defaults", |state| {
+        state.user_bindings.command(0).is_none()
     });
     run.stop();
     std::fs::remove_dir_all(file.parent().expect("a directory")).expect("clean");
