@@ -7510,7 +7510,7 @@ def rust_definitions(rows):
     (`impl Lock`, `impl Drop for Lock`, `impl Dispatch<WlSurface, ()> for Client`).
     An item starts at the attributes and comments right above it and ends on its line when that line
     ends with `;` or `}`, else at the next line of its indent that starts with `}`, `)` or `]` and
-    opens no block. Limit: rustfmt's layout is assumed, and an item-like line inside a string
+    opens no block, unless it is a `)` followed by a `where` clause or a `{` on a line of its own. Limit: rustfmt's layout is assumed, and an item-like line inside a string
     (a raw-string fixture) counts as an item."""
     found = []
     for i, row in enumerate(rows):
@@ -7553,8 +7553,11 @@ def rust_definitions(rows):
                     break
                 if indent_of(rows[j]) == indent:
                     if text[0] in "})]" and not text.endswith("{"):
-                        last = j
-                        break
+                        # A `)` that closes a signature continues into its `where` clause or its `{`.
+                        after = next((r.strip() for r in rows[j + 1:] if r.strip()), "")
+                        if not (text[0] == ")" and after.startswith(("where", "{"))):
+                            last = j
+                            break
                     if not text.startswith(("where", "{", ")", "]", "->")):
                         break
                 last = j
