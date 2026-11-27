@@ -776,20 +776,36 @@ class Kept(unittest.TestCase):
 
     def test_a_file_named_by_its_suffix_places_the_files_of_its_crate(self):
         # `data/globals` and `src/notifications.rs` resolve by their suffix and name their crate,
-        # whose `src/state.rs` and `src/store.rs` the same lines cite after them.
-        state = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/state.rs"
-        store = "forge/specs/athanor-shelld/athanor-shelld-1.0.0/src/store.rs"
-        with (
-            mock.patch.object(verify, "BASE_REF", "HEAD"),
-            mock.patch.object(verify, "diff_hunks", return_value={state: [(0, 0, 1)], store: [(0, 0, 1)]}),
-        ):
-            result = verify.check_line_citations()
-        moved = {p.split(" is moved")[0] for p in result.problems if "is moved by this change" in p}
-        cited = {
-            f"doc_notification_center.md:15: `{store}:9`",
-            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (110, 567)),
+        # whose `src/state.rs` and `src/store.rs` the same lines cite after them. The documents
+        # and the crates are a fixture: no live text decides what this test holds (#1568).
+        one, two = "forge/specs/one/one-1.0.0", "forge/specs/two/two-1.0.0"
+        files = {
+            f"{one}/data/globals": "alpha\n",
+            f"{one}/src/state.rs": "a\nb\nc\n",
+            f"{two}/src/state.rs": "a\nb\nc\n",
+            f"{one}/src/notifications.rs": "alpha\n",
+            f"{one}/src/store.rs": "a\nb\nc\n",
+            f"{two}/src/store.rs": "a\nb\nc\n",
         }
-        self.assertLessEqual(cited, moved)
+        text = (
+            "The `alpha` is in `data/globals:1`, then the `b` at `src/state.rs:2`.\n"
+            "The `alpha` is in `src/notifications.rs:1`, then the `c` at `src/store.rs:3`.\n"
+        )
+        hunks = {f"{one}/src/state.rs": [(0, 0, 1)], f"{one}/src/store.rs": [(0, 0, 1)]}
+        found = verify.citation_findings(
+            "doc.md", text, set(files), files.__getitem__, hunks=hunks, base_text=text,
+            base_file=files.__getitem__,
+        )
+        moved = {f[-1] for f in found if "is moved by this change" in f[-1]}
+        self.assertEqual(
+            moved,
+            {
+                f"doc.md:1: `{one}/src/state.rs:2` is moved by this change: it should name "
+                f"`{one}/src/state.rs:3`",
+                f"doc.md:2: `{one}/src/store.rs:3` is moved by this change: it should name "
+                f"`{one}/src/store.rs:4`",
+            },
+        )
 
 
 if __name__ == "__main__":
