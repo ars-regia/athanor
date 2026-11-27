@@ -133,24 +133,32 @@ pub(crate) const POWER_OFF: Command = Command {
 };
 
 /// What a key asks the worker for.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Job {
     Call(&'static Call),
     Run(&'static Command),
+    /// A command line of the user's (decision 38), run as `/bin/sh -c <line>`: never while
+    /// the session is locked, and every press runs it.
+    Shell(String),
 }
 
+/// The name of a user's command in its unit's name.
+const USER_COMMAND: &str = "command";
+
 impl Job {
-    fn while_locked(self) -> bool {
+    fn while_locked(&self) -> bool {
         match self {
             Self::Call(call) => call.while_locked,
             Self::Run(command) => command.while_locked,
+            Self::Shell(_) => false,
         }
     }
 
-    fn coalesce(self) -> bool {
+    fn coalesce(&self) -> bool {
         match self {
             Self::Call(call) => call.coalesce,
             Self::Run(command) => command.coalesce,
+            Self::Shell(_) => false,
         }
     }
 }
@@ -181,16 +189,15 @@ impl SessionCalls {
     /// Queues `request` without waiting: a full queue, or a worker that has ended, drops it
     /// with a warning, and the next press asks again.
     pub(crate) fn send(&self, request: Request) {
-        let job = request.job;
         match self.queue.try_send(request) {
             Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
+            Err(TrySendError::Full(Request { job, .. })) => {
                 tracing::warn!(
                     ?job,
                     "the session-bus queue is full; the key's job is dropped"
                 );
             }
-            Err(TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Disconnected(Request { job, .. })) => {
                 tracing::warn!(
                     ?job,
                     "the session-bus worker has ended; the key's job is dropped"
@@ -248,7 +255,8 @@ trait Bus {
     /// when it cannot be opened.
     fn connect(&mut self) -> bool;
     fn call(&mut self, call: &Call);
-    fn run(&mut self, unit: &str, command: &Command);
+    /// Starts `argv` as the transient unit `unit`; `name` names the command in the log.
+    fn run(&mut self, unit: &str, name: &'static str, argv: &[&str]);
 }
 
 /// The session bus, connected at the first call and again after an error.
@@ -324,9 +332,15 @@ impl Bus for SessionBus {
         }
     }
 
-    fn run(&mut self, unit: &str, command: &Command) {
+    fn run(&mut self, unit: &str, name: &'static str, argv: &[&str]) {
         let auxiliary: Vec<(&str, Vec<(&str, Variant)>)> = Vec::new();
-        let body = (unit, "fail", transient_properties(command.argv), auxiliary);
+        let mut properties = transient_properties(argv);
+        if name == USER_COMMAND {
+            // A user's line may start a program in the background and let the shell exit, as
+            // `foot &` does: the program outlives the unit's main process.
+            properties.push(("KillMode", Variant::from("process")));
+        }
+        let body = (unit, "fail", properties, auxiliary);
         let sent = self.send(|connection| {
             zbus::block_on(connection.call_method(
                 Some(SYSTEMD),
@@ -341,7 +355,7 @@ impl Bus for SessionBus {
             Err(error) => tracing::warn!(
                 %error,
                 unit,
-                command = command.name,
+                command = name,
                 "the user manager did not start a key's command"
             ),
         }
@@ -373,11 +387,19 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
             tracing::info!(?job, "the session locked after the key; its job is dropped");
             continue;
         }
-        match job {
+        match &job {
             Job::Call(call) => bus.call(call),
             Job::Run(command) => {
                 runs += 1;
-                bus.run(&unit_name(command.name, pid, runs), command);
+                bus.run(&unit_name(command.name, pid, runs), command.name, command.argv);
+            }
+            Job::Shell(line) => {
+                runs = runs.wrapping_add(1);
+                let unit = unit_name(USER_COMMAND, pid, runs);
+                // The user manager expands `$` in each word of `ExecStart` and turns `$$` into
+                // `$`: doubled, every `$` reaches the shell as the user wrote it.
+                let line = line.replace('$', "$$");
+                bus.run(&unit, USER_COMMAND, &["/bin/sh", "-c", &line]);
             }
         }
         while pending.len() < QUEUE {
@@ -443,9 +465,12 @@ mod tests {
             }
         }
 
-        fn run(&mut self, unit: &str, command: &Command) {
-            assert!(unit.contains(&command.name.replace('-', r"\x2d")), "{unit}");
-            self.sent.push(command.name);
+        fn run(&mut self, unit: &str, name: &'static str, argv: &[&str]) {
+            assert!(unit.contains(&name.replace('-', r"\x2d")), "{unit}");
+            if name == USER_COMMAND {
+                assert_eq!(argv, ["/bin/sh", "-c", "foot --title $$HOME"]);
+            }
+            self.sent.push(name);
         }
     }
 
@@ -485,6 +510,18 @@ mod tests {
             ["mute"],
             "a lock that starts while the bus connects drops the log-out"
         );
+    }
+
+    /// A user's command runs through `/bin/sh -c` at each press, its `$` doubled for the user
+    /// manager, and one asked before the session locked is dropped.
+    #[test]
+    fn a_users_command_runs_each_press_and_never_from_before_a_lock() {
+        let shell = |epoch| at(Job::Shell("foot --title $HOME".to_owned()), epoch);
+        assert_eq!(
+            worked(vec![shell(1), shell(1)], 1, None),
+            [USER_COMMAND, USER_COMMAND]
+        );
+        assert_eq!(worked(vec![shell(0), shell(1)], 1, None), [USER_COMMAND]);
     }
 
     #[test]

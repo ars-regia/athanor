@@ -75,7 +75,9 @@ class Forms(unittest.TestCase):
         found = verify.citation_findings(
             "doc.md", text, set(files), files.__getitem__, upstream={("doc.md", "data/y")}
         )
-        self.assertEqual(found, [])
+        # No crate is carried over: `benches/b.rs` is ambiguous (#1574), and nothing else is found.
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("`benches/b.rs:1` is ambiguous", found[0][-1])
         found = verify.citation_findings(
             "other.md", text, set(files), files.__getitem__, upstream={("doc.md", "data/y")}
         )
@@ -352,16 +354,28 @@ class Resolution(unittest.TestCase):
         self.assertEqual(len(messages("The `grant` is at `x.rs:2`.")), 1)
         self.assertEqual(messages("The `grant` is at `x.rs:1`."), [])
 
-    def test_an_ambiguous_bare_name_is_not_read(self):
-        self.assertEqual(
-            messages("The `grant` is at `x.rs:2`.", {"other/src/x.rs": "a\n"}), []
+    def test_an_ambiguous_bare_name_is_a_finding(self):
+        # #1574: it was skipped without a word, so it could drift off its code and stay green.
+        out = messages("The `grant` is at `x.rs:2`.", {"other/src/x.rs": "a\n"})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("`x.rs:2` is ambiguous: several files end with it, give a longer path", out[0])
+
+    def test_an_ambiguous_bare_name_is_exempt_where_its_crate_or_upstream_places_it(self):
+        extra = {"other/src/x.rs": "a\n"}
+        # The crate the line names before it resolves the name.
+        self.assertEqual(messages("The `grant` is in `crate/src/lib.rs:1` and `src/lib.rs:3`.", {"crate/src/x.rs": "fn grant() {}\n"}), [])
+        files = {**FILES, **extra}
+        found = verify.citation_findings(
+            "doc.md", "The `grant` is at `x.rs:2`.", set(files), files.__getitem__,
+            upstream={("doc.md", "x.rs")},
         )
+        self.assertEqual(found, [])
 
     def test_a_short_path_resolves_by_its_unique_suffix(self):
         self.assertEqual(len(messages("The `zeta` is at `lib/y.rs:2`.")), 1)
         self.assertEqual(messages("The `zeta` is at `lib/y.rs:1`."), [])
         self.assertEqual(
-            messages("The `zeta` is at `lib/y.rs:2`.", {"pkg2/lib/y.rs": "a\n"}), []
+            len(messages("The `zeta` is at `lib/y.rs:2`.", {"pkg2/lib/y.rs": "a\n"})), 1
         )
 
     def test_a_shorthand_after_a_path_without_a_line_keeps_that_path(self):
@@ -808,5 +822,43 @@ class Kept(unittest.TestCase):
         )
 
 
+class Ambiguous(unittest.TestCase):
+    def test_every_live_ambiguous_citation_is_listed_and_nothing_else(self):
+        self.assertEqual(verify.check_line_citations().problems, [])
+
+    def test_one_more_ambiguous_citation_of_a_listed_key_fails(self):
+        key = next(iter(sorted(verify.LINE_CITATIONS_AMBIGUOUS)))
+        fewer = {**verify.LINE_CITATIONS_AMBIGUOUS, key: verify.LINE_CITATIONS_AMBIGUOUS[key] - 1}
+        with mock.patch.object(verify, "LINE_CITATIONS_AMBIGUOUS", fewer):
+            problems = verify.check_line_citations().problems
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is ambiguous", problems[0])
+        self.assertTrue(problems[0].startswith(key[0]))
+
+    def test_a_count_above_the_live_one_fails(self):
+        key = next(iter(sorted(verify.LINE_CITATIONS_AMBIGUOUS)))
+        more = {**verify.LINE_CITATIONS_AMBIGUOUS, key: verify.LINE_CITATIONS_AMBIGUOUS[key] + 1}
+        with mock.patch.object(verify, "LINE_CITATIONS_AMBIGUOUS", more):
+            problems = verify.check_line_citations().problems
+        self.assertEqual(len(problems), 1)
+        self.assertIn(f"lower the count to {verify.LINE_CITATIONS_AMBIGUOUS[key]}", problems[0])
+
+    def test_a_listed_citation_passes_and_an_unlisted_one_fails(self):
+        key = next(iter(sorted(verify.LINE_CITATIONS_AMBIGUOUS)))
+        rest = {k: n for k, n in verify.LINE_CITATIONS_AMBIGUOUS.items() if k != key}
+        with mock.patch.object(verify, "LINE_CITATIONS_AMBIGUOUS", rest):
+            problems = verify.check_line_citations().problems
+        self.assertTrue(problems and all("is ambiguous" in p and p.startswith(key[0]) for p in problems), problems)
+
+    def test_a_listed_citation_that_is_no_longer_ambiguous_fails(self):
+        stale = {**verify.LINE_CITATIONS_AMBIGUOUS, ("doc_none.md", "src/x.rs"): 1}
+        with mock.patch.object(verify, "LINE_CITATIONS_AMBIGUOUS", stale):
+            problems = verify.check_line_citations().problems
+        self.assertEqual(len(problems), 1)
+        self.assertIn("doc_none.md", problems[0])
+        self.assertIn("remove the entry", problems[0])
+
+
 if __name__ == "__main__":
     unittest.main()
+

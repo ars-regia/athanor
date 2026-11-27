@@ -4,6 +4,9 @@
 //! from every client, the input method's grab included, press and release (`State::kept_keys`);
 //! every other key, decision 28's four included, is forwarded. The compositor reads no
 //! configuration for its defaults: a user's own bindings are a later change (OS13).
+//!
+//! That change is `user_bindings.rs` (decision 38): the user's bindings come before these
+//! while the session is unlocked, and only these act while it is locked.
 
 pub(crate) mod cosmic;
 
@@ -91,6 +94,9 @@ pub(crate) enum Action {
     ZoomIn,
     /// Super+-: the magnifier one zoom step out, off at level 1.
     ZoomOut,
+    /// A command line of the user's, the n-th of `UserBindings`, which the user manager runs
+    /// as `/bin/sh -c <line>` at the worker's request (decision 38).
+    Spawn(usize),
 }
 
 impl Action {
@@ -112,6 +118,7 @@ impl Action {
             Self::TurnSplit | Self::GrowTile | Self::ShrinkTile | Self::ToggleFloating => false,
             // Not in section 1's list: the lock surface gets the keys.
             Self::ZoomIn | Self::ZoomOut => false,
+            Self::Spawn(_) => false,
         }
     }
 
@@ -136,6 +143,7 @@ impl Action {
             Self::Step(_) | Self::Carry(_) => false,
             Self::FocusToward(_) | Self::SwapToward(_) => false,
             Self::TurnSplit | Self::GrowTile | Self::ShrinkTile | Self::ToggleFloating => false,
+            Self::Spawn(_) => false,
         }
     }
 }
@@ -244,7 +252,7 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER, Keysym::minus), Action::ZoomOut),
 ];
 
-const fn on(mods: u8, sym: Keysym) -> Trigger {
+pub(crate) const fn on(mods: u8, sym: Keysym) -> Trigger {
     Trigger { mods, sym }
 }
 
@@ -271,12 +279,13 @@ pub(crate) fn arms_super(modifiers: &ModifiersState, handle: &KeysymHandle<'_>) 
             .any(|sym| [Keysym::Super_L, Keysym::Super_R].contains(sym))
 }
 
-/// The action of the key `handle` pressed with `modifiers`, if the compositor keeps it: none
-/// while `locked` but those `Action::kept_while_locked` names.
+/// The action of the key `handle` pressed with `modifiers` in `table`, if the compositor keeps
+/// it: while `locked`, of `DEFAULTS` alone and only those `Action::kept_while_locked` names.
 pub(crate) fn find(
     modifiers: &ModifiersState,
     handle: &KeysymHandle<'_>,
     locked: bool,
+    table: &[(Trigger, Action)],
 ) -> Option<Action> {
     matching(
         mask(modifiers),
@@ -284,6 +293,7 @@ pub(crate) fn find(
         &handle.raw_syms(),
         handle.raw_latin_sym_or_raw_current_sym(),
         locked,
+        table,
     )
 }
 
@@ -297,9 +307,14 @@ fn matching(
     raw: &[Keysym],
     latin: Option<Keysym>,
     locked: bool,
+    table: &[(Trigger, Action)],
 ) -> Option<Action> {
+    // A protected key is read on every sym it matches by, so that a user's binding on the sym a
+    // non-Latin layout gives it (Super+Alt+Cyrillic_ie under a Russian layout) cannot take it.
+    let kept = protected(mods, raw) || latin.is_some_and(|latin| protected(mods, &[latin]));
+    let table = if locked || kept { DEFAULTS } else { table };
     let action = terminal_switch(mods, modified).or_else(|| {
-        DEFAULTS
+        table
             .iter()
             .find(|(trigger, _)| {
                 trigger.mods == mods && (raw.contains(&trigger.sym) || latin == Some(trigger.sym))
@@ -376,6 +391,10 @@ impl State {
             Action::ToggleFloating => self.toggle_floating(),
             Action::ZoomIn => self.zoom_step(true),
             Action::ZoomOut => self.zoom_step(false),
+            Action::Spawn(n) => match self.user_bindings.command(n) {
+                Some(line) => self.send_job(Job::Shell(line.to_owned())),
+                None => tracing::warn!(n, "a user binding without its command"),
+            },
         }
     }
 
@@ -429,7 +448,7 @@ mod tests {
 
     /// `matching` for a key whose raw and modified sym is `sym`, under a Latin layout.
     fn plain(mods: u8, sym: Keysym, locked: bool) -> Option<Action> {
-        matching(mods, sym, &[sym], Some(sym), locked)
+        matching(mods, sym, &[sym], Some(sym), locked, DEFAULTS)
     }
 
     #[test]
@@ -596,7 +615,8 @@ mod tests {
                 Keysym::XF86_Switch_VT_4,
                 &[Keysym::F4],
                 Some(Keysym::F4),
-                false
+                false,
+                DEFAULTS,
             ),
             Some(Action::Vt(4))
         );
@@ -614,7 +634,7 @@ mod tests {
         };
         assert_eq!(mask(&caps), SUPER | ALT);
         assert_eq!(
-            matching(SUPER | ALT, Keysym::T, &[Keysym::t], Some(Keysym::t), false),
+            matching(SUPER | ALT, Keysym::T, &[Keysym::t], Some(Keysym::t), false, DEFAULTS),
             Some(Action::Reveal)
         );
         // Under a Russian layout the key of T is Cyrillic_ie; its Latin sym is t.
@@ -624,7 +644,8 @@ mod tests {
                 Keysym::Cyrillic_ie,
                 &[Keysym::Cyrillic_ie],
                 Some(Keysym::t),
-                false
+                false,
+                DEFAULTS,
             ),
             Some(Action::Reveal)
         );
@@ -634,5 +655,27 @@ mod tests {
             "the set of modifiers is exact"
         );
         assert_eq!(plain(SUPER, Keysym::t, false), None);
+    }
+
+    /// A user's binding on the sym a Russian layout gives a protected key does not take it:
+    /// Super+Alt+T reveals, and Super+Alt+A, which no default serves, does nothing.
+    #[test]
+    fn a_user_binding_takes_no_protected_key_by_another_layouts_sym() {
+        let user = [
+            (on(SUPER | ALT, Keysym::Cyrillic_ie), Action::Spawn(0)),
+            (on(SUPER | ALT, Keysym::Cyrillic_ef), Action::Spawn(1)),
+            (on(SUPER, Keysym::Cyrillic_ie), Action::Spawn(2)),
+        ];
+        let russian = |mods, sym, latin| matching(mods, sym, &[sym], Some(latin), false, &user);
+        assert_eq!(
+            russian(SUPER | ALT, Keysym::Cyrillic_ie, Keysym::t),
+            Some(Action::Reveal)
+        );
+        assert_eq!(russian(SUPER | ALT, Keysym::Cyrillic_ef, Keysym::a), None);
+        assert_eq!(
+            russian(SUPER, Keysym::Cyrillic_ie, Keysym::t),
+            Some(Action::Spawn(2)),
+            "an unprotected key is the user's"
+        );
     }
 }

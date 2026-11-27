@@ -14,6 +14,7 @@
 //! a symbolic link, as a user's dotfiles managed by links need.
 
 use crate::store::{self, Error, Store};
+use std::path::Path;
 use toml::{Table, Value};
 
 /// The record, in the store's directory.
@@ -22,18 +23,19 @@ pub const RECORD: &str = "import.toml";
 /// Where the imported values come from.
 const FROM: &str = "cosmic";
 
-/// What one family's import does under the store's lock, returning its outcome.
+/// What one family's import does under the store's lock, reading the user's COSMIC directory,
+/// returning its outcome.
 type Family = (
     &'static str,
-    fn(&store::Locked<'_>) -> Result<&'static str, Error>,
+    fn(&store::Locked<'_>, Option<&Path>) -> Result<&'static str, Error>,
 );
 
 /// A family's outcome in the record (`doc_own_stack.md` decision 38).
 const OUTCOMES: [&str; 4] = ["imported", "absent", "kept", "refused"];
 
-/// The families the import knows. None yet: the keyboard, the magnifier and the bindings come
-/// with their writer modules (ADR-0150 point 6; the plan's P2 to P4).
-const FAMILIES: &[Family] = &[];
+/// The families the import knows: the keyboard and the magnifier come with their writer modules
+/// (ADR-0150 point 6; the plan's P2 and P3).
+const FAMILIES: &[Family] = &[("bindings", crate::shortcuts::import)];
 
 /// What a run did.
 #[derive(Debug, PartialEq, Eq)]
@@ -44,8 +46,13 @@ pub enum Ran {
     Recorded,
 }
 
-/// Runs the import into `store`, under its lock.
+/// Runs the import into `store`, under its lock, from the user's COSMIC directory.
 pub fn run(store: &Store) -> Result<Ran, Error> {
+    run_from(store, crate::cosmic_config::user_dir().as_deref())
+}
+
+/// `run`, reading the COSMIC directory `cosmic`.
+fn run_from(store: &Store, cosmic: Option<&Path>) -> Result<Ran, Error> {
     let locked = store.lock()?;
     let record = locked.read(RECORD)?;
     let listed = match &record {
@@ -55,7 +62,7 @@ pub fn run(store: &Store) -> Result<Ran, Error> {
     let mut outcomes = Vec::new();
     for (name, import) in FAMILIES {
         if !listed.contains_key(*name) {
-            outcomes.push((*name, import(&locked)?));
+            outcomes.push((*name, import(&locked, cosmic)?));
         }
     }
     if record.is_some() && outcomes.is_empty() {
@@ -111,11 +118,12 @@ mod tests {
     fn a_first_start_writes_the_record_and_a_second_changes_nothing() {
         let dir = scratch("import-twice");
         let store = Store::at(dir.join("athanor/sulphur"));
-        assert!(matches!(run(&store), Ok(Ran::Recorded)));
+        let cosmic = dir.join("cosmic");
+        assert!(matches!(run_from(&store, Some(&cosmic)), Ok(Ran::Recorded)));
         let table: Table = toml::from_str(&record(store.dir())).expect("toml");
         assert_eq!(table["schema"].as_integer(), Some(1));
         assert_eq!(table["from"].as_str(), Some("cosmic"));
-        assert_eq!(table["families"].as_table().map(Table::len), Some(0));
+        assert_eq!(table["families"]["bindings"].as_str(), Some("absent"));
         let snapshot = |dir: &Path| {
             let mut entries: Vec<_> = fs::read_dir(dir)
                 .expect("list")
@@ -132,7 +140,7 @@ mod tests {
         };
         let before = snapshot(store.dir());
         std::thread::sleep(std::time::Duration::from_millis(20));
-        assert!(matches!(run(&store), Ok(Ran::Done)));
+        assert!(matches!(run_from(&store, Some(&cosmic)), Ok(Ran::Done)));
         assert_eq!(
             snapshot(store.dir()),
             before,
@@ -155,7 +163,7 @@ mod tests {
             "schema = 1\nfrom = \"cosmic\"\n[families]\nkeyboard = \"maybe\"\n",
         ] {
             fs::write(dir.join(RECORD), text).expect("seed");
-            assert!(run(&store).is_err(), "{text}");
+            assert!(run_from(&store, None).is_err(), "{text}");
             assert_eq!(record(&dir), text);
         }
         fs::remove_file(dir.join(RECORD)).expect("remove");
@@ -165,14 +173,14 @@ mod tests {
             .expect("mkfifo");
         assert!(made.success());
         assert!(
-            matches!(run(&store), Err(Error::NotRegular { .. })),
+            matches!(run_from(&store, None), Err(Error::NotRegular { .. })),
             "a FIFO, refused without blocking"
         );
         fs::remove_file(dir.join(RECORD)).expect("remove");
         let elsewhere = dir.join("elsewhere.toml");
         fs::write(&elsewhere, "schema = 1\nfrom = \"cosmic\"\n[families]\n").expect("target");
         std::os::unix::fs::symlink(&elsewhere, dir.join(RECORD)).expect("link");
-        assert!(matches!(run(&store), Err(Error::Link { .. })));
+        assert!(matches!(run_from(&store, None), Err(Error::Link { .. })));
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
@@ -190,12 +198,12 @@ mod tests {
         assert!(stopped.success());
         let store = Store::at(dir.clone());
         let start = Instant::now();
-        assert!(matches!(run(&store), Err(Error::Locked { .. })));
+        assert!(matches!(run_from(&store, None), Err(Error::Locked { .. })));
         assert!(start.elapsed() < store::LOCK_BOUND * 3);
         assert!(!dir.join(RECORD).exists());
         holder.kill().expect("kill the holder");
         holder.wait().expect("wait");
-        assert!(matches!(run(&store), Ok(Ran::Recorded)));
+        assert!(matches!(run_from(&store, None), Ok(Ran::Recorded)));
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
