@@ -214,8 +214,9 @@ fn row(
                 .get("command")
                 .and_then(command_line)
                 .ok_or_else(missing)?;
+            let at = commands.len();
             commands.push(line.to_owned());
-            Action::Spawn(commands.len() - 1)
+            Action::Spawn(at)
         }
         "system" => {
             let system = table
@@ -276,7 +277,7 @@ pub(crate) fn parse(text: &str) -> Result<(UserBindings, Vec<String>), String> {
                 match row(entry, &replaced, &mut commands) {
                     Ok(Row::Bind(trigger, action)) => user.push((trigger, action)),
                     Ok(Row::Disable(trigger)) => disabled.push(trigger),
-                    Err(reason) => skipped.push(format!("binding {}: {reason}", at + 1)),
+                    Err(reason) => skipped.push(format!("binding {}: {reason}", at.saturating_add(1))),
                 }
             }
         }
@@ -343,10 +344,8 @@ mod tests {
     use super::*;
 
     /// The client's copy of the defaults, in the file's form.
-    const OS13: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../../system/athanor-sulphur-client/data/os13-bindings.toml"
-    ));
+    const OS13: &str =
+        include_str!("../../../../../system/athanor-sulphur-client/data/os13-bindings.toml");
 
     fn read(text: &str) -> UserBindings {
         let (bindings, skipped) = parse(&format!("schema = 1\n{text}")).expect("read");

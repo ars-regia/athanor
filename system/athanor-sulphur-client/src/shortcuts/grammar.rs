@@ -127,9 +127,13 @@ pub(super) fn keys(keys: &str) -> Result<String, String> {
     let mut held = [false; 4];
     let mut key = None;
     for token in keys.split('+').map(str::trim) {
-        if let Some(at) = MODIFIERS.iter().position(|m| m.eq_ignore_ascii_case(token)) {
-            if std::mem::replace(&mut held[at], true) {
-                return Err(format!("{keys:?} names {} twice", MODIFIERS[at]));
+        if let Some((on, name)) = held
+            .iter_mut()
+            .zip(MODIFIERS)
+            .find(|(_, m)| m.eq_ignore_ascii_case(token))
+        {
+            if std::mem::replace(on, true) {
+                return Err(format!("{keys:?} names {name} twice"));
             }
             continue;
         }
@@ -297,19 +301,19 @@ fn optional<T>(
     s: &mut Scanner<'_>,
     read: impl Fn(&mut Scanner<'_>) -> Result<T, String>,
 ) -> Result<Option<T>, String> {
-    if s.rest.starts_with("None") {
-        s.rest = &s.rest[4..];
+    if let Some(rest) = s.rest.strip_prefix("None") {
+        s.rest = rest;
         return Ok(None);
     }
-    let wrapped = s.rest.starts_with("Some");
-    if wrapped {
-        s.rest = &s.rest[4..];
+    let wrapped = s.rest.strip_prefix("Some");
+    if let Some(rest) = wrapped {
+        s.rest = rest;
         s.skip()?;
         s.require('(')?;
         s.skip()?;
     }
     let value = read(s)?;
-    if wrapped {
+    if wrapped.is_some() {
         s.skip()?;
         s.require(')')?;
     }
@@ -321,10 +325,11 @@ fn number(s: &mut Scanner<'_>) -> Result<i64, String> {
         .rest
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(s.rest.len());
-    let n = s.rest[..end]
+    let (digits, rest) = s.rest.split_at_checked(end).unwrap_or((s.rest, ""));
+    let n = digits
         .parse()
         .map_err(|_| "expected a number".to_owned())?;
-    s.rest = &s.rest[end..];
+    s.rest = rest;
     Ok(n)
 }
 
@@ -441,7 +446,7 @@ pub(super) fn custom(text: &str) -> Result<Vec<Result<Table, String>>, String> {
             }
             Err(why) => {
                 let end = super::top_level(start, ',').min(super::top_level(start, '}'));
-                s.rest = &start[end..];
+                s.rest = start.get(end..).unwrap_or("");
                 Err(why)
             }
         };

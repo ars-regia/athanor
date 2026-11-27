@@ -394,7 +394,7 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
                 bus.run(&unit_name(command.name, pid, runs), command.name, command.argv);
             }
             Job::Shell(line) => {
-                runs += 1;
+                runs = runs.wrapping_add(1);
                 let unit = unit_name(USER_COMMAND, pid, runs);
                 // The user manager expands `$` in each word of `ExecStart` and turns `$$` into
                 // `$`: doubled, every `$` reaches the shell as the user wrote it.
