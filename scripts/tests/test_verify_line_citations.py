@@ -191,6 +191,7 @@ class Lists(unittest.TestCase):
                 out = self.found(text)
                 self.assertEqual(len(out), 1)
                 self.assertIn("does not hold `gone-pkg`", out[0])
+                self.assertIn("the lines moved", out[0])
 
     def test_a_name_of_another_clause_is_not_part_of_the_run(self):
         self.assertEqual(self.found(f"The `nix` ships in `cosmic-osd` (`{self.PJ}:2`)."), [])
@@ -284,6 +285,28 @@ class Names(unittest.TestCase):
         # known leniency, #1553: a comment that holds the whole setting holds it
         unit = {"unit/b.service": "[Service]\n# ProtectSystem=strict below\nProtectSystem=strict\n"}
         self.assertEqual(messages("It sets `ProtectSystem=strict` (`unit/b.service:2`).", unit), [])
+
+    def test_a_setting_whose_value_changed_is_a_finding(self):
+        unit = {"unit/c.service": "[Service]\nProtectSystem=full\n"}
+        out = messages("It sets `ProtectSystem=strict` (`unit/c.service:2`).", unit)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("the file sets `ProtectSystem` to another value", out[0])
+        # a key that the file does not set is no token, as before
+        self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/c.service:2`).", unit), [])
+        # a key set only in a comment is not set
+        commented = {"unit/d.service": "[Service]\n# ProtectHome=read-only\nProtectSystem=full\n"}
+        self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/d.service:3`).", commented), [])
+        # a value the sentence sets against the held one is no finding
+        restart = {"unit/e.service": "[Service]\nRestart=on-failure\n"}
+        self.assertEqual(messages("It uses `Restart=on-failure`, not `Restart=always` (`unit/e.service:2`).",
+                                  restart), [])
+        # a value that a setting lists after its first is not another value
+        caps = {"unit/f.service": "[Service]\nCapabilityBoundingSet=CAP_A CAP_B\n"}
+        self.assertEqual(messages("It keeps `CapabilityBoundingSet=CAP_B` (`unit/f.service:2`).", caps), [])
+        # a quoted value is the value, and a dotted name sets no key of its own
+        quoted = {"unit/g.service": "[Service]\nEnvironment=\"RUST_LOG=info\"\nX.Mode=2\n"}
+        self.assertEqual(messages("It sets `Environment=RUST_LOG=info` (`unit/g.service:2`).", quoted), [])
+        self.assertEqual(messages("It sets `Mode=1` (`unit/g.service:3`).", quoted), [])
 
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
@@ -753,20 +776,36 @@ class Kept(unittest.TestCase):
 
     def test_a_file_named_by_its_suffix_places_the_files_of_its_crate(self):
         # `data/globals` and `src/notifications.rs` resolve by their suffix and name their crate,
-        # whose `src/state.rs` and `src/store.rs` the same lines cite after them.
-        state = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/state.rs"
-        store = "forge/specs/athanor-shelld/athanor-shelld-1.0.0/src/store.rs"
-        with (
-            mock.patch.object(verify, "BASE_REF", "HEAD"),
-            mock.patch.object(verify, "diff_hunks", return_value={state: [(0, 0, 1)], store: [(0, 0, 1)]}),
-        ):
-            result = verify.check_line_citations()
-        moved = {p.split(" is moved")[0] for p in result.problems if "is moved by this change" in p}
-        cited = {
-            f"doc_notification_center.md:15: `{store}:9`",
-            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (110, 570)),
+        # whose `src/state.rs` and `src/store.rs` the same lines cite after them. The documents
+        # and the crates are a fixture: no live text decides what this test holds (#1568).
+        one, two = "forge/specs/one/one-1.0.0", "forge/specs/two/two-1.0.0"
+        files = {
+            f"{one}/data/globals": "alpha\n",
+            f"{one}/src/state.rs": "a\nb\nc\n",
+            f"{two}/src/state.rs": "a\nb\nc\n",
+            f"{one}/src/notifications.rs": "alpha\n",
+            f"{one}/src/store.rs": "a\nb\nc\n",
+            f"{two}/src/store.rs": "a\nb\nc\n",
         }
-        self.assertLessEqual(cited, moved)
+        text = (
+            "The `alpha` is in `data/globals:1`, then the `b` at `src/state.rs:2`.\n"
+            "The `alpha` is in `src/notifications.rs:1`, then the `c` at `src/store.rs:3`.\n"
+        )
+        hunks = {f"{one}/src/state.rs": [(0, 0, 1)], f"{one}/src/store.rs": [(0, 0, 1)]}
+        found = verify.citation_findings(
+            "doc.md", text, set(files), files.__getitem__, hunks=hunks, base_text=text,
+            base_file=files.__getitem__,
+        )
+        moved = {f[-1] for f in found if "is moved by this change" in f[-1]}
+        self.assertEqual(
+            moved,
+            {
+                f"doc.md:1: `{one}/src/state.rs:2` is moved by this change: it should name "
+                f"`{one}/src/state.rs:3`",
+                f"doc.md:2: `{one}/src/store.rs:3` is moved by this change: it should name "
+                f"`{one}/src/store.rs:4`",
+            },
+        )
 
 
 if __name__ == "__main__":
