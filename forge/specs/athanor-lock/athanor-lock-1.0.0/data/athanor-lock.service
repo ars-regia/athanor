@@ -24,17 +24,21 @@ Slice=session.slice
 # MemoryMax= is set at spike L5's measurement plus 15% (LP15, ADR-0068), with LP18 step 2's
 # VM test.
 
+# D43 (#1558): no line that makes the user manager create a user namespace. Under a per-user
+# manager ProtectSystem=, ProtectHome=, the Private*= and the ProtectKernel*= and
+# ProtectControlGroups= lines put the service in one owned by the user, where a process of the
+# same uid holds CAP_SYS_PTRACE and attaches to the lock whatever its dumpable flag. The lock
+# confines its files and network in process (src/confine.rs); `verify.py separated-units` holds
+# this unit to that. The lines below keep the host's user namespace (measured on systemd 262).
 # LP15: Wayland, the system and session buses and athanor-unlockd's socket are all Unix sockets.
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateNetwork=yes
-PrivateTmp=yes
 NoNewPrivileges=yes
+# Without it a 32-bit socketcall through int 0x80 is not filtered, and opened a UDP socket past
+# RestrictAddressFamilies=AF_UNIX (measured on systemd 262).
+SystemCallArchitectures=native
 SystemCallFilter=@system-service
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
+# Landlock does not mediate a change of a file's mode, owner, times or extended attributes, and
+# the lock makes none: refused with EPERM, so a stray call fails instead of killing the guard.
+SystemCallFilter=~@chown:EPERM chmod:EPERM fchmod:EPERM fchmodat:EPERM fchmodat2:EPERM utime:EPERM utimes:EPERM utimensat:EPERM futimesat:EPERM setxattr:EPERM lsetxattr:EPERM fsetxattr:EPERM setxattrat:EPERM removexattr:EPERM lremovexattr:EPERM fremovexattr:EPERM removexattrat:EPERM
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
