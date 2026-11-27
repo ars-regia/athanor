@@ -17,12 +17,11 @@ pipeline and installation; the image is specified in
 - **No runtime path into the build tree or `/tmp`.** Load artefacts from installed paths,
   never `target/`; privileged state goes under `/run/athanor`, not `/tmp` (`verify.py paths`).
 - **Only `athanor-sulphur-client` depends on COSMIC** or reads its configuration
-  (`verify.py boundary`). The exceptions are four files of athanor-sulphur, which depend on
+  (`verify.py boundary`). The exceptions are three files of athanor-sulphur, which depend on
   no COSMIC crate (`doc_shell.md` SH2): `src/xkb_config.rs` reads cosmic-comp's keyboard layouts
-  (`doc_own_stack.md` decision 27), `src/screen_filter.rs` its colour filter (decision 28),
-  `src/focus_theme.rs` the theme of the focus outline (decision 31), and
+  (`doc_own_stack.md` decision 27), `src/screen_filter.rs` its colour filter (decision 28), and
   `src/bindings/cosmic.rs` calls cosmic-settings-daemon for the volume, brightness and
-  screen-reader keys (decision 29). The first three leave as their families move to the preference store under `$XDG_CONFIG_HOME/athanor/sulphur/` (ADR-0150), which only `athanor-sulphur-client` writes.
+  screen-reader keys (decision 29). The first two leave as their families move to the preference store under `$XDG_CONFIG_HOME/athanor/sulphur/` (ADR-0150), which only `athanor-sulphur-client` writes; `src/focus_theme.rs` already has, and reads the store.
 - **The polkit subject identifies the caller**, not the bus connection, and every action the
   code checks is declared in a `.policy` file (`verify.py polkit polkit-subject`).
 - **Dependency versions** come from `[workspace.dependencies]` in the root `Cargo.toml`.
