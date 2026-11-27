@@ -3,11 +3,14 @@
 
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use athanor_portal::screenshot::{Format, Host, Shot};
 use athanor_sulphur_client::{Client, OutputPicture, PixelFormat};
 use tokio::sync::oneshot;
 use zbus::message::Header;
+
+use crate::caller::Frontend;
 
 thread_local! {
     /// The compositor's client, made on the main thread at the first screenshot and kept for
@@ -17,22 +20,23 @@ thread_local! {
 
 /// The backend's side of the interface.
 pub struct Outputs {
-    /// The connection the frontend check asks the bus on (PT3, `caller::authorise`).
-    query: zbus::Connection,
+    /// The frontend check (PT3, `caller::Frontend`).
+    frontend: Arc<Frontend>,
     /// Where the capture buffers are created: the unit's runtime directory, the one place
     /// beneath `$XDG_RUNTIME_DIR` Landlock lets the backend write (PT3).
     dir: PathBuf,
 }
 
 impl Outputs {
-    pub fn new(query: zbus::Connection, dir: PathBuf) -> Outputs {
-        Outputs { query, dir }
+    pub fn new(frontend: Arc<Frontend>, dir: PathBuf) -> Outputs {
+        Outputs { frontend, dir }
     }
 }
 
 impl Host for Outputs {
     async fn frontend(&self, header: &Header<'_>) -> Result<(), String> {
-        crate::caller::authorise(header, &self.query)
+        self.frontend
+            .authorise(header)
             .await
             .map_err(|err| err.to_string())
     }

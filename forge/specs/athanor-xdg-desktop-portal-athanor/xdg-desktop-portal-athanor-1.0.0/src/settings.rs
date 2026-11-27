@@ -10,16 +10,18 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::{Arc, PoisonError, RwLock};
 
+use athanor_portal::eis::OnBus;
 use athanor_portal::settings::{self as values, Fallback, APPEARANCE};
+use athanor_unit::bus_caller::Questions;
 use gio::prelude::*;
 use glib::{Variant, VariantClass};
 use tokio::sync::mpsc::UnboundedSender;
 use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
-use zbus::Connection;
 use zbus::{Array, Dict, ObjectPath, OwnedVariant, Signature, Structure};
 
-use crate::{caller, Error};
+use crate::caller::Frontend;
+use crate::Error;
 
 /// The GNOME schemas served whole, key by key, as xdg-desktop-portal-gtk 1.15.3 does: every
 /// key GTK 4.20 and libadwaita 1.8 read through the portal (PT5). A schema that is not
@@ -261,33 +263,33 @@ pub async fn emit(emitter: &SignalEmitter<'_>, change: &Change) {
         );
         return;
     };
-    if let Err(err) = Portal::setting_changed(emitter, &change.namespace, &change.key, &value).await
+    if let Err(err) =
+        Portal::<OnBus>::setting_changed(emitter, &change.namespace, &change.key, &value).await
     {
         tracing::warn!(error = %err, namespace = change.namespace, key = change.key, "cannot announce a changed setting");
     }
 }
 
-pub struct Portal {
+pub struct Portal<Q = OnBus> {
     store: Arc<RwLock<Store>>,
-    /// The query connection: it serves nothing, subscribes to nothing and owns no name, so the
-    /// caller check never waits for a reply behind the calls this object answers (issue #1035).
-    query: Connection,
+    /// The frontend check, on connections that serve nothing (PT3, issue #1035).
+    frontend: Arc<Frontend<Q>>,
 }
 
-impl Portal {
-    pub fn new(store: Arc<RwLock<Store>>, query: Connection) -> Portal {
-        Portal { store, query }
+impl<Q> Portal<Q> {
+    pub fn new(store: Arc<RwLock<Store>>, frontend: Arc<Frontend<Q>>) -> Portal<Q> {
+        Portal { store, frontend }
     }
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Settings")]
-impl Portal {
+impl<Q: Questions + Send + Sync + 'static> Portal<Q> {
     async fn read_all(
         &self,
         namespaces: Vec<String>,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<HashMap<String, HashMap<String, OwnedVariant>>, Error> {
-        caller::authorise(&header, &self.query).await?;
+        self.frontend.authorise(&header).await?;
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         Ok(store
             .iter()
@@ -308,7 +310,7 @@ impl Portal {
         key: String,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<OwnedVariant, Error> {
-        caller::authorise(&header, &self.query).await?;
+        self.frontend.authorise(&header).await?;
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         store
             .get(&namespace)
@@ -381,13 +383,12 @@ mod tests {
     #[tokio::test]
     async fn the_interface_matches_the_upstream_definition() {
         let bus = crate::caller::tests::Bus::start("introspect");
-        let query = bus.builder().build().await.expect("query");
         let upstream = members(include_str!(
             "../interfaces/org.freedesktop.impl.portal.Settings.xml"
         ));
         let mut ours = String::new();
         zbus::object_server::Interface::introspect_to_writer(
-            &Portal::new(Arc::default(), query),
+            &Portal::new(Arc::default(), crate::caller::tests::image(&bus).await),
             &mut ours,
             0,
         );

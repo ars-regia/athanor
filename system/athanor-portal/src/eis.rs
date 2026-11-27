@@ -322,6 +322,7 @@ pub(crate) mod tests {
         pub(crate) unit: String,
         pub(crate) exec: String,
         pub(crate) fragment: String,
+        pub(crate) drop_ins: Vec<String>,
         /// The compositor unit's `MainPID`, the owner's own pid when `None`.
         pub(crate) main_pid: Option<u32>,
         pub(crate) hide_pidfd: bool,
@@ -335,6 +336,7 @@ pub(crate) mod tests {
                 unit: COMPOSITOR.unit.into(),
                 exec: COMPOSITOR.exec.into(),
                 fragment: format!("{}/{}", bus_caller::IMAGE_USER_UNITS, COMPOSITOR.unit),
+                drop_ins: Vec::new(),
                 main_pid: None,
                 hide_pidfd: false,
             }
@@ -403,7 +405,7 @@ pub(crate) mod tests {
                 main_pid: self.main_pid.unwrap_or_else(std::process::id),
                 exec_start: vec![self.exec.clone()],
                 fragment_path: self.fragment.clone(),
-                drop_in_paths: Vec::new(),
+                drop_in_paths: self.drop_ins.clone(),
             })
         }
     }
