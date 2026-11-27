@@ -6148,17 +6148,24 @@ def copied_source(root, spec, word):
     return found.popitem()[1] if len(found) == 1 else None
 
 
-# What precedes a %files path that ships no file, and what qualifies one (spec_files_covering).
+# What precedes a %files path that ships no file, what qualifies one, and the conditionals that
+# may stand in %files (spec_files_covering); any other %word there fails closed.
 FILES_SKIPPED = re.compile(r"%(?:dir|exclude|ghost)\s")
-FILES_QUALIFIERS = re.compile(r"^(?:%(?:attr|config|verify|defattr|lang|caps|doc|license)(?:\([^)]*\))?\s+)+")
+FILES_QUALIFIERS = re.compile(r"^(?:%(?:attr|config|verify|defattr|lang|caps|doc|license)(?:\([^)]*\))?(?:\s+|$))+")
+FILES_CONDITIONALS = re.compile(r"%(?:if\w*|el\w*|endif)\b")
+# Fedora's values of the directory macros that specs list in %files; another macro there reads
+# as a glob that matches anything (spec_files_covering).
+FILES_DIRS = {"%{_libdir}": "/usr/lib64", "%{_datadir}": "/usr/share", "%{_unitdir}": "/usr/lib/systemd/system",
+              "%{_sysusersdir}": "/usr/lib/sysusers.d", "%{_tmpfilesdir}": "/usr/lib/tmpfiles.d"}
 
 
 def spec_files_covering(text, directories):
     """Each %files line of a spec that may ship a file into one of `directories` (paths on the
     installed system) without naming it: a list read with -f, unless %find_lang writes it,
-    which names translations alone; and a path, not with %dir, %exclude or %ghost, that is one
-    of them or a directory above one, a glob that matches one of those, a macro that
-    installed_path leaves read as a glob that matches anything, or that climbs with `..`."""
+    which names translations alone; a line led by a %word it does not know; and a path, not
+    with %dir, %exclude or %ghost, that is one of them or a directory above one, a glob that
+    matches one of those or a file in one, a macro that installed_path leaves read as a glob
+    that matches anything, or that climbs with `..`."""
     above = {"/"} | {"/".join(d.split("/")[:n]) for d in directories for n in range(2, d.count("/") + 2)}
     langs = {f"{name}.lang" for name in re.findall(r"^\s*%find_lang\s+(\S+)", text, re.M)}
     found, in_files = [], False
@@ -6172,10 +6179,18 @@ def spec_files_covering(text, directories):
         if FILES_END.match(line):
             in_files = False
         path = FILES_QUALIFIERS.sub("", line)
-        if not in_files or not line or line.startswith("#") or FILES_SKIPPED.match(path):
+        if not in_files or not path or line.startswith("#") or FILES_SKIPPED.match(path) or FILES_CONDITIONALS.match(path):
             continue
-        path = re.sub(r"%\{[^}]*\}|%\w+", "*", installed_path(path))
-        if path.startswith(("/", "*")) and (".." in path.split("/") or any(fnmatch.fnmatchcase(d, path) for d in above)):
+        if re.match(r"%[A-Za-z]", path):
+            found.append(line)
+            continue
+        path = installed_path(path)
+        for macro, value in FILES_DIRS.items():
+            path = path.replace(macro, value)
+        path = re.sub(r"%\{[^}]*\}|%\w+", "*", path)
+        parent = path.rpartition("/")[0]
+        if path.startswith(("/", "*")) and (".." in path.split("/") or any(fnmatch.fnmatchcase(d, path) for d in above)
+                                              or any(c in path for c in "*?[") and any(fnmatch.fnmatchcase(d, parent) for d in directories)):
             found.append(line)
     return found
 
@@ -6296,8 +6311,10 @@ def separated_unit_problems(units, dropins=None, separated=SEPARATED_USER_UNITS)
             missing = ", ".join(sorted(SEPARATED_REFUSED_CALLS - refused)) or "none"
             problems.append(f"{unit}: SystemCallFilter= is not @system-service alone, then refusals of every call Landlock does not mediate, once its drop-ins apply (refusals missing: {missing}); a call allowed after a refusal is allowed again (doc_lock_and_prompts.md LP15)")
         commands = lists["ExecStart"]
-        if len(commands) != 1 or not commands[0].startswith("/"):
-            problems.append(f"{unit}: ExecStart= is {' then '.join(commands) or 'unset'} once its drop-ins apply, not one command named by its absolute path without a prefix: `+` runs it outside the sandbox, the filter included, and `!`, `!!`, `-`, `@`, `:` and `|` change how it runs (systemd.service(5), doc_lock_and_prompts.md LP15)")
+        if len(commands) != 1 or not commands[0].startswith("/") or ";" in unit_words(commands[0]):
+            problems.append(f"{unit}: ExecStart= is {' then '.join(commands) or 'unset'} once its drop-ins apply, not one command named by its absolute path without a prefix: `+` runs it outside the sandbox, the filter included, `!`, `!!`, `-`, `@`, `:` and `|` change how it runs, and a `;` word starts a second command, which may carry its own prefix (systemd.service(5), doc_lock_and_prompts.md LP15)")
+        if any(key == "Type" and value == "oneshot" for _, key, value in unit_assignments(merged)):
+            problems.append(f"{unit}: Type=oneshot, under which ExecStart= runs one command after another; a separated unit runs one long-lived command (systemd.service(5), doc_lock_and_prompts.md LP15)")
     return problems
 
 

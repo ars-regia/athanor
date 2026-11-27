@@ -416,6 +416,43 @@ class SeparatedUnitsTest(unittest.TestCase):
             [],
         )
 
+    def test_exec_start_runs_no_second_command(self):
+        # A `;` word starts a second command, which may carry its own prefix: systemd accepts
+        # it under Type=oneshot, so both fail.
+        second = unit(KEPT).replace("ExecStart=/", "ExecStart=/usr/bin/true ; +/")
+        oneshot = unit(KEPT).replace("[Service]\n", "[Service]\nType=oneshot\n", 1)
+        for name, text, dropin, expected in (
+            ("a ; in the unit", second, None, "ExecStart="),
+            (
+                "a ; in a drop-in",
+                unit(KEPT),
+                "[Service]\nExecStart=\nExecStart=/usr/bin/athanor-lock ; /usr/bin/id\n",
+                "ExecStart=",
+            ),
+            ("oneshot in the unit", oneshot, None, "Type=oneshot"),
+            (
+                "oneshot in a drop-in",
+                unit(KEPT),
+                "[Service]\nType=oneshot\n",
+                "Type=oneshot",
+            ),
+        ):
+            with self.subTest(name):
+                dropins = {f"athanor-lock/{LOCK}.d/50-x.conf": dropin} if dropin else {}
+                found = problems({LOCK: text}, dropins)
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(expected, found[0])
+        # The negative control: a `;` inside a word, an escaped one, and another type.
+        self.assertEqual(
+            problems(
+                {LOCK: unit(KEPT)},
+                {
+                    f"athanor-lock/{LOCK}.d/50-x.conf": "[Service]\nType=simple\nExecStart=\nExecStart=/usr/bin/athanor-lock a;b \\;\n"
+                },
+            ),
+            [],
+        )
+
     def test_files_that_may_ship_an_unnamed_drop_in_fail(self):
         # The spec writes its drop-in in %install, which no copy shows, and %files ships it
         # without naming it.
@@ -432,6 +469,10 @@ class SeparatedUnitsTest(unittest.TestCase):
             "%files\n%{_libdir}/../lib/systemd/user\n",
             "%files\n%{_mydir}\n",
             "%files\n/usr\n",
+            f"%files\n%{{_prefix}}/lib/systemd/*/{LOCK}.d/*.conf\n",
+            f"%files\n/usr/lib/systemd/use?/{LOCK}.d/*\n",
+            "%files\n%artifact /usr/lib/systemd\n",
+            "%files\n%artifact /usr/share/x\n",
         ):
             with self.subTest(files=files):
                 found = problems({LOCK: unit(KEPT)}, {SPEC: install + files})
@@ -439,12 +480,13 @@ class SeparatedUnitsTest(unittest.TestCase):
                 self.assertIn(SPEC, found[0])
                 self.assertIn("cannot name or read", found[0])
         # The negative controls: a list %find_lang writes, a directory listed with %dir, the
-        # unit itself, and paths that lead elsewhere.
+        # unit itself, paths that lead elsewhere, conditionals, and globs in known directories.
         for files in (
             "%files -f polkit-1.lang\n",
             f"%files\n%dir /usr/lib/systemd/user/{LOCK}.d\n%attr(0755,root,root) %dir %{{_userunitdir}}/service.d\n",
             f"%files\n%{{_userunitdir}}/{LOCK}\n%{{_unitdir}}/x.service\n%{{_datadir}}/x/*\n%license COPYING\n",
             "%files\n%exclude /usr/lib/systemd/user\n%ghost /usr/lib/systemd/user\n%{_libexecdir}/%{name}\n",
+            "%files\n%defattr(-,root,root,-)\n%if 0%{?fedora}\n%{_libdir}/lib*.so.*\n%else\n%{_datadir}/x/*.conf\n%endif\n",
         ):
             with self.subTest(files=files):
                 self.assertEqual(
