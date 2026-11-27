@@ -13,6 +13,12 @@ spec.loader.exec_module(verify)
 
 LOCK = "athanor-lock.service"
 SHIPPED = SCRIPT.parents[1] / "forge/specs/athanor-lock/athanor-lock-1.0.0/data" / LOCK
+AGENT = "athanor-polkit-agent.service"
+AGENT_SHIPPED = (
+    SCRIPT.parents[1]
+    / "forge/specs/athanor-polkit-agent/athanor-polkit-agent-1.0.0/data"
+    / AGENT
+)
 SPEC = "athanor-lock/athanor-lock.spec"
 DATA = "athanor-lock/athanor-lock-1.0.0/data"
 REFUSALS = next(
@@ -37,7 +43,7 @@ def unit(lines):
 def problems(units, dropins=None):
     """`dropins` maps `<spec>/<directory>/<file>` to the text of a user drop-in installed
     under usr/lib/systemd/user/, or a longer path under forge/specs to a file put there,
-    such as a spec."""
+    such as a spec. The fixtures are the lock's, so only the lock is held."""
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         for name, text in (dropins or {}).items():
@@ -49,8 +55,12 @@ def problems(units, dropins=None):
             path = root / "forge/specs" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
-        found, dropin_problems = verify.separated_unit_dropins(root, units)
-        return dropin_problems + verify.separated_unit_problems(units, found)
+        found, dropin_problems = verify.separated_unit_dropins(
+            root, units, separated=(LOCK,)
+        )
+        return dropin_problems + verify.separated_unit_problems(
+            units, found, separated=(LOCK,)
+        )
 
 
 class SeparatedUnitsTest(unittest.TestCase):
@@ -58,6 +68,23 @@ class SeparatedUnitsTest(unittest.TestCase):
         # The negative control: the unit D43 leaves, and the shipped unit itself.
         self.assertEqual(problems({LOCK: unit(KEPT)}), [])
         self.assertEqual(problems({LOCK: SHIPPED.read_text()}), [])
+
+    def test_the_agents_shipped_unit_passes_and_is_held(self):
+        # LP11: the polkit agent's unit joined the class when it shipped (D43).
+        self.assertIn(AGENT, verify.SEPARATED_USER_UNITS)
+        self.assertEqual(
+            verify.separated_unit_problems(
+                {AGENT: AGENT_SHIPPED.read_text()}, separated=(AGENT,)
+            ),
+            [],
+        )
+        widened = AGENT_SHIPPED.read_text().replace(
+            "NoNewPrivileges=yes\n", "NoNewPrivileges=yes\nProtectSystem=strict\n"
+        )
+        self.assertEqual(
+            len(verify.separated_unit_problems({AGENT: widened}, separated=(AGENT,))),
+            1,
+        )
 
     def test_each_directive_measured_to_create_a_user_namespace_fails(self):
         for line in (
@@ -541,7 +568,7 @@ class SeparatedUnitsTest(unittest.TestCase):
                 f"%install\ninstall -D data/20-x.conf %{{buildroot}}/usr/lib/systemd/user/{LOCK}.d/20-x.conf\n"
             )
             found, dropin_problems = verify.separated_unit_dropins(
-                root, {LOCK: unit(KEPT)}
+                root, {LOCK: unit(KEPT)}, separated=(LOCK,)
             )
         self.assertEqual(found, {LOCK: []})
         self.assertEqual(len(dropin_problems), 2, dropin_problems)

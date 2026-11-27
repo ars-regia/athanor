@@ -5718,6 +5718,7 @@ SESSION_UNITS = {
     "athanor-shelld.service": ("surface", False, "preset"),
     "athanor-idle.service": ("guard", True, "preset"),
     "athanor-lock.service": ("guard", True, "preset"),
+    "athanor-polkit-agent.service": ("guard", True, "preset"),
     "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
@@ -5798,6 +5799,8 @@ SESSION_EXEMPT = {
     ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("athanor-lock.service", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset {SN3_CITE}"):
         "installed and not enabled until its preset at the switch (doc_lock_and_prompts.md, LP18 step 3)",
+    ("athanor-polkit-agent.service", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset {SN3_CITE}"):
+        "installed and not enabled until its preset in cosmic-osd's retirement (doc_lock_and_prompts.md, LP11 and LP18 step 5)",
     ("athanor-launcher.service", ACTIVATED_INSTALL):
         "enabled by hand until the switch (doc_launcher.md, LA12)",
     ("athanor-control-center.service", ACTIVATED_INSTALL):
@@ -6293,8 +6296,8 @@ def check_peer_exe():
 # D43, #1558). Under the user manager a namespacing property puts the unit in a user namespace
 # the user owns, where every process of the same uid holds CAP_SYS_PTRACE, so a non-dumpable flag
 # and Yama's scope 1 no longer keep them from attaching. Such a unit confines itself in process.
-# The polkit agent's unit joins when it ships (LP11); the greeter has no unit of its own.
-SEPARATED_USER_UNITS = ("athanor-lock.service",)
+# The polkit agent's unit (LP11) is the second; the greeter has no unit of its own.
+SEPARATED_USER_UNITS = ("athanor-lock.service", "athanor-polkit-agent.service")
 # The keys a separated unit may set, by section. Each was measured on systemd 262, on the
 # reference desktop on 2026-11-26, to keep the host's user namespace under the user manager:
 # set alone in a transient user unit, then the lock's whole unit in one, `/proc/<pid>/ns/user`
@@ -7343,7 +7346,7 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    ("doc_software.md", "forge/config/packages.json", "2-88", None, 1):
+    ("doc_software.md", "forge/config/packages.json", "2-90", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 # Another project's file that a document cites by a path a tracked file also ends with, each

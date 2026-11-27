@@ -37,6 +37,7 @@
     "polkit",
     "unlockd",
     "lock",
+    "polkit-agent",
     "settings"
   ],
   "custom_tier0": [
@@ -83,6 +84,7 @@
     "xdg-desktop-portal-athanor",
     "unlockd",
     "lock",
+    "polkit-agent",
     "settings"
   ],
   "cachyos_addons": [],

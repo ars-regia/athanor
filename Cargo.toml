@@ -36,6 +36,7 @@ members = [
   "system/athanor-sessiond",
   "forge/specs/athanor-unlockd/athanor-unlockd-1.0.0",
   "forge/specs/athanor-lock/athanor-lock-1.0.0",
+  "forge/specs/athanor-polkit-agent/athanor-polkit-agent-1.0.0",
   "system/athanor-settings-core",
   "forge/specs/athanor-settings/athanor-settings-1.0.0",
 ]

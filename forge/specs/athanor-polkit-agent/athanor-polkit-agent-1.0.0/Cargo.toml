@@ -1,0 +1,20 @@
+[package]
+name = "athanor-polkit-agent"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The Athanor polkit authentication agent, written in Sal (doc_lock_and_prompts.md, LP11)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+# LP18 step 5, P2: the toolkit-free core. Each dependency arrives with the module that uses it;
+# zbus, athanor-auth and Sal follow with the bus, the helper client and the screen.
+[dependencies]
+# `subject`: the program's description made safe to show (text::line, T14).
+athanor-unit = { path = "../../../../system/athanor-unit" }
+# `subject`: open(2)'s flags for .flatpak-info; `identity`: the passwd lookup through NSS.
+nix = { workspace = true, features = ["fs", "user"] }
+# `queue`: polkitd's cookie, the request's capability within the user, zeroized on drop.
+zeroize = { workspace = true }
+
+[lints]
+workspace = true

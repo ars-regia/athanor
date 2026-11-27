@@ -646,6 +646,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-polkit-agent"
+version = "1.0.0"
+dependencies = [
+ "athanor-unit",
+ "nix 0.32.0",
+ "zeroize",
+]
+
+[[package]]
 name = "athanor-portal"
 version = "1.0.0"
 dependencies = [
