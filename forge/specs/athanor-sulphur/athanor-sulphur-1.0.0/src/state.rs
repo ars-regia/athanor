@@ -275,6 +275,13 @@ pub struct State {
     pub lifted: Option<Window>,
     /// The live objects of athanor-workspace-tiling-v1, those of a workspace gone excepted.
     pub workspace_tilings: Vec<AthanorWorkspaceTilingV1>,
+    /// The workspaces pinned through athanor-workspace-v1, kept when they empty for the
+    /// session (decision 32).
+    pub pinned: Vec<WorkspaceId>,
+    /// The live workspace objects of athanor-workspace-v1, those of a workspace gone excepted.
+    pub workspace_objects: Vec<crate::workspace_manager::Workspace>,
+    /// The live window objects of athanor-workspace-v1, an inert one excepted.
+    pub workspace_windows: Vec<crate::workspace_manager::WorkspaceWindow>,
     /// The live objects of athanor-dock-overlap-v1 (decision 35).
     pub dock_overlaps: Vec<crate::dock_overlap::Overlap>,
     /// Each output's material tier and the objects that follow it (`material.rs`).
@@ -405,6 +412,7 @@ impl State {
         crate::toplevel_state::global(&dh);
         crate::keyboard_group::global(&dh);
         crate::workspace_tiling::global(&dh);
+        crate::workspace_manager::global(&dh);
         crate::dock_overlap::global(&dh);
         crate::material::global(&dh);
         crate::a11y::global(&dh);
@@ -533,6 +541,9 @@ impl State {
             tilings: Vec::new(),
             lifted: None,
             workspace_tilings: Vec::new(),
+            pinned: Vec::new(),
+            workspace_objects: Vec::new(),
+            workspace_windows: Vec::new(),
             dock_overlaps: Vec::new(),
             materials: Default::default(),
             toplevel_states: Vec::new(),

@@ -6,8 +6,8 @@
 //! there when it is activated again, at once, drawn sliding in (`slide`). Each output is a
 //! workspace group of the protocol, each workspace offers `activate`, applied at the manager's
 //! `commit`, and its coordinates are its place in its group.
-// ponytail: no pinned workspace and no reordering yet; the overview's private interface adds them
-// (doc_overview.md, plan task 5).
+// A workspace pinned through athanor-workspace-v1 stays when it empties, for the session, and
+// that protocol reorders an output's workspaces (decision 32, `workspace_manager.rs`).
 
 use crate::handlers::shown;
 use crate::identity::Privilege;
@@ -732,9 +732,10 @@ impl State {
         for strip in &mut self.workspaces {
             let active = strip.active_id();
             let last = strip.list.last().copied();
-            strip
-                .list
-                .retain(|id| used.contains(id) || Some(*id) == active || Some(*id) == last);
+            let pinned = &self.pinned;
+            strip.list.retain(|id| {
+                used.contains(id) || pinned.contains(id) || Some(*id) == active || Some(*id) == last
+            });
             strip.active = strip
                 .list
                 .iter()
@@ -762,8 +763,79 @@ impl State {
         if let Some(home) = entered.first() {
             self.tile_layout(*home);
         }
+        let workspaces = &self.workspaces;
+        self.pinned
+            .retain(|id| workspaces.iter().any(|strip| strip.list.contains(id)));
         self.end_gone_tilings();
         self.send_workspaces();
+        self.send_workspace_objects();
+    }
+
+    /// Whether `id` is the empty workspace its output keeps last, which cannot move (decision
+    /// 32).
+    pub(crate) fn kept_last(&self, id: WorkspaceId) -> bool {
+        self.workspaces
+            .iter()
+            .any(|strip| strip.list.last() == Some(&id))
+    }
+
+    /// Places the workspace `id` just before `other`, or just after it, among its output's
+    /// workspaces; the active workspace stays active. False, changing nothing, when `other` is
+    /// another output's, when `id` is the workspace kept last, and for a move after it
+    /// (decision 32).
+    pub(crate) fn move_workspace(&mut self, id: WorkspaceId, other: WorkspaceId, after: bool) -> bool {
+        let Some(strip) = self
+            .workspaces
+            .iter_mut()
+            .find(|strip| strip.list.contains(&id))
+        else {
+            return false;
+        };
+        let last = strip.list.last().copied();
+        if !strip.list.contains(&other) || last == Some(id) || (after && last == Some(other)) {
+            return false;
+        }
+        if id == other {
+            return true;
+        }
+        let active = strip.active_id();
+        strip.list.retain(|kept| *kept != id);
+        let Some(at) = strip.list.iter().position(|kept| *kept == other) else {
+            return false;
+        };
+        strip.list.insert(if after { at.saturating_add(1) } else { at }, id);
+        strip.active = strip
+            .list
+            .iter()
+            .position(|kept| Some(*kept) == active)
+            .unwrap_or(0);
+        self.workspaces_changed();
+        true
+    }
+
+    /// Where a parked or minimised `window` comes back, its geometry's top left in the space:
+    /// the place it keeps, through `reachable`.
+    pub(crate) fn parked_at(&self, window: &Window) -> Option<Point<i32, Logical>> {
+        self.parked
+            .iter()
+            .chain(self.minimised.iter())
+            .find(|(kept, _)| kept == window)
+            .map(|(_, at)| self.reachable(window, *at))
+    }
+
+    /// The handle of the workspace `id` that `client`'s workspace manager was sent, if it binds
+    /// one.
+    pub(crate) fn workspace_handle_for(
+        &self,
+        client: &smithay::reexports::wayland_server::backend::ClientId,
+        id: WorkspaceId,
+    ) -> Option<ExtWorkspaceHandleV1> {
+        self.workspace_clients
+            .iter()
+            .filter(|bound| bound.manager.client().is_some_and(|own| own.id() == *client))
+            .flat_map(|bound| bound.sent.iter())
+            .find(|sent| sent.id == id)
+            .map(|sent| sent.handle.clone())
     }
 
     /// Sends every client of the protocol what changed; the managers gone are dropped.
