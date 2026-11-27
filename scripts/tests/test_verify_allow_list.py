@@ -19,6 +19,8 @@ zwlr_layer_shell_v1 layer-gated
 ext_foreign_toplevel_list_v1 privileged
 ext_session_lock_manager_v1 privileged
 ext_image_copy_capture_manager_v1 privileged
+ext_output_image_capture_source_manager_v1 privileged
+ext_foreign_toplevel_image_capture_source_manager_v1 privileged
 athanor_toplevel_actions_v1 privileged
 athanor_keyboard_group_manager_v1 privileged
 athanor_a11y_manager_v1 privileged
@@ -100,7 +102,12 @@ class AllowList(unittest.TestCase):
         )
         self.write(
             f"{CLIENT}/src/capture.rs",
-            'fn capture() { Unavailable("ext_image_copy_capture_manager_v1") }\n',
+            'mod outputs;\nfn capture() { Unavailable("ext_image_copy_capture_manager_v1") }\n',
+        )
+        self.write(
+            f"{CLIENT}/src/capture/outputs.rs",
+            'fn capture_outputs() { Unavailable("ext_output_image_capture_source_manager_v1");'
+            ' Unavailable("ext_image_copy_capture_manager_v1") }\n',
         )
         self.write(
             f"{CLIENT}/src/actions.rs",
@@ -359,6 +366,57 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("/usr/bin/athanor-launcher", out[0])
         self.assertIn("ext_image_copy_capture_manager_v1", out[0])
+
+    def test_every_capture_entry_point_of_the_client_counts_for_the_target_that_calls_it(self):
+        # #1575: `capture_pixels` and `capture_outputs` bind capture globals too. A target that
+        # calls one is derived exactly the globals of its entry point: the output source for
+        # `capture_outputs`, never the toplevel one, and the line of a binary that lost the grant
+        # is reported.
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        toplevel = "ext_foreign_toplevel_image_capture_source_manager_v1"
+        output = "ext_output_image_capture_source_manager_v1"
+        copy = "ext_image_copy_capture_manager_v1"
+        cases = {
+            "client.capture_pixels(id)": ("athanor-launcher", {toplevel, copy}, {output}),
+            "client.capture_outputs()": ("athanor-portal", {output, copy}, {toplevel}),
+        }
+        for call, (name, binds, never) in cases.items():
+            with self.subTest(call):
+                self.fresh()
+                self.client()
+                self.write(
+                    f"{CLIENT}/src/capture.rs",
+                    'mod outputs;\nfn capture() { Unavailable("ext_foreign_toplevel_image_capture_source_manager_v1");'
+                    ' Unavailable("ext_image_copy_capture_manager_v1") }\n',
+                )
+                self.package(
+                    name,
+                    dependency,
+                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                )
+                head = f"/usr/bin/{name} {name}.service ext_foreign_toplevel_list_v1"
+                self.lines(head + "\n")
+                out = " ".join(self.problems())
+                self.assertTrue(all(g in out for g in binds), out)
+                self.assertFalse(any(g in out for g in never), out)
+                self.lines(f"{head} {' '.join(sorted(binds))}\n")
+                self.assertEqual(self.problems(), [])
+
+    def test_a_public_capture_entry_point_of_the_client_matches_an_on_demand_pattern(self):
+        # A new entry point cannot open the gap of #1575 again.
+        src = ROOT / verify.CLIENT_CRATE / "src"
+        found = 0
+        for where in (src / "capture.rs", src / "capture" / "outputs.rs"):
+            for name in re.findall(r"^\s*pub (?:async )?fn (capture\w*)", where.read_text(), re.M):
+                found += 1
+                with self.subTest(name):
+                    patterns = [calls for _, calls in verify.ON_DEMAND.values()]
+                    call = f"client.{name}(id)"
+                    self.assertTrue(
+                        any(p.search(call) for p in patterns if not isinstance(p, tuple)), call
+                    )
+        self.assertGreaterEqual(found, 3)
 
     def test_the_window_actions_count_only_for_a_target_that_acts(self):
         # The client binds the window actions at the first action of `Client::window_actions`
@@ -626,6 +684,9 @@ class AllowList(unittest.TestCase):
             ),
             "a client whose capture moved": (
                 f"{CLIENT}/src/capture.rs", "\n", "binds at the first capture",
+            ),
+            "a client whose output capture moved": (
+                f"{CLIENT}/src/capture/outputs.rs", "\n", "binds at the first capture of the outputs",
             ),
             "a client whose window actions moved": (
                 f"{CLIENT}/src/actions.rs", "\n", "binds at the first window action",
