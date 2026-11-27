@@ -122,7 +122,7 @@ does, and its package `forge/specs/athanor-preferences-import`, built as `athano
 it installs the user unit `athanor-preferences-import.service`: `PartOf=graphical-session.target`,
 `Before=` and wanted by `athanor-sulphur.service`, `TimeoutStartSec=5s`, `TimeoutStopSec=5s`,
 `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=read-only`,
-`ConfigurationDirectory=athanor/sulphur`, and its preset; SN4's row. Two entries of
+`ConfigurationDirectory=athanor/sulphur`, and its preset; SN4's row. *Amended on 2026-11-27 (proposed, to be approved by the maintainer with the pull request that records it):* the unit does not set `ProtectSystem=strict` or `ProtectHome=read-only`, which under the user manager put the service in a user namespace that the user owns (#1558), as `doc_session.md` SN3 states as amended on 2026-11-26; Landlock, which the binary applies to itself through `athanor_unit::sandbox` before it reads anything, is what limits its writes to the store's directory, and its reads stay open, since a followed link may lead anywhere. Two entries of
 `docs/architecture/components.toml`, `system/athanor-preferences-import` (kind `crate`) and
 `forge/specs/athanor-preferences-import` (kind `rpm spec`), each with its `spec` and `item`, as
 `athanor-idle`'s two entries have. Tests:

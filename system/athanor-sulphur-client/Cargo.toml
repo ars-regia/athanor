@@ -32,6 +32,8 @@ gtk4 = { workspace = true, optional = true }
 nix = { workspace = true, features = ["event", "time"], optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The preference store's files (ADR-0150), parsed as Sulphur parses them.
+toml = { workspace = true }
 tracing = { workspace = true }
 wayland-client = { workspace = true }
 # `unstable` for zxdg_output_v1, the outputs' logical place in a screenshot (doc_portal.md, PT8).

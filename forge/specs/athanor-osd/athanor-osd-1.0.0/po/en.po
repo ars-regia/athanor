@@ -8,23 +8,33 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/logic.rs:72
+#: src/logic.rs:95
 msgid "Muted"
 msgstr "Muted"
 
-#: src/logic.rs:73
+#: src/logic.rs:96
 #, rust-format
 msgid "Volume {percent} percent"
 msgstr "Volume {percent} percent"
 
-#: src/logic.rs:74
+#: src/logic.rs:97
 msgid "Microphone muted"
 msgstr "Microphone muted"
 
-#: src/logic.rs:75
+#: src/logic.rs:98
 #, rust-format
 msgid "Microphone {percent} percent"
 msgstr "Microphone {percent} percent"
+
+#: src/logic.rs:99
+#, rust-format
+msgid "Brightness {percent} percent"
+msgstr "Brightness {percent} percent"
+
+#: src/logic.rs:101
+#, rust-format
+msgid "Keyboard brightness {percent} percent"
+msgstr "Keyboard brightness {percent} percent"
 
 #: src/surface.rs:174
 msgid "Volume"
@@ -33,3 +43,11 @@ msgstr "Volume"
 #: src/surface.rs:175
 msgid "Microphone"
 msgstr "Microphone"
+
+#: src/surface.rs:176
+msgid "Brightness"
+msgstr "Brightness"
+
+#: src/surface.rs:177
+msgid "Keyboard brightness"
+msgstr "Keyboard brightness"

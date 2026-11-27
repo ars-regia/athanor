@@ -1,9 +1,10 @@
-//! athanor-osd: the on-screen display of doc_osd.md, step 1 of OD17. It serves the volume,
-//! mute and microphone keys on `os.athanor.Osd1`, carries each out through the audio model of
-//! athanor-services and shows it on a Sal layer surface.
+//! athanor-osd: the on-screen display of doc_osd.md, steps 1 and 2 of OD17. It serves the
+//! volume, mute, microphone and brightness keys on `os.athanor.Osd1`, carries each out through
+//! the audio or the battery model of athanor-services and shows it on a Sal layer surface, as it
+//! shows a backlight change the battery model did not command (OD5).
 //!
 //! Two threads of its own, both started after Landlock: Tokio's, which serves the bus and runs
-//! the audio model and the keys' core, and the toolkit's loop on the main thread, with GLib's
+//! the models and the keys' core, and the toolkit's loop on the main thread, with GLib's
 //! main context in it. The core hands what to show to the main thread over a channel, which a
 //! task of GLib's context drains into the surfaces' queue. Both of the overlay's channels are
 //! bounded: the bus drops a key the core's queue cannot hold (`bus::KEYS`), and the core waits
@@ -14,6 +15,7 @@ mod surface;
 
 use std::cell::RefCell;
 use std::env;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -22,6 +24,8 @@ use athanor_osd::logic::{Core, Effect, Key};
 use athanor_osd::{bus, confine, i18n};
 use athanor_sal::driver;
 use athanor_services::audio::{self, AudioCommand, AudioState};
+use athanor_services::battery::{self, BatteryCommand, BatteryState, BACKLIGHT_ROOT, LEDS_ROOT};
+use athanor_services::runtime::Buses;
 use athanor_sulphur_client::glib_loop::GlibSource;
 use athanor_sulphur_client::Client;
 use athanor_unit::dirs::Dirs;
@@ -44,7 +48,15 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the cache");
         return ExitCode::FAILURE;
     };
-    let grants = confine::overlay(&dirs, |name| env::var_os(name));
+    let mut grants = confine::overlay(&dirs, |name| env::var_os(name));
+    let backlights = confine::backlights(Path::new(BACKLIGHT_ROOT), Path::new(LEDS_ROOT));
+    if backlights.screen.is_none() {
+        tracing::info!("no screen backlight; the brightness keys show nothing");
+    }
+    if backlights.keyboard.is_none() {
+        tracing::info!("no keyboard backlight; its keys show nothing");
+    }
+    grants.read.extend(backlights.read);
     if let Err(error) = sandbox::ensure_single_threaded().and_then(|()| grants.apply()) {
         tracing::error!(%error, "cannot confine the overlay with Landlock; refusing to run unconfined");
         return ExitCode::FAILURE;
@@ -65,7 +77,14 @@ fn main() -> ExitCode {
     };
     let (views, mut view_rx) = mpsc::channel::<Input>(VIEWS);
     runtime.spawn(async move {
-        let (state, commands) = audio::spawn(&tokio::runtime::Handle::current());
+        let handle = tokio::runtime::Handle::current();
+        let (state, commands) = audio::spawn(&handle);
+        let lights = battery::spawn(
+            &handle,
+            Buses::new(handle.clone()),
+            PathBuf::from(BACKLIGHT_ROOT),
+            PathBuf::from(LEDS_ROOT),
+        );
         let (keys, key_rx) = mpsc::channel(bus::KEYS);
         // Held for the life of the service: dropping them releases the name.
         let _connections = match bus::serve(keys).await {
@@ -78,7 +97,13 @@ fn main() -> ExitCode {
                 return;
             }
         };
-        drive(Core::new(AMPLIFY), key_rx, state, commands, &views).await;
+        let models = Models {
+            state,
+            commands,
+            battery: lights.0,
+            battery_commands: lights.1,
+        };
+        drive(Core::new(AMPLIFY), key_rx, models, &views).await;
         // Without its core the overlay would take no key: it ends, and systemd restarts it.
         if views.send(Input::Fail("the keys' core stopped".into())).await.is_err() {
             tracing::error!("the overlay's loop ended before its core");
@@ -124,15 +149,30 @@ fn main() -> ExitCode {
     }
 }
 
-/// The keys' core: each key against the model's state, the model's changes, and the clock of
-/// the timeout and the announcement. Ends when the bus, the model or the surfaces do.
+/// The models the keys act through.
+struct Models {
+    state: watch::Receiver<AudioState>,
+    commands: mpsc::UnboundedSender<AudioCommand>,
+    battery: watch::Receiver<BatteryState>,
+    battery_commands: mpsc::UnboundedSender<BatteryCommand>,
+}
+
+/// The keys' core: each key against the models' states, their changes, and the clock of the
+/// timeout and the announcement. Ends when the bus, the audio model or the surfaces do; without
+/// the battery model, which ends without the system bus, the brightness keys show nothing.
 async fn drive(
     mut core: Core,
     mut keys: mpsc::Receiver<Key>,
-    mut state: watch::Receiver<AudioState>,
-    commands: mpsc::UnboundedSender<AudioCommand>,
+    models: Models,
     views: &mpsc::Sender<Input>,
 ) {
+    let Models {
+        mut state,
+        commands,
+        mut battery,
+        battery_commands,
+    } = models;
+    let mut lit = true;
     loop {
         let deadline = core.deadline();
         // Never reached while `deadline` is `None`: the branch is off then.
@@ -158,6 +198,20 @@ async fn drive(
                     return;
                 }
             },
+            changed = battery.changed(), if lit => match changed {
+                Ok(()) => {
+                    let lights = battery.borrow_and_update().clone();
+                    let seen = state.borrow().clone();
+                    core.observe_battery(&lights, &seen, Instant::now())
+                }
+                Err(_) => {
+                    tracing::warn!("the battery model stopped; the brightness keys show nothing");
+                    lit = false;
+                    // With no backlight left in its state, the core shows nothing for them.
+                    let seen = state.borrow().clone();
+                    core.observe_battery(&BatteryState::default(), &seen, Instant::now())
+                }
+            },
             () = tokio::time::sleep_until(wake.into()), if deadline.is_some() => {
                 let seen = state.borrow().clone();
                 core.tick(&seen, Instant::now())
@@ -168,6 +222,11 @@ async fn drive(
                 Effect::Command(command) => {
                     if commands.send(command).is_err() {
                         tracing::error!("the audio model stopped; the key is not carried out");
+                    }
+                }
+                Effect::Battery(command) => {
+                    if battery_commands.send(command).is_err() {
+                        tracing::warn!("the battery model stopped; the key is not carried out");
                     }
                 }
                 Effect::View(view) => {

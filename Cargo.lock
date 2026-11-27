@@ -659,6 +659,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-preferences-import"
+version = "1.0.0"
+dependencies = [
+ "athanor-sulphur-client",
+ "athanor-unit",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-preview"
 version = "1.0.0"
 dependencies = [
@@ -849,6 +858,7 @@ dependencies = [
  "nix 0.32.0",
  "serde_json",
  "thiserror 2.0.21",
+ "toml",
  "tracing",
  "wayland-client",
  "wayland-protocols",

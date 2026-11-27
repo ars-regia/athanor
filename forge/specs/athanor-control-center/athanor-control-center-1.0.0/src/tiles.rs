@@ -161,6 +161,7 @@ mod tests {
                 level: 50,
             }),
             refused: 0,
+            ..Default::default()
         };
         let media = MediaState {
             players: vec![Player {
