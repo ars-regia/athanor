@@ -90,10 +90,11 @@ class AllowList(unittest.TestCase):
         self.write(
             f"{CLIENT}/src/lib.rs",
             "mod a11y;\nmod actions;\nmod capture;\nmod connection;\nmod keyboard_group;\n"
-            "mod windows;\nmod workspace_tiling;\npub fn connect() {}\n",
+            "mod windows;\nmod workspace_tiling;\nmod workspaces;\npub fn connect() {}\n",
         )
+        self.write(f"{CLIENT}/src/connection.rs", "pub struct Client;\n")
         self.write(
-            f"{CLIENT}/src/connection.rs",
+            f"{CLIENT}/src/workspaces.rs",
             "use wayland_protocols::ext::foreign_toplevel_list::v1::client::"
             "ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;\n",
         )
@@ -242,17 +243,22 @@ class AllowList(unittest.TestCase):
         self.assertIn("/usr/bin/athanor-dock", out[0])
 
     def test_the_connection_counts_only_for_a_target_that_connects(self):
-        # connection.rs binds its globals when a client connects: athanor-idle uses the
-        # crate's `idle` module alone and binds none of them (maintainer decision, 2026-11-07).
+        # workspaces.rs binds its global when a client connects: athanor-idle uses the
+        # crate's `idle` module alone and binds none of it (maintainer decision, 2026-11-07),
+        # nor does a client that connects without the workspaces, as the portal's Screenshot
+        # backend does, or that calls another type's `connect`.
         self.client()
         dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
-        self.package(
-            "athanor-idle",
-            dependency,
-            {"src/main.rs": "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n"},
-        )
         self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
-        self.assertEqual(self.problems(), [])
+        for source in (
+            "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n",
+            "use athanor_sulphur_client::idle;\nfn main() { Display::connect(); idle::read_user(); }\n",
+            "use athanor_sulphur_client::Client;\n"
+            "fn main() { Client::connect_without_workspaces(&connection); }\n",
+        ):
+            with self.subTest(source):
+                self.package("athanor-idle", dependency, {"src/main.rs": source})
+                self.assertEqual(self.problems(), [])
         # An alias of Client still names it, so the binds still count.
         for source in (
             "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&display); }\n",
@@ -265,6 +271,43 @@ class AllowList(unittest.TestCase):
                 self.assertEqual(len(out), 1, out)
                 self.assertIn("/usr/bin/athanor-idle", out[0])
                 self.assertIn("ext_foreign_toplevel_list_v1", out[0])
+
+    def test_the_connection_counts_when_client_and_connect_are_in_different_files(self):
+        # The target's files are read together: an alias of Client declared in one file and
+        # connected through in another binds the workspace manager.
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
+        main = "mod alias;\nmod dial;\nfn main() { dial::run(); }\n"
+        self.package(
+            "athanor-idle",
+            dependency,
+            {
+                "src/main.rs": main,
+                "src/alias.rs": "pub type Shell = athanor_sulphur_client::Client;\n",
+                "src/dial.rs": "pub fn run() { crate::alias::Shell::connect_wayland(c); }\n",
+            },
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("/usr/bin/athanor-idle", out[0])
+        self.assertIn("ext_foreign_toplevel_list_v1", out[0])
+        # A target that connects without the workspaces in one file and calls another
+        # type's `connect` in another cannot be told from one that connects through an alias,
+        # so it counts: the safe side. The portal's Screenshot backend calls no `::connect`.
+        self.package(
+            "athanor-idle",
+            dependency,
+            {
+                "src/main.rs": main,
+                "src/alias.rs": "use athanor_sulphur_client::Client;\n"
+                "pub fn shot() { Client::connect_without_workspaces(&connection); }\n",
+                "src/dial.rs": "pub fn run() { Display::connect(); }\n",
+            },
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
     def test_a_disabled_optional_dependency_is_not_followed(self):
         self.write(
@@ -579,7 +622,7 @@ class AllowList(unittest.TestCase):
             ),
             "a row of no class": (verify.GLOBALS_FILE, GLOBALS + "wl_shm everyone\n", "wl_shm everyone"),
             "a client whose connect names no privileged global": (
-                f"{CLIENT}/src/connection.rs", "pub fn connect() {}\n", "binds at connect",
+                f"{CLIENT}/src/workspaces.rs", "pub fn connect() {}\n", "binds at connect",
             ),
             "a client whose capture moved": (
                 f"{CLIENT}/src/capture.rs", "\n", "binds at the first capture",

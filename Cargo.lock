@@ -652,6 +652,7 @@ dependencies = [
  "athanor-unit",
  "futures-util",
  "nix 0.32.0",
+ "png",
  "tokio",
  "tracing",
  "zbus 6.2.1",
@@ -6891,11 +6892,13 @@ name = "xdg-desktop-portal-athanor"
 version = "1.0.0"
 dependencies = [
  "athanor-portal",
+ "athanor-sulphur-client",
  "athanor-unit",
  "gio",
  "glib",
  "tokio",
  "tracing",
+ "wayland-client",
  "zbus 6.2.1",
 ]
 

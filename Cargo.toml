@@ -85,6 +85,9 @@ nucleo-matcher = "0.3"
 glycin = "4"
 poppler-rs = "0.26"
 cairo-rs = "0.22"
+# The PNG of a screenshot (doc_portal.md, PT8), already in the lock through vello_cpu and
+# tiny-skia.
+png = "0.18.1"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 # The client side of wlr-layer-shell and wlr-output-power-management: athanor-idle's overlay

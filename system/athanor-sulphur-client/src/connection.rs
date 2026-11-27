@@ -39,7 +39,6 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
     ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
-    ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
 };
 use wayland_protocols::wp::security_context::v1::client::{
     wp_security_context_manager_v1::WpSecurityContextManagerV1,
@@ -87,7 +86,7 @@ pub enum Error {
     InvalidArgument(&'static str),
     #[error("the display was closed")]
     Closed,
-    #[error("the window's picture was not taken: {0}")]
+    #[error("the picture was not taken: {0}")]
     Capture(&'static str),
 }
 
@@ -169,7 +168,7 @@ impl Client {
             .backend()
             .upgrade()
             .ok_or_else(|| Error::Connection("the display has no live backend".into()))?;
-        let client = Self::attach(Connection::from_backend(backend))?;
+        let client = Self::attach(Connection::from_backend(backend), true)?;
         let closing = Rc::downgrade(&client.inner);
         let closed_handler = display.connect_closed(move |_, _| {
             if let Some(inner) = closing.upgrade() {
@@ -188,14 +187,23 @@ impl Client {
     /// runs that context through `glib_loop::GlibSource`. Such a connection has no
     /// `closed` signal; a failure of the socket ends the reading, as with GDK.
     pub fn connect_wayland(connection: &Connection) -> Result<Client, Error> {
-        Self::attach(connection.clone())
+        Self::attach(connection.clone(), true)
     }
 
-    fn attach(connection: Connection) -> Result<Client, Error> {
+    /// As [`Client::connect_wayland`], without the workspaces: the client never binds the
+    /// workspace manager, so [`Client::workspaces`] stays empty and [`Client::set_tiling`]
+    /// reports it unavailable under cosmic-comp. For a client with no use for them, as the
+    /// portal's Screenshot backend, whose line of the compositor's allow-list grants only the
+    /// capture globals (least privilege, `workspaces.rs`).
+    pub fn connect_without_workspaces(connection: &Connection) -> Result<Client, Error> {
+        Self::attach(connection.clone(), false)
+    }
+
+    fn attach(connection: Connection, workspaces: bool) -> Result<Client, Error> {
         let (globals, mut queue) = registry_queue_init::<State>(&connection)
             .map_err(|err| Error::Connection(err.to_string()))?;
         let qh = queue.handle();
-        let mut state = State::bind(&globals, &qh);
+        let mut state = State::bind(&globals, &qh, workspaces);
         announce(&mut queue, &mut state)?;
         state.events.clear();
 
@@ -325,11 +333,7 @@ impl Client {
         if state.own_compositor() {
             crate::workspace_tiling::set_state(&state, workspace, tiling)?;
         } else {
-            let manager = state
-                .globals
-                .workspace_manager
-                .as_ref()
-                .ok_or(Error::Unavailable("ext_workspace_manager_v1"))?;
+            let manager = crate::workspaces::manager(&state)?;
             let handles = state
                 .workspace_handles
                 .get(&workspace)
@@ -821,8 +825,9 @@ pub(crate) struct Globals {
     pub(crate) keyboard_group: crate::keyboard_group::Globals,
     /// athanor-sulphur's tiling of the workspaces, bound at the first watch.
     pub(crate) workspace_tiling: crate::workspace_tiling::Globals,
-    workspace_manager: Option<ExtWorkspaceManagerV1>,
-    cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
+    /// The workspaces, bound at connect unless the client connects without them.
+    pub(crate) workspace_manager: Option<crate::workspaces::Manager>,
+    pub(crate) cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
     pub(crate) keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     pub(crate) a11y: Option<crate::a11y::Manager>,
@@ -841,9 +846,9 @@ pub(crate) struct Toplevel {
     pub(crate) athanor: Option<AthanorToplevelStateV1>,
 }
 
-struct WorkspaceHandles {
-    ext: ExtWorkspaceHandleV1,
-    cosmic: Option<ZcosmicWorkspaceHandleV2>,
+pub(crate) struct WorkspaceHandles {
+    pub(crate) ext: ExtWorkspaceHandleV1,
+    pub(crate) cosmic: Option<ZcosmicWorkspaceHandleV2>,
 }
 
 #[derive(Default)]
@@ -851,10 +856,10 @@ pub(crate) struct State {
     pub(crate) globals: Globals,
     pub(crate) windows: Table<WindowId, Window>,
     pub(crate) toplevels: HashMap<WindowId, Toplevel>,
-    workspaces: Table<WorkspaceId, Workspace>,
-    workspace_handles: HashMap<WorkspaceId, WorkspaceHandles>,
+    pub(crate) workspaces: Table<WorkspaceId, Workspace>,
+    pub(crate) workspace_handles: HashMap<WorkspaceId, WorkspaceHandles>,
     /// Each group's outputs, in the order they entered, GDK's objects included.
-    groups: HashMap<ObjectId, Vec<ObjectId>>,
+    pub(crate) groups: HashMap<ObjectId, Vec<ObjectId>>,
     group_of: HashMap<WorkspaceId, ObjectId>,
     /// Output globals by registry name, their connector names, and their modes.
     outputs: HashMap<u32, wl_output::WlOutput>,
@@ -894,7 +899,7 @@ where
 }
 
 impl State {
-    fn bind(globals: &GlobalList, qh: &QueueHandle<State>) -> State {
+    fn bind(globals: &GlobalList, qh: &QueueHandle<State>, workspaces: bool) -> State {
         let mut state = State::default();
         // Outputs first: the workspace manager announces a group's outputs only through
         // the `wl_output` objects the client holds when it binds the manager.
@@ -919,7 +924,11 @@ impl State {
             #[cfg(feature = "capture")]
             capture: crate::capture::Globals::default(),
             seat: bind(globals, qh, 1..=7),
-            workspace_manager: bind(globals, qh, 1..=1),
+            workspace_manager: if workspaces {
+                bind(globals, qh, 1..=1)
+            } else {
+                None
+            },
         };
         state
     }
@@ -933,6 +942,14 @@ impl State {
     ) {
         let output = registry.bind::<wl_output::WlOutput, _, _>(name, version.min(4), qh, ());
         self.outputs.insert(name, output);
+    }
+
+    /// The `wl_output` objects, in the order of their registry names.
+    #[cfg(feature = "capture")]
+    pub(crate) fn wl_outputs(&self) -> Vec<wl_output::WlOutput> {
+        let mut names: Vec<_> = self.outputs.keys().copied().collect();
+        names.sort_unstable();
+        names.iter().filter_map(|name| self.outputs.get(name)).cloned().collect()
     }
 
     fn outputs(&self) -> Vec<Output> {
@@ -1008,7 +1025,7 @@ impl State {
         });
     }
 
-    fn commit_workspaces(&mut self) {
+    pub(crate) fn commit_workspaces(&mut self) {
         for workspace in self.workspaces.pending_values() {
             workspace.output = self
                 .group_of
@@ -1257,7 +1274,7 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
                 // A capture ends before the handle it was made from does.
                 #[cfg(feature = "capture")]
                 state.captures.retain(|_, capture| {
-                    if capture.window != *id {
+                    if capture.window != Some(*id) {
                         return true;
                     }
                     capture.wake();
@@ -1361,58 +1378,6 @@ impl Dispatch<AthanorToplevelStateV1, WindowId> for State {
             }
         }
     }
-}
-
-impl Dispatch<ExtWorkspaceManagerV1, ()> for State {
-    fn event(
-        state: &mut Self,
-        _: &ExtWorkspaceManagerV1,
-        event: ext_workspace_manager_v1::Event,
-        _: &(),
-        _: &Connection,
-        qh: &QueueHandle<Self>,
-    ) {
-        match event {
-            ext_workspace_manager_v1::Event::WorkspaceGroup { workspace_group } => {
-                state.groups.insert(workspace_group.id(), Vec::new());
-            }
-            ext_workspace_manager_v1::Event::Workspace { workspace } => {
-                let Some(&id) = workspace.data::<WorkspaceId>() else {
-                    return;
-                };
-                let cosmic = state
-                    .globals
-                    .cosmic_workspaces
-                    .as_ref()
-                    .map(|manager| manager.get_cosmic_workspace(&workspace, qh, id));
-                crate::workspace_tiling::watch(state, id, &workspace, qh);
-                state.workspaces.insert(
-                    id,
-                    Workspace {
-                        id,
-                        name: String::new(),
-                        active: false,
-                        tiling: None,
-                        output: None,
-                    },
-                );
-                state.workspace_handles.insert(
-                    id,
-                    WorkspaceHandles {
-                        ext: workspace,
-                        cosmic,
-                    },
-                );
-            }
-            ext_workspace_manager_v1::Event::Done => state.commit_workspaces(),
-            _ => {}
-        }
-    }
-
-    event_created_child!(State, ExtWorkspaceManagerV1, [
-        ext_workspace_manager_v1::EVT_WORKSPACE_GROUP_OPCODE => (ExtWorkspaceGroupHandleV1, ()),
-        ext_workspace_manager_v1::EVT_WORKSPACE_OPCODE => (ExtWorkspaceHandleV1, WorkspaceId(fresh()))
-    ]);
 }
 
 impl Dispatch<ExtWorkspaceGroupHandleV1, ()> for State {

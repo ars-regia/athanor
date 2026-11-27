@@ -8,6 +8,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
 athanor-unit = { path = "../athanor-unit", features = ["bus-caller"] }
+png = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }

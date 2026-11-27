@@ -31,6 +31,7 @@ mod unit;
 mod windows;
 pub mod window_management;
 mod workspace_tiling;
+mod workspaces;
 
 /// GLib's default main context has one owner at a time, and the tests of a binary run on
 /// threads of their own: a test that acquires the context holds this lock while it does.
@@ -39,7 +40,7 @@ pub(crate) static MAIN_CONTEXT: std::sync::Mutex<()> = std::sync::Mutex::new(())
 
 pub use actions::WindowActions;
 #[cfg(feature = "capture")]
-pub use capture::{Picture, PixelFormat};
+pub use capture::{OutputPicture, Picture, PixelFormat};
 pub use connection::{Client, Error};
 pub use launch::{LaunchError, Opener};
 pub use shortcuts::SETTINGS_PAGE_PREFIX;

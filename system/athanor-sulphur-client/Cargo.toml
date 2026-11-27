@@ -36,7 +36,8 @@ thiserror = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 wayland-client = { workspace = true }
-wayland-protocols = { workspace = true }
+# `unstable` for zxdg_output_v1, the outputs' logical place in a screenshot (doc_portal.md, PT8).
+wayland-protocols = { workspace = true, features = ["unstable"] }
 wayland-scanner = { workspace = true }
 
 [[example]]

@@ -1,11 +1,13 @@
-//! A window's picture for the launcher's preview (doc_launcher.md, LA6), through
-//! ext-image-copy-capture-v1 into a shared-memory buffer: its pixels as the compositor wrote
-//! them, and with the `gtk` feature a GDK texture of them.
+//! A window's picture for the launcher's preview (doc_launcher.md, LA6), and every output's for
+//! the portal's screenshot (doc_portal.md, PT8), through ext-image-copy-capture-v1 into a
+//! shared-memory buffer: the pixels as the compositor wrote them, and with the `gtk` feature a
+//! GDK texture of a window's.
 
 use std::fs::{File, OpenOptions};
 use std::future::poll_fn;
 use std::os::fd::AsFd;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::path::{Path, PathBuf};
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
@@ -17,11 +19,16 @@ use wayland_client::{delegate_noop, Connection, Dispatch, Proxy, QueueHandle, WE
 use wayland_protocols::ext::image_capture_source::v1::client::{
     ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
     ext_image_capture_source_v1::ExtImageCaptureSourceV1,
+    ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
 };
 use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1},
     ext_image_copy_capture_manager_v1::{ExtImageCopyCaptureManagerV1, Options},
     ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
+};
+use wayland_protocols::xdg::xdg_output::zv1::client::{
+    zxdg_output_manager_v1::ZxdgOutputManagerV1,
+    zxdg_output_v1::{self, ZxdgOutputV1},
 };
 
 use crate::connection::{bind, fresh, Client, Error, State};
@@ -31,6 +38,9 @@ use crate::unit;
 /// A frame takes one repaint; a window that is not repainted in time is shown without
 /// its picture.
 const TIMEOUT: Duration = Duration::from_millis(500);
+/// An output's frame waits for the compositor's next repaint of the outputs, which an idle
+/// output may delay; a screenshot is not a preview, so it waits longer.
+const OUTPUT_TIMEOUT: Duration = Duration::from_secs(2);
 /// The compositor reports the size, so it is bounded on both sides: a side, and the whole
 /// buffer (4096 × 4096 pixels of 4 bytes, and a 5K window fits).
 const MAX_SIDE: u32 = 8192;
@@ -59,19 +69,44 @@ pub struct Picture {
     pub bytes: Vec<u8>,
 }
 
+/// An output's picture, and where the output lies in the layout, in logical pixels.
+#[derive(Clone, Debug)]
+pub struct OutputPicture {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    /// The picture's `wl_output.transform`, 0 to 7: an output is copied as it is scanned out.
+    pub transform: u32,
+    pub picture: Picture,
+}
+
 /// One capture in flight. Dropping it destroys its protocol objects.
 pub(crate) struct Pending {
-    /// The capture ends with this window: it is dropped when the toplevel closes, so no
-    /// object of the capture outlives the handle it was made from.
-    pub(crate) window: WindowId,
+    /// A window's capture ends with the window: it is dropped when the toplevel closes, so no
+    /// object of the capture outlives the handle it was made from. `None` for an output's.
+    pub(crate) window: Option<WindowId>,
     source: ExtImageCaptureSourceV1,
     session: ExtImageCopyCaptureSessionV1,
+    /// An output's logical position and size, from its `zxdg_output_v1`.
+    xdg_output: Option<ZxdgOutputV1>,
+    position: Option<(i32, i32)>,
+    logical_size: Option<(i32, i32)>,
+    transform: u32,
     size: Option<(u32, u32)>,
     format: Option<wl_shm::Format>,
     frame: Option<ExtImageCopyCaptureFrameV1>,
     buffer: Option<Shm>,
     result: Option<Result<Picture, Error>>,
     waker: Option<Waker>,
+}
+
+/// What a finished capture holds.
+struct Taken {
+    picture: Picture,
+    transform: u32,
+    position: Option<(i32, i32)>,
+    logical_size: Option<(i32, i32)>,
 }
 
 struct Shm {
@@ -85,6 +120,33 @@ struct Shm {
 }
 
 impl Pending {
+    /// Asks for a session on `source`, the pointer left out of its frames (PT8).
+    fn new(
+        window: Option<WindowId>,
+        source: ExtImageCaptureSourceV1,
+        manager: &ExtImageCopyCaptureManagerV1,
+        xdg_output: Option<ZxdgOutputV1>,
+        id: u64,
+        qh: &QueueHandle<State>,
+    ) -> Pending {
+        let session = manager.create_session(&source, Options::empty(), qh, id);
+        Pending {
+            window,
+            source,
+            session,
+            xdg_output,
+            position: None,
+            logical_size: None,
+            transform: 0,
+            size: None,
+            format: None,
+            frame: None,
+            buffer: None,
+            result: None,
+            waker: None,
+        }
+    }
+
     pub(crate) fn finish(&mut self, result: Result<Picture, Error>) {
         self.result.get_or_insert(result);
         self.wake();
@@ -99,7 +161,7 @@ impl Pending {
 }
 
 /// Destroys the objects in the reverse of their creation: frame, buffer, pool, session,
-/// source.
+/// source, and an output's `zxdg_output_v1`.
 impl Drop for Pending {
     fn drop(&mut self) {
         if let Some(frame) = self.frame.take() {
@@ -111,6 +173,9 @@ impl Drop for Pending {
         }
         self.session.destroy();
         self.source.destroy();
+        if let Some(xdg_output) = self.xdg_output.take() {
+            xdg_output.destroy();
+        }
     }
 }
 
@@ -155,11 +220,24 @@ fn layout(width: u32, height: u32) -> Option<(u32, u32)> {
     (len <= MAX_BYTES).then_some((stride, len))
 }
 
-/// An unlinked file in `$XDG_RUNTIME_DIR/athanor`, private to this process and the
-/// compositor. That directory is the one every confined shell program may write: the bar
-/// and the launcher create it before they confine themselves, and their Landlock rulesets
-/// grant it and nothing else of the runtime directory.
-fn shm_file(len: u32) -> std::io::Result<File> {
+/// An unlinked file in `dir` when the caller set one (`Client::set_capture_dir`), else in
+/// `$XDG_RUNTIME_DIR/athanor`, private to this process and the compositor. That directory is
+/// the one every confined shell program may write: the bar and the launcher create it before
+/// they confine themselves, and their Landlock rulesets grant it and nothing else of the
+/// runtime directory.
+fn shm_file(len: u32, dir: Option<&Path>) -> std::io::Result<File> {
+    let dir = match dir {
+        Some(dir) => dir.to_path_buf(),
+        None => shell_dir()?,
+    };
+    let path = dir.join(format!("capture-{}", unit::random()));
+    let file = OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
+    std::fs::remove_file(&path)?;
+    file.set_len(u64::from(len))?;
+    Ok(file)
+}
+
+fn shell_dir() -> std::io::Result<PathBuf> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .filter(|dir| dir.is_absolute())
@@ -169,12 +247,7 @@ fn shm_file(len: u32) -> std::io::Result<File> {
                 "XDG_RUNTIME_DIR is not set to an absolute path",
             )
         })?;
-    let dir = crate::launch::runtime_subdir(&runtime)?;
-    let path = dir.join(format!("capture-{}", unit::random()));
-    let file = OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
-    std::fs::remove_file(&path)?;
-    file.set_len(u64::from(len))?;
-    Ok(file)
+    crate::launch::runtime_subdir(&runtime)
 }
 
 /// The capture globals, bound at the first capture (`Client::capture`): a client that never
@@ -182,18 +255,27 @@ fn shm_file(len: u32) -> std::io::Result<File> {
 #[derive(Default)]
 pub(crate) struct Globals {
     sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
+    output_sources: Option<ExtOutputImageCaptureSourceManagerV1>,
+    xdg_outputs: Option<ZxdgOutputManagerV1>,
     image_copy: Option<ExtImageCopyCaptureManagerV1>,
+    /// Where the capture buffers are created, when not the shell's directory.
+    dir: Option<PathBuf>,
 }
 
 /// A capture global, bound at the first capture that needs it. One the compositor does not
 /// offer is looked for again at the next capture.
-fn bound<I>(slot: &mut Option<I>, globals: &GlobalList, qh: &QueueHandle<State>) -> Option<I>
+fn bound<I>(
+    slot: &mut Option<I>,
+    globals: &GlobalList,
+    qh: &QueueHandle<State>,
+    versions: std::ops::RangeInclusive<u32>,
+) -> Option<I>
 where
     I: Proxy + Clone + 'static,
     State: Dispatch<I, ()>,
 {
     if slot.is_none() {
-        *slot = bind(globals, qh, 1..=1);
+        *slot = bind(globals, qh, versions);
     }
     slot.clone()
 }
@@ -240,42 +322,109 @@ impl Client {
             let state = &mut *state;
             let toplevel = state.toplevels.get(&window).ok_or(Error::NoWindow)?;
             let (registry, qh) = (&self.inner.registry, &self.inner.qh);
-            let sources = bound(&mut state.globals.capture.sources, registry, qh)
+            let sources = bound(&mut state.globals.capture.sources, registry, qh, 1..=1)
                 .ok_or(Error::Unavailable("ext_foreign_toplevel_image_capture_source_manager_v1"))?;
-            let manager = bound(&mut state.globals.capture.image_copy, registry, qh)
+            let manager = bound(&mut state.globals.capture.image_copy, registry, qh, 1..=1)
                 .ok_or(Error::Unavailable("ext_image_copy_capture_manager_v1"))?;
             if state.globals.shm.is_none() {
                 return Err(Error::Unavailable("wl_shm"));
             }
-            let source = sources.create_source(&toplevel.ext, &self.inner.qh, ());
-            let session = manager.create_session(&source, Options::empty(), &self.inner.qh, id);
-            state.captures.insert(
-                id,
-                Pending {
-                    window,
-                    source,
-                    session,
-                    size: None,
-                    format: None,
-                    frame: None,
-                    buffer: None,
-                    result: None,
-                    waker: None,
-                },
-            );
+            let source = sources.create_source(&toplevel.ext, qh, ());
+            state.captures.insert(id, Pending::new(Some(window), source, &manager, None, id, qh));
         }
         // Removes the capture when the call ends or is dropped before it does.
         let guard = Forget { client: self, id };
+        let answer = self.taken(id, TIMEOUT).await;
+        // Destroys the frame, the buffer, the session and the source.
+        drop(guard);
+        self.flush()?;
+        answer.map(|taken| taken.picture)
+    }
+
+    /// Creates the capture buffers beneath `dir`, a directory the caller may write, rather
+    /// than beneath `$XDG_RUNTIME_DIR/athanor`.
+    pub fn set_capture_dir(&self, dir: PathBuf) {
+        self.inner.state.borrow_mut().globals.capture.dir = Some(dir);
+    }
+
+    /// Every output's picture, without the pointer, in the order of their registry names,
+    /// with the output's place in the layout. It fails when any output's does: a screenshot
+    /// with an output missing is not answered.
+    pub async fn capture_outputs(&self) -> Result<Vec<OutputPicture>, Error> {
+        self.live()?;
+        let ids = {
+            let mut state = self.inner.state.borrow_mut();
+            let state = &mut *state;
+            let (registry, qh) = (&self.inner.registry, &self.inner.qh);
+            let sources = bound(&mut state.globals.capture.output_sources, registry, qh, 1..=1)
+                .ok_or(Error::Unavailable("ext_output_image_capture_source_manager_v1"))?;
+            let manager = bound(&mut state.globals.capture.image_copy, registry, qh, 1..=1)
+                .ok_or(Error::Unavailable("ext_image_copy_capture_manager_v1"))?;
+            let xdg_outputs = bound(&mut state.globals.capture.xdg_outputs, registry, qh, 1..=3)
+                .ok_or(Error::Unavailable("zxdg_output_manager_v1"))?;
+            if state.globals.shm.is_none() {
+                return Err(Error::Unavailable("wl_shm"));
+            }
+            let outputs = state.wl_outputs();
+            if outputs.is_empty() {
+                return Err(Error::Capture("no output"));
+            }
+            let mut ids = Vec::with_capacity(outputs.len());
+            for output in &outputs {
+                let id = fresh();
+                // Its logical place is sent at creation, so before the frame is ready.
+                let xdg_output = xdg_outputs.get_xdg_output(output, qh, id);
+                let source = sources.create_source(output, qh, ());
+                let pending = Pending::new(None, source, &manager, Some(xdg_output), id, qh);
+                state.captures.insert(id, pending);
+                ids.push(id);
+            }
+            ids
+        };
+        // Removes every capture when the call ends or is dropped before it does.
+        let guards: Vec<_> = ids.iter().map(|&id| Forget { client: self, id }).collect();
+        let answers =
+            futures_util::future::join_all(ids.iter().map(|&id| self.taken(id, OUTPUT_TIMEOUT)))
+                .await;
+        drop(guards);
+        self.flush()?;
+        answers
+            .into_iter()
+            .map(|answer| {
+                let taken = answer?;
+                let ((x, y), (width, height)) = taken
+                    .position
+                    .zip(taken.logical_size)
+                    .ok_or(Error::Capture("the output's place in the layout is unknown"))?;
+                Ok(OutputPicture {
+                    x,
+                    y,
+                    width,
+                    height,
+                    transform: taken.transform,
+                    picture: taken.picture,
+                })
+            })
+            .collect()
+    }
+
+    /// Waits for capture `id` to finish, for at most `timeout`.
+    async fn taken(&self, id: u64, timeout: Duration) -> Result<Taken, Error> {
         self.flush()?;
         let answer = glib::future_with_timeout(
-            TIMEOUT,
+            timeout,
             poll_fn(|cx| {
                 let mut state = self.inner.state.borrow_mut();
                 let Some(pending) = state.captures.get_mut(&id) else {
                     return Poll::Ready(Err(Error::Capture("the capture was lost")));
                 };
                 match pending.result.take() {
-                    Some(result) => Poll::Ready(result),
+                    Some(result) => Poll::Ready(result.map(|picture| Taken {
+                        picture,
+                        transform: pending.transform,
+                        position: pending.position,
+                        logical_size: pending.logical_size,
+                    })),
                     None => {
                         pending.waker = Some(cx.waker().clone());
                         Poll::Pending
@@ -284,9 +433,6 @@ impl Client {
             }),
         )
         .await;
-        // Destroys the frame, the buffer, the session and the source.
-        drop(guard);
-        self.flush()?;
         answer.unwrap_or(Err(Error::Capture("the compositor did not answer in time")))
     }
 }
@@ -301,6 +447,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, u64> for State {
         qh: &QueueHandle<State>,
     ) {
         let shm = state.globals.shm.clone();
+        let dir = state.globals.capture.dir.clone();
         let Some(pending) = state.captures.get_mut(id) else { return };
         match event {
             ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => {
@@ -320,10 +467,10 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, u64> for State {
                     return;
                 };
                 let Some((stride, len)) = layout(width, height) else {
-                    pending.finish(Err(Error::Capture("the window is too large to preview")));
+                    pending.finish(Err(Error::Capture("the picture is too large")));
                     return;
                 };
-                let file = match shm_file(len) {
+                let file = match shm_file(len, dir.as_deref()) {
                     Ok(file) => file,
                     Err(err) => {
                         tracing::warn!("the capture buffer was not created: {err}");
@@ -342,7 +489,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, u64> for State {
                 pending.buffer = Some(Shm { file, pool, buffer, width, height, stride, len });
             }
             ext_image_copy_capture_session_v1::Event::Stopped => {
-                pending.finish(Err(Error::Capture("the window went away")));
+                pending.finish(Err(Error::Capture("the window or the output went away")));
             }
             _ => {}
         }
@@ -382,6 +529,12 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, u64> for State {
                 };
                 pending.finish(result);
             }
+            ext_image_copy_capture_frame_v1::Event::Transform { transform } => {
+                pending.transform = match transform {
+                    WEnum::Value(transform) => transform.into(),
+                    WEnum::Unknown(transform) => transform,
+                };
+            }
             ext_image_copy_capture_frame_v1::Event::Failed { .. } => {
                 pending.finish(Err(Error::Capture("the compositor refused the frame")));
             }
@@ -390,7 +543,29 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, u64> for State {
     }
 }
 
+impl Dispatch<ZxdgOutputV1, u64> for State {
+    fn event(
+        state: &mut State,
+        _: &ZxdgOutputV1,
+        event: zxdg_output_v1::Event,
+        id: &u64,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        let Some(pending) = state.captures.get_mut(id) else { return };
+        match event {
+            zxdg_output_v1::Event::LogicalPosition { x, y } => pending.position = Some((x, y)),
+            zxdg_output_v1::Event::LogicalSize { width, height } => {
+                pending.logical_size = Some((width, height));
+            }
+            _ => {}
+        }
+    }
+}
+
 delegate_noop!(State: ExtForeignToplevelImageCaptureSourceManagerV1);
+delegate_noop!(State: ExtOutputImageCaptureSourceManagerV1);
+delegate_noop!(State: ZxdgOutputManagerV1);
 delegate_noop!(State: ExtImageCopyCaptureManagerV1);
 delegate_noop!(State: ExtImageCaptureSourceV1);
 delegate_noop!(State: wl_shm_pool::WlShmPool);
@@ -452,6 +627,50 @@ mod tests {
             assert_eq!(bound.iter().filter(|i| i == global).count(), 1, "{bound:?}");
         }
         drop(client);
+    }
+
+    /// The output capture globals are bound by the first `capture_outputs`, once across
+    /// calls, never at connection; a compositor without one is named in the error. Without
+    /// `wl_shm` each call stops before it asks for a frame.
+    #[test]
+    fn capturing_the_outputs_binds_their_globals_once_and_only_then() {
+        const OUTPUT_GLOBALS: &[&str] = &[
+            "ext_output_image_capture_source_manager_v1",
+            "ext_image_copy_capture_manager_v1",
+            "zxdg_output_manager_v1",
+        ];
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (connection, client, bound) = connect(&[
+            "wl_output",
+            "ext_output_image_capture_source_manager_v1",
+            "ext_image_copy_capture_manager_v1",
+            "zxdg_output_manager_v1",
+        ]);
+        connection.roundtrip().expect("roundtrip");
+        let at_connection = bound.lock().expect("lock").clone();
+        assert!(!OUTPUT_GLOBALS.iter().any(|g| at_connection.iter().any(|i| i == g)), "{at_connection:?}");
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        for _ in 0..2 {
+            let mut capture = std::pin::pin!(client.capture_outputs());
+            let answer = std::future::Future::poll(capture.as_mut(), &mut context);
+            assert!(matches!(answer, Poll::Ready(Err(Error::Unavailable("wl_shm")))), "{answer:?}");
+        }
+        connection.roundtrip().expect("roundtrip");
+        let bound = bound.lock().expect("lock").clone();
+        for global in OUTPUT_GLOBALS {
+            assert_eq!(bound.iter().filter(|i| i == global).count(), 1, "{bound:?}");
+        }
+        drop(client);
+
+        let (_connection, client, _bound) = connect(&["wl_output", "ext_image_copy_capture_manager_v1"]);
+        let mut capture = std::pin::pin!(client.capture_outputs());
+        let answer = std::future::Future::poll(capture.as_mut(), &mut context);
+        assert!(
+            matches!(answer, Poll::Ready(Err(Error::Unavailable("ext_output_image_capture_source_manager_v1")))),
+            "{answer:?}"
+        );
     }
 
     #[test]
