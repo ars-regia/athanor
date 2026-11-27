@@ -1230,6 +1230,47 @@ where
     elements
 }
 
+/// The windows of a workspace of `output`, front to back, each at its geometry in the space with
+/// its marks as `stack` draws them: no layer surface, no drag icon, and no slide (decision 32).
+pub fn workspace<R>(
+    renderer: &mut R,
+    windows: &[(Window, Rectangle<i32, Logical>)],
+    space: &Space<Window>,
+    output: &Output,
+    marks: &Marks,
+) -> Vec<Stacked<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let mut elements = Vec::new();
+    let Some(geometry) = space.output_geometry(output) else {
+        return elements;
+    };
+    let area = {
+        let map = layer_map_for_output(output);
+        laid_out(output).map(|size| inset(geometry, size, map.non_exclusive_zone()))
+    };
+    let place = Place {
+        origin: geometry.loc,
+        scale: output.current_scale().fractional_scale(),
+        output: geometry,
+        area: area.unwrap_or(geometry),
+    };
+    for (window, located) in windows {
+        window_elements(
+            renderer,
+            &mut elements,
+            window,
+            *located,
+            Point::default(),
+            marks,
+            &place,
+        );
+    }
+    elements
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

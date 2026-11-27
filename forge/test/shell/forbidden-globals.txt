@@ -4,6 +4,7 @@ athanor_keyboard_group_manager_v1
 athanor_material_manager_v1
 athanor_toplevel_actions_v1
 athanor_toplevel_manager_v1
+athanor_workspace_manager_v1
 athanor_workspace_tiling_manager_v1
 cosmic_a11y_manager_v1
 ext_data_control_manager_v1
