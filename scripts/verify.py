@@ -5822,18 +5822,9 @@ SESSION_EXEMPT = {
 
 
 def unit_section(text, section):
-    """(key, value) of every assignment in one section of a unit file."""
-    current, found = None, []
-    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
-        line = line.strip()
-        if not line or line[0] in "#;":
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current = line[1:-1]
-        elif current == section and "=" in line:
-            key, value = line.split("=", 1)
-            found.append((key.strip(), value.strip()))
-    return found
+    """(key, value) of every assignment in one section of a unit file, read as systemd reads
+    it (`unit_lines`)."""
+    return [(key, value) for current, key, value in unit_assignments(text) if current == section]
 
 
 def unit_names(pairs, key):

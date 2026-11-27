@@ -308,6 +308,20 @@ class StateLinkTest(unittest.TestCase):
         self.assertEqual(verify.state_link_problems(units, created), [])
 
 
+class UnitSectionTest(unittest.TestCase):
+    def test_a_comment_ending_in_a_backslash_continues_nothing(self):
+        # systemd skips a comment line whole, so the assignment after it is read (#1582).
+        text = "[Service]\n# a note \\\nStateDirectory=athanor\nWatchdogSec=30s\n"
+        self.assertEqual(
+            verify.unit_section(text, "Service"),
+            [("StateDirectory", "athanor"), ("WatchdogSec", "30s")],
+        )
+
+    def test_a_continued_line_is_joined(self):
+        text = "[Service]\nStateDirectory=a \\\n  b\n[Install]\nWantedBy=x\n"
+        self.assertEqual(verify.unit_section(text, "Service"), [("StateDirectory", "a    b")])
+
+
 class TimeSpanTest(unittest.TestCase):
     def test_spans(self):
         for value, seconds in (
