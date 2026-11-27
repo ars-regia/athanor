@@ -764,7 +764,7 @@ class Kept(unittest.TestCase):
         moved = {p.split(" is moved")[0] for p in result.problems if "is moved by this change" in p}
         cited = {
             f"doc_notification_center.md:15: `{store}:9`",
-            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (110, 378, 446, 556)),
+            *(f"doc_session_daemons.md:54: `{state}:{n}`" for n in (110, 567)),
         }
         self.assertLessEqual(cited, moved)
 

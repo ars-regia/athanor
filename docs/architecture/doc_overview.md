@@ -495,7 +495,7 @@ Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the
 - **What binds it.** ADR-0138 decisions 2 and 6; section 7 (A2-24) and `doc_launcher.md` LA12, which remove cosmic-launcher only with this switcher bound to Alt+Tab; SH1's rule for replacing a surface (`doc_shell.md`); `doc_own_stack.md` OS8 (Orca's transcript), OS13 (every default binding has a fixture test) and decision 30 (the compositor draws no title bars, with their text, theme and accessibility work).
 - **cosmic-comp's session today.** COSMIC's `defaults` bind Alt+Tab and Super+Tab to `System(WindowSwitcher)`, and Alt+Shift+Tab and Super+Shift+Tab to `System(WindowSwitcherPrevious)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:109-112`, cosmic-comp-1.11.0-2.fc43.athanor1). `system_actions:53,55` run `cosmic-launcher alt-tab` and `cosmic-launcher shift-alt-tab` (cosmic-settings-daemon-1.11.0-2.fc43). The compositor client writes a user's system action once with `shortcuts::set_system_action_once` (`system/athanor-sulphur-client/src/shortcuts.rs:70`), as the launcher does for `Launcher` (`forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/main.rs:88`).
 - **athanor-sulphur today** (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0`, below `S`).
-  - Alt+Tab is unbound: the fixture test `the_unnamed_cosmic_keys_reach_the_client` lists it among COSMIC's keys that reach the client (`S/src/fixture.rs:11314, 11320`, the test and its Alt+Tab row).
+  - Alt+Tab is unbound: the fixture test `the_unnamed_cosmic_keys_reach_the_client` lists it among COSMIC's keys that reach the client (`S/src/fixture.rs:11359, 11365`, the test and its Alt+Tab row).
   - Bindings are rows of `DEFAULTS` (`S/src/bindings.rs:145`). `Action::Call` makes a call of `S/src/session_calls.rs`: a session-bus method without arguments, with `while_locked` and `coalesce` flags (`Call`, `:15-28`); the launcher's is coalesced.
   - A bound key's press is intercepted whatever surface holds the keyboard; only an inhibitor changes that, for the actions that are not `never_inhibited` (`S/src/input.rs:122-165`, `S/src/bindings.rs:129`). So, while Alt is held, each further Tab reaches the bus as another call, not the switcher as a key.
   - Activating a window through `athanor_toplevel_actions_v1` activates its workspace first, or unminimises it, which activates its workspace too, and then focuses it (`S/src/toplevel_state.rs:179-196`, `S/src/state.rs#State::unminimise`).
@@ -686,6 +686,11 @@ captures does not hold under athanor-sulphur.
 - The grid's live thumbnails stay window captures (OV6).
 - The source is granted by the overview's line in the allow-list and to no other client, and is
   refused while the session is locked (#1133; `doc_own_stack.md` OS16).
+- *Amended on 2026-11-26, with #1133, by the maintainer's decision of that day:* the frame follows the
+  workspace's output, its mode and its transform, and never draws the pointer. The confined
+  border, the focus outline and the 1 px divider ring are drawn as on screen, except that a workspace
+  that is left has no focus outline, since the session's focus is not on it. A workspace has no layer
+  surface, so the frame is transparent behind its windows, and an empty workspace gives a transparent frame.
 - Fixture test (`doc_own_stack.md` OS6): the overview's capture of the active workspace, taken while
   the overview is shown, holds the workspace's windows and not the overview's surface.
 

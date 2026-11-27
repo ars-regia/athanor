@@ -53,6 +53,14 @@ athanor-sulphur from `src/workspace_tiling.rs`. It is MIT, 2026 Athanor Forge, a
 in `SHA256SUMS` either. The client binds it in `src/workspace_tiling.rs` at the first
 `Client::watch_tiling`, and only under athanor-sulphur (`Client::own_compositor`).
 
+`athanor-workspace-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5, decision 32,
+as amended on 2026-11-26): the overview's control of workspaces through
+`athanor_workspace_manager_v1`, a workspace's pin and place among its output's workspaces,
+each window's workspace and place and its move to another workspace, and the
+ext-image-copy-capture-v1 source of a workspace, served by athanor-sulphur from
+`src/workspace_manager.rs`. It is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS`
+either.
+
 `athanor-dock-overlap-v1.xml` is Athanor's own protocol too (doc_own_stack.md decision 35):
 whether a window covers the rectangle the dock shows itself in, for its intellihide, made by
 `athanor_dock_overlap_manager_v1` for the dock's layer surface, served by athanor-sulphur from

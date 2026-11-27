@@ -223,11 +223,15 @@ impl Dispatch2<AthanorToplevelActionsV1, State> for ToplevelActions {
 /// for virtual input; and the window is minimised or one the user can see. A closed handle names
 /// none.
 fn acted_on(state: &State, toplevel: &ExtForeignToplevelHandleV1) -> Option<Window> {
-    if state.drops_virtual_input() {
+    acted_on_handle(state, &ForeignToplevelHandle::from_resource(toplevel)?)
+}
+
+/// The window `handle` names, when the shell may act on it, as `acted_on` decides.
+pub(crate) fn acted_on_handle(state: &State, handle: &ForeignToplevelHandle) -> Option<Window> {
+    if state.drops_virtual_input() || handle.is_closed() {
         return None;
     }
-    let handle = ForeignToplevelHandle::from_resource(toplevel).filter(|h| !h.is_closed())?;
-    let window = state.window_by_handle(&handle)?;
+    let window = state.window_by_handle(handle)?;
     (state.is_minimised(&window) || shown(&window)).then_some(window)
 }
 
@@ -262,6 +266,8 @@ impl State {
             .into_iter()
             .filter(|object| self.send_toplevel_state(object))
             .collect();
+        // The overview's window objects follow the same frames (decision 32).
+        self.send_workspace_windows();
     }
 
     /// Sends `object` what changed of its window; false when the object or the window is gone.
