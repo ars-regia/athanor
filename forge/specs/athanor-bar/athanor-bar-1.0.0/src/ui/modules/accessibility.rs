@@ -254,7 +254,7 @@ impl Module for AccessModule {
             .and_then(|client| client.accessibility());
         if widget == widgets.high_contrast {
             if let Err(err) =
-                appearance::apply(|choice| choice.high_contrast = on, theme::write_cosmic)
+                appearance::apply(|choice| choice.high_contrast = on, theme::write)
             {
                 tracing::error!(error = %err, "cannot switch high contrast");
                 ui.set_active(widget, Appearance::read().high_contrast);

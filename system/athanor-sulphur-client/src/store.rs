@@ -27,13 +27,16 @@ pub const SCHEMA: i64 = 1;
 pub const LIMIT: u64 = 64 * 1024;
 
 /// How long a writer waits for the lock before it gives up (ADR-0150 point 4).
+// ponytail: the wait is a poll on the caller's thread, which for the apply function is the
+// interface's, so a holder that hangs stalls it for this long once; a write off that thread
+// when a measurement shows it matters.
 pub const LOCK_BOUND: Duration = Duration::from_secs(1);
 
 /// Between two tries of the lock.
 const LOCK_RETRY: Duration = Duration::from_millis(10);
 
-/// The directory under the configuration root.
-const RELATIVE: &str = "athanor/sulphur";
+/// The store's directory under the configuration home, for a test of a unit that makes it.
+pub const RELATIVE: &str = "athanor/sulphur";
 
 /// The lock every writer takes, in the directory.
 const LOCK: &str = ".lock";
@@ -89,6 +92,13 @@ impl Store {
     /// The store at `dir`.
     pub fn at(dir: PathBuf) -> Store {
         Store { dir }
+    }
+
+    /// The store of the subdirectory `name`, with its own lock and its own files. A family
+    /// whose writers run confined in a process of their own lives in one, so that the
+    /// process's write grant names the subdirectory and not the files of the other families.
+    pub fn sub(&self, name: &str) -> Store {
+        Store::at(self.dir.join(name))
     }
 
     /// Crate-private, so the crate's writes go through `update`; the path is not secret, since
@@ -159,6 +169,11 @@ pub struct Locked<'a> {
 }
 
 impl Locked<'_> {
+    /// The store this lock belongs to.
+    pub(crate) fn store(&self) -> &Store {
+        self.store
+    }
+
     /// The path of the file `name`, which must be a plain file name ending in `.toml` and not
     /// starting with a dot, so that no name reaches outside the directory or names `.lock`.
     fn file(&self, name: &str) -> Result<PathBuf, Error> {

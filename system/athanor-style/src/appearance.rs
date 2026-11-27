@@ -670,15 +670,19 @@ pub fn watch(on_change: impl Fn(Appearance) + 'static) {
 }
 
 /// Applies `change` to the appearance the store holds and writes the result, in VL4's
-/// order: the GNOME keys, then `org.athanor.desktop.appearance`, then the compositor's keys
-/// through `cosmic` (athanor-sulphur-client's `theme::write_cosmic`, the only code that
-/// knows COSMIC). The change is applied to the store's values read here, so a key another
-/// process changed since the caller last read it is not written back.
-/// A failure of the last step is logged and leaves the result `Ok`: the shell reads the
-/// store, and only cosmic-comp's borders and indicators lag.
+/// order: the GNOME keys, then `org.athanor.desktop.appearance`, then the compositor's half
+/// through `compositor` (athanor-sulphur-client's `theme::write`, the only code that knows
+/// COSMIC and the preference store): the file the own compositor draws the focus outline
+/// with and, while COSMIC's applications still read them, COSMIC's keys. The change is applied
+/// to the store's values read here, so a key another process changed since the caller last
+/// read it is not written back.
+/// An error of the last step is returned, with the GNOME keys already written: the shell
+/// reads them and follows, and the compositor keeps the last outline it read. The caller
+/// logs the error; nothing is rolled back. What `compositor` logs and does not return, as `theme::write` does for COSMIC's
+/// keys alone, leaves the result `Ok`.
 pub fn apply(
     change: impl FnOnce(&mut Appearance),
-    cosmic: impl FnOnce(&Appearance) -> io::Result<()>,
+    compositor: impl FnOnce(&Appearance) -> io::Result<()>,
 ) -> io::Result<()> {
     let stores = Stores::open();
     let current = stores.read();
@@ -745,10 +749,7 @@ pub fn apply(
         }
     }
     gio::Settings::sync();
-    if let Err(err) = cosmic(&choice) {
-        tracing::warn!(error = %err, "cannot write the compositor's theme keys; its borders and indicators keep the previous appearance");
-    }
-    Ok(())
+    compositor(&choice)
 }
 
 #[cfg(test)]
