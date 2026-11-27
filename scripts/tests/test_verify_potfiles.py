@@ -422,6 +422,20 @@ class RustCodeTest(unittest.TestCase):
         self.assertNotIn("tr(", code)
         self.assertIn("fn g() {}", code)
 
+    def test_a_test_field_leaves_the_code_after_it(self):
+        # #1576: the attribute applies to the field, not to the next block.
+        for head, kept in (
+            ("struct S {\n    #[cfg(test)]\n    a: u8,\n    b: u8,\n}\n", "b: u8"),
+            ("enum E {\n    #[cfg(test)]\n    A,\n    B,\n}\n", "B,"),
+            ("fn f(#[cfg(test)] a: u8, b: u8) {}\n", "b: u8"),
+        ):
+            with self.subTest(head=head):
+                code, masked = verify.rust_code(head + 'fn write() { tr("Open"); }\n')
+                self.assertIn(kept, code)
+                self.assertIn("fn write()", code)
+                self.assertIn("fn write()", masked)
+                self.assertTrue(verify.GETTEXT_CALL.search(code))
+
     def test_a_char_literal_quote_opens_no_string(self):
         code, _ = verify.rust_code('let q = \'"\';\nlet s = tr("Open");\n')
         self.assertTrue(verify.GETTEXT_CALL.search(code))

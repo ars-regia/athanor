@@ -91,7 +91,7 @@ directory), `scripts/devvm/launcher-acceptance.sh:45`, `:288-289`,
 `scripts/devvm/session-acceptance.sh:42`, `:59`, `:164`,
 `scripts/devvm/default-session-acceptance.sh:102-103` (CosmicIdle and the colour filter),
 `scripts/devvm/start.sh:67` (CosmicIdle), `scripts/shell-bench/soak.py:21`,
-`forge/scripts/check_image_session.py:98-114`, `scripts/verify.py:2121-2148` (the overlay),
+`forge/scripts/check_image_session.py:98-114`, `scripts/verify.py:2116-2143` (the overlay),
 `scripts/tests/test_verify_shipped.py:18` (the overlay's `is_dark`), and Sulphur's README,
 `forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/README.md:283-295` (`xkb_config` and the
 colour filter).

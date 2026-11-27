@@ -1796,12 +1796,7 @@ def rust_code(text):
             i += 1
     flat = "".join(masked)
     for attr in re.finditer(r"#\[cfg\(test\)\]", flat):
-        start = attr.end()
-        brace, semi = flat.find("{", start), flat.find(";", start)
-        if brace < 0 or 0 <= semi < brace:
-            end = n if semi < 0 else semi + 1
-        else:
-            end = block_end(flat, brace)
+        end = item_end(flat, attr.end())
         blank(code, attr.start(), end)
         blank(masked, attr.start(), end)
     return "".join(code), "".join(masked)
@@ -3328,13 +3323,13 @@ INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
 COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
 # code outside that crate makes the call, written as a method or as a path: athanor-sulphur-
-# client binds the capture globals at the first `Client::capture`, the window actions at the
+# client binds the capture globals of a window at the first `Client::capture` or `Client::capture_pixels`, those of the outputs at the first `Client::capture_outputs`, the window actions at the
 # first action of `Client::window_actions`, the keyboard group at the first
 # `Client::watch_keyboard_group`, athanor-sulphur's accessibility manager at the first
 # `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
-# capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
-# every name of them in the crate. workspaces.rs binds the workspace manager when a client
+# capture.rs, capture/outputs.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and
+# windows.rs hold every name of them in the crate. workspaces.rs binds the workspace manager when a client
 # connects with `Client::connect` or `Client::connect_wayland`, so it counts for a target only
 # when the target's files outside the crate, taken together, name `Client`, under any alias,
 # and call a `::connect` or `::connect_wayland`, in the same file or in another, as an alias
@@ -3347,7 +3342,11 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # type's `::connect` counts, the safe side. connection.rs names no privileged global and counts
 # for every target.
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
-             ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*capture(?:_pixels)?\b|::\s*capture(?:_pixels)?\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/capture/outputs.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*capture_outputs\b|::\s*capture_outputs\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
              ("system/athanor-sulphur-client",
               re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)")),
@@ -3368,11 +3367,13 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               (re.compile(r"\bClient\b"), re.compile(r"::\s*connect(?:_wayland)?\b(?!\s*::)")))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
-# first capture, at the first window action, at the first watch of the keyboard group, at the
+# first capture, at the first capture of the outputs, at the first window action, at the first watch of the keyboard group, at the
 # first watch of the accessibility state, at the first watch of the tiling and at the first watch
 # of the windows. Each names at least one, or the check no longer sees what the client binds.
 CLIENT_BINDS = {"system/athanor-sulphur-client/src/workspaces.rs": "at connect",
                 "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
+                "system/athanor-sulphur-client/src/capture/outputs.rs":
+                "at the first capture of the outputs",
                 "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
                 "system/athanor-sulphur-client/src/keyboard_group.rs":
                 "at the first watch of the keyboard group",
@@ -7551,7 +7552,7 @@ def rust_definitions(rows):
     (`impl Lock`, `impl Drop for Lock`, `impl Dispatch<WlSurface, ()> for Client`).
     An item starts at the attributes and comments right above it and ends on its line when that line
     ends with `;` or `}`, else at the next line of its indent that starts with `}`, `)` or `]` and
-    opens no block. Limit: rustfmt's layout is assumed, and an item-like line inside a string
+    opens no block, unless it is a `)` followed by a `where` clause or a `{` on a line of its own. Limit: rustfmt's layout is assumed, and an item-like line inside a string
     (a raw-string fixture) counts as an item."""
     found = []
     for i, row in enumerate(rows):
@@ -7594,8 +7595,11 @@ def rust_definitions(rows):
                     break
                 if indent_of(rows[j]) == indent:
                     if text[0] in "})]" and not text.endswith("{"):
-                        last = j
-                        break
+                        # A `)` that closes a signature continues into its `where` clause or its `{`.
+                        after = next((r.strip() for r in rows[j + 1:] if r.strip()), "")
+                        if not (text[0] == ")" and after.startswith(("where", "{"))):
+                            last = j
+                            break
                     if not text.startswith(("where", "{", ")", "]", "->")):
                         break
                 last = j
