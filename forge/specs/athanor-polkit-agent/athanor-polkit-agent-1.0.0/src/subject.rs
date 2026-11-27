@@ -60,12 +60,14 @@ pub fn describe(details: &HashMap<String, String>, proc: &Path) -> Option<Progra
 
 /// The `[Application]` group's `name` of the `.flatpak-info` at `path`. The only path followed
 /// from the subject's root, and read bounded: a link there is refused (`O_NOFOLLOW`), a FIFO
-/// does not block the bus thread (`O_NONBLOCK`), the open file must be a regular one, and one
-/// over FLATPAK_INFO_MAX is refused.
+/// does not block the bus thread (`O_NONBLOCK`), a terminal does not become the agent's
+/// (`O_NOCTTY`), the open file must be a regular one, and one over FLATPAK_INFO_MAX is refused.
 fn flatpak_name(path: &Path) -> Option<String> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags((OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC).bits())
+        .custom_flags(
+            (OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_NOCTTY | OFlag::O_CLOEXEC).bits(),
+        )
         .open(path)
         .ok()?;
     if !file.metadata().ok()?.is_file() {

@@ -42,6 +42,7 @@ SystemCallFilter=@system-service
 # the agent makes none: refused with EPERM, so a stray call fails instead of killing the guard.
 SystemCallFilter=~@chown:EPERM chmod:EPERM fchmod:EPERM fchmodat:EPERM fchmodat2:EPERM utime:EPERM utimes:EPERM utimensat:EPERM futimesat:EPERM setxattr:EPERM lsetxattr:EPERM fsetxattr:EPERM setxattrat:EPERM removexattr:EPERM lremovexattr:EPERM fremovexattr:EPERM removexattrat:EPERM
 RestrictRealtime=yes
+RestrictSUIDSGID=yes
 LockPersonality=yes
 RestrictAddressFamilies=AF_UNIX
 
