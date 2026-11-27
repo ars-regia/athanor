@@ -21,7 +21,7 @@ impl Wire {
     /// Connects outside a security context and lists the globals.
     pub(super) fn connect(run: &mut Running) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-        let data = run.state.client_state(&server_end, None);
+        let data = run.state.admitted_state(&server_end, None);
         run.state
             .display_handle
             .insert_client(server_end, data)

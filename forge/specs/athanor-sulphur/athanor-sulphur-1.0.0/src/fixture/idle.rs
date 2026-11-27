@@ -11,7 +11,7 @@ const BLACK: [u8; 4] = [0, 0, 0, 255];
 /// `athanor-idle`'s display, connected, with its globals bound.
 fn daemon(run: &mut Running) -> Display {
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let data = run.state.client_state(&server_end, None);
+    let data = run.state.admitted_state(&server_end, None);
     run.state
         .display_handle
         .insert_client(server_end, data)

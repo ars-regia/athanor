@@ -3,7 +3,7 @@
 
 use crate::handlers::{shown, HeldCommit};
 use crate::headless::{FrameStats, Headless};
-use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
+use crate::identity::{AllowList, Identity, Peer, Privilege, Proc, Process};
 use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
@@ -93,6 +93,7 @@ use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -311,6 +312,9 @@ pub struct State {
     pub allow_list: AllowList,
     /// Where a connecting client's executable and cgroup are read.
     pub process: Box<dyn Process>,
+    /// The queue of the origin check (`origin.rs`), once the binary has started it: without
+    /// it, as in the fixture, a client is granted its transient lines alone.
+    pub origin: Option<SyncSender<crate::origin::Job>>,
     /// The X11 display xwayland-satellite serves, when the compositor holds one.
     pub x11: Option<crate::xwayland::X11>,
 }
@@ -560,6 +564,7 @@ impl State {
             output_power: OutputPower::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
+            origin: None,
             x11: None,
         })
     }
@@ -570,32 +575,122 @@ impl State {
         self.idle_notifier_state.notify_activity(&seat);
     }
 
+    /// What `identify` reads of the client at the other end of `stream`, or `None`, logged,
+    /// when its identity cannot be read: then it is granted no privileged global.
+    fn peer(&self, stream: &UnixStream) -> Option<Peer> {
+        match crate::identity::identify(stream.as_fd(), self.process.as_ref(), &self.allow_list) {
+            Ok(peer) => {
+                tracing::debug!(identity = ?peer.identity, grants = ?peer.grants, "a client connected");
+                Some(peer)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "a client's identity cannot be read: no privileged global");
+                None
+            }
+        }
+    }
+
     /// What the compositor keeps for a client that connects now on `stream`, through
-    /// `context`'s listener or through the compositor's own socket without one. The privileged
-    /// globals it is granted are decided here, once: inside a security context none, outside
-    /// one what the allow-list grants its identity, and none when its identity cannot be read.
+    /// `context`'s listener or through the compositor's own socket without one, with no origin
+    /// check: inside a security context it is granted nothing, outside one the transient lines
+    /// of the allow-list its identity names, and nothing when its identity cannot be read. A
+    /// client of the compositor's socket goes through `connect` instead.
     pub fn client_state(
         &self,
         stream: &UnixStream,
         context: Option<SecurityContext>,
     ) -> Arc<ClientState> {
-        let (identity, grants) = match &context {
-            Some(_) => (None, Vec::new()),
-            None => match crate::identity::identify(
-                stream.as_fd(),
-                self.process.as_ref(),
-                &self.allow_list,
-            ) {
-                Ok((identity, grants)) => {
-                    tracing::debug!(?identity, ?grants, "a client connected");
-                    (Some(identity), grants)
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "a client's identity cannot be read: no privileged global");
-                    (None, Vec::new())
-                }
-            },
+        let peer = match &context {
+            Some(_) => None,
+            None => self.peer(stream),
         };
+        let (identity, grants) = match peer {
+            Some(peer) => (Some(peer.identity), peer.grants.exempt),
+            None => (None, Vec::new()),
+        };
+        self.new_client_state(identity, grants, context)
+    }
+
+    /// `client_state`, as if the origin check had admitted the client: the fixture's fake
+    /// process stands for the main process of its unit.
+    #[cfg(test)]
+    pub fn admitted_state(
+        &self,
+        stream: &UnixStream,
+        context: Option<SecurityContext>,
+    ) -> Arc<ClientState> {
+        let peer = match &context {
+            Some(_) => None,
+            None => self.peer(stream),
+        };
+        let (identity, grants) = match peer {
+            Some(peer) => (Some(peer.identity), peer.grants.all()),
+            None => (None, Vec::new()),
+        };
+        self.new_client_state(identity, grants, context)
+    }
+
+    /// A client of the compositor's own socket: inserted at once when none of its lines needs
+    /// the origin check, otherwise handed to the check, which never makes the loop wait
+    /// (`origin.rs`). A queue that is full or gone inserts it with its transient lines alone.
+    pub fn connect(&mut self, stream: UnixStream) {
+        let Some(peer) = self.peer(&stream) else {
+            let data = self.new_client_state(None, Vec::new(), None);
+            self.insert(stream, data);
+            return;
+        };
+        if peer.grants.by_origin.is_empty() {
+            let data = self.new_client_state(Some(peer.identity), peer.grants.exempt, None);
+            self.insert(stream, data);
+            return;
+        }
+        let job = crate::origin::Job { stream, peer };
+        let (job, why) = match &self.origin {
+            Some(queue) => match queue.try_send(job) {
+                Ok(()) => return,
+                Err(TrySendError::Full(job)) => (job, "the origin check's queue is full"),
+                Err(TrySendError::Disconnected(job)) => (job, "the origin check has stopped"),
+            },
+            None => (job, "the origin check is not running"),
+        };
+        self.checked(crate::origin::Verdict {
+            job,
+            admitted: Err(why.into()),
+        });
+    }
+
+    /// Inserts a client the origin check answered for: granted every line it names when it was
+    /// admitted, its transient lines alone when it was not.
+    pub fn checked(&mut self, verdict: crate::origin::Verdict) {
+        let crate::origin::Job { stream, peer } = verdict.job;
+        let mut grants = peer.grants.exempt;
+        match verdict.admitted {
+            Ok(()) => grants.extend(peer.grants.by_origin),
+            Err(reason) => tracing::warn!(
+                identity = ?peer.identity,
+                refused = ?peer.grants.by_origin,
+                %reason,
+                "the origin check did not admit a client of the allow-list: its lines outside the transient ones are not granted"
+            ),
+        }
+        let data = self.new_client_state(Some(peer.identity), grants, None);
+        self.insert(stream, data);
+    }
+
+    fn insert(&mut self, stream: UnixStream, data: Arc<ClientState>) {
+        if let Err(error) = self.display_handle.insert_client(stream, data) {
+            tracing::warn!(%error, "a client could not connect");
+        }
+    }
+
+    /// What the compositor keeps for a client of `identity`, granted `grants`, through
+    /// `context`'s listener if any.
+    fn new_client_state(
+        &self,
+        identity: Option<Identity>,
+        grants: Vec<Privilege>,
+        context: Option<SecurityContext>,
+    ) -> Arc<ClientState> {
         let instance = context.as_ref().and_then(|context| {
             let id = context.instance_id.clone()?;
             Some((context.creator_client_id.clone(), id))
@@ -1767,12 +1862,7 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
     let socket = ListeningSocketSource::new_auto()?;
     let name = socket.socket_name().to_os_string();
     handle
-        .insert_source(socket, |stream, _, state| {
-            let data = state.client_state(&stream, None);
-            if let Err(error) = state.display_handle.insert_client(stream, data) {
-                tracing::warn!(%error, "a client could not connect");
-            }
-        })
+        .insert_source(socket, |stream, _, state| state.connect(stream))
         .map_err(|e| e.error)?;
     Ok(name)
 }

@@ -1491,7 +1491,7 @@ impl Running {
             executable_file.clone(),
             executable_stats.clone(),
         ));
-        let client_state = state.client_state(&server_end, None);
+        let client_state = state.admitted_state(&server_end, None);
         state
             .display_handle
             .insert_client(server_end, client_state)
@@ -1986,7 +1986,7 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
         .clone();
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     run.state
         .display_handle
         .insert_client(server_end, client_state)
@@ -2077,7 +2077,7 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
 fn an_exclusive_surface_keeps_the_keyboard_in_its_own_popup() {
     let mut run = Running::start(None);
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -2148,7 +2148,7 @@ fn a_bar_popup_leaves_the_keyboard_to_the_window() {
     let window = focus(&run.state);
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -2263,7 +2263,7 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     let window = focus(&run.state);
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -2949,7 +2949,7 @@ impl Local {
     /// Connects to the compositor, inside `context` if any, and lists the globals.
     fn connect(run: &mut Running, context: Option<SecurityContext>) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-        let data = run.state.client_state(&server_end, context);
+        let data = run.state.admitted_state(&server_end, context);
         let id = run
             .state
             .display_handle
@@ -4964,6 +4964,31 @@ fn task5_bar_unit_and_executable_get_privileged_globals() {
     let mut run = Running::start(None);
     let bar = Local::connect(&mut run, None);
     assert!(bar.privileged(), "the bar sees the privileged globals");
+    run.stop();
+}
+
+/// Through the compositor's own socket, the bar's line waits for the origin check (OS4, #1560):
+/// admitted, the bar sees the privileged globals; refused, or with no check running, it sees
+/// none of them, as its line is not one of the transient ones.
+#[test]
+fn task5_the_bar_s_line_waits_for_the_origin_check() {
+    fn connect(run: &mut Running) -> Local {
+        let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+        run.state.connect(server_end);
+        Local::over(run, client_end, None)
+    }
+    let mut run = Running::start(None);
+    assert!(!connect(&mut run).privileged(), "no origin check");
+    let handle = run.event_loop.handle();
+    let refuse = |_: &crate::origin::Job| Err("refused".to_owned());
+    run.state.origin = Some(crate::origin::start(&handle, refuse, State::checked).expect("origin"));
+    assert!(!connect(&mut run).privileged(), "refused");
+    let admit = |job: &crate::origin::Job| {
+        assert_eq!(job.peer.identity.unit.as_deref(), Some("athanor-bar.service"));
+        Ok(())
+    };
+    run.state.origin = Some(crate::origin::start(&handle, admit, State::checked).expect("origin"));
+    assert!(connect(&mut run).privileged(), "admitted");
     run.stop();
 }
 
@@ -8692,7 +8717,7 @@ fn os9_a_virtual_key_takes_the_hardware_path() {
     });
     let window = focus(&run.state);
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -10400,7 +10425,7 @@ fn os9_an_input_method_releasing_its_grab_leaves_a_popup_grab() {
     assert!(grabbed(&run.state), "the input method holds the keyboard");
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -10575,7 +10600,7 @@ fn os9_an_exclusive_surface_suspends_the_input_method_grab() {
     method.grab_keyboard(&mut ime, &mut run);
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle

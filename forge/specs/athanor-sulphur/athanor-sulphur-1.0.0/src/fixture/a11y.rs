@@ -455,7 +455,7 @@ fn a_click_ends_the_following_of_the_focus() {
 fn a_click_outside_a_grabbing_popup_with_the_magnifier_on() {
     let mut run = Running::start(None);
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state(&server_end, None);
+    let client_state = run.state.admitted_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle

@@ -104,6 +104,10 @@ class BoundaryTest(unittest.TestCase):
     def test_a_family_of_units_of_a_cosmic_application_is_not_a_configuration(self):
         code = 'const LINE: &str = "app-athanor-com.system76.CosmicSettings*@.service";\n'
         self.assertEqual(problems({"system/athanor-layout/src/main.rs": code}), [])
+        unit = 'const UNIT: &str = "app-athanor-com.system76.CosmicSettings@0123abcd.service";\n'
+        self.assertEqual(problems({"system/athanor-layout/src/main.rs": unit}), [])
+        config = 'const X: &str = "app-athanor-com.system76.CosmicSettings";\n'
+        self.assertEqual(len(problems({"system/athanor-layout/src/main.rs": config})), 1)
 
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
         allowed = [

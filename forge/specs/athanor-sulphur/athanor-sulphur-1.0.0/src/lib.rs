@@ -42,6 +42,7 @@ mod lock;
 mod look;
 mod marks;
 mod material;
+mod origin;
 mod output_management;
 mod output_power;
 mod pacing;
@@ -207,6 +208,8 @@ pub fn run() -> Result<(), Error> {
     user_bindings::start(&mut state, &event_loop.handle());
     // The workspace slide's direction, read from the bar's catalog before the first frame.
     workspace::slide::settle_direction();
+    // The origin check of the allow-list, before the first client (OS4, #1560).
+    state.origin = Some(origin::start(&event_loop.handle(), origin::ask, State::checked)?);
     let socket = state::listen(&event_loop.handle())?;
     // Under the user manager, as `athanor-sulphur.service` runs it, the satellite gets a
     // scope of its own (OS4).
