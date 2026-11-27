@@ -95,9 +95,10 @@ fn serve(
         .build()?;
     runtime.block_on(async move {
         let query = zbus::connection::Builder::session().build().await?;
-        let outputs = screenshot::Outputs::new(query.clone(), dir.clone());
+        let frontend = Arc::new(caller::Frontend::new(query).await?);
+        let outputs = screenshot::Outputs::new(frontend.clone(), dir.clone());
         let conn = zbus::connection::Builder::session()
-            .serve_at(PATH, settings::Portal::new(store, query))
+            .serve_at(PATH, settings::Portal::new(store, frontend))
             .serve_at(PATH, athanor_portal::screenshot::Screenshot::new(outputs, dir))
             .name(BUS_NAME)
             .build()

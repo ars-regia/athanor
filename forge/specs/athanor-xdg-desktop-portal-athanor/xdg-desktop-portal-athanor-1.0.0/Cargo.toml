@@ -10,7 +10,8 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 athanor-portal = { path = "../../../../system/athanor-portal" }
 # The outputs' pictures for a screenshot (doc_portal.md, PT8), without GTK.
 athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false, features = ["capture"] }
-athanor-unit = { path = "../../../../system/athanor-unit", features = ["watchdog"] }
+# The frontend check's questions (`caller.rs`, `athanor_unit::bus_caller`), and the watchdog.
+athanor-unit = { path = "../../../../system/athanor-unit", features = ["bus-caller", "watchdog"] }
 gio = { workspace = true }
 glib = { workspace = true }
 tokio = { workspace = true }

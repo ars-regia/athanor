@@ -47,7 +47,8 @@ pub struct Ask {
 pub trait Host: Send + Sync + 'static {
     type Identity: Identity + Send + Sync + 'static;
     /// The frontend-only rule of PT3: `Ok` only for a call from the owner of
-    /// `org.freedesktop.portal.Desktop`.
+    /// `org.freedesktop.portal.Desktop` that is the main process of the image's
+    /// `xdg-desktop-portal.service` (issue #1560).
     fn frontend(&self, header: &Header<'_>) -> impl Future<Output = Result<(), String>> + Send;
     /// The admission of PT10 for `InputSessions` and `StopCapture`: `Ok` only for the bar.
     fn bar(&self, header: &Header<'_>) -> impl Future<Output = Result<(), String>> + Send;

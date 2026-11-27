@@ -465,7 +465,8 @@ pub fn uri(path: &Path) -> String {
 
 /// What the backend gives the interface: the frontend check of PT3 and the outputs' pictures.
 pub trait Host: Send + Sync + 'static {
-    /// `Ok` when the caller is the frontend, the owner of `org.freedesktop.portal.Desktop`.
+    /// `Ok` when the caller is the frontend: the owner of `org.freedesktop.portal.Desktop` and the
+    /// main process of the image's `xdg-desktop-portal.service` (PT3, issue #1560).
     fn frontend(&self, header: &Header<'_>) -> impl Future<Output = Result<(), String>> + Send;
     /// Every output's picture, without the pointer. The future resolves only once the
     /// capture has ended, so that the turn held until then covers it.
