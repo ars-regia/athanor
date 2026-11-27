@@ -67,7 +67,7 @@ The port is the prerequisite of #1356, the greeter on Sulphur's greeter mode (`d
 
 These hold once #1356 lands.
 
-**Decision 41 (`doc_own_stack.md:2231-2262`).** The grant that admits the greeter to the mode is decided with this port, by a revision of `doc_own_stack.md`. It lists three options not taken, and one rejected outright: the greeter under `athanor-sulphur.service`. G1 decides that choice (section 6).
+**Decision 41 (`doc_own_stack.md:2233-2264`).** The grant that admits the greeter to the mode is decided with this port, by a revision of `doc_own_stack.md`. It lists three options not taken, and one rejected outright: the greeter under `athanor-sulphur.service`. G1 decides that choice (section 6).
 
 **What the GTK greeter already holds:**
 - *No account pictures.* It decodes no image an account supplied (`forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/ui.rs#Avatar`).
@@ -105,7 +105,7 @@ These hold once #1356 lands.
    - *After the port.* Sal's `IconTheme::system` reads the same installed theme (`system/athanor-sal/src/icon.rs`), so the `Requires` stays. The own-allow entry `rpm cosmic-icon-theme` has its own retirement, which is not this plan's.
    - *What else stays.* `athanor-style` and `rpm gtk4-layer-shell` stay on the list: the dock and cosmic-comp still use them.
 7. **The session menu.**
-   - *The approved text.* SN14 (`doc_session.md:190-192`): the greeter offers the menu only when `/usr/bin/athanor-sulphur-session` is installed, tested as `session_command` tests its paths (`auth.rs:97-113`). The menu is a button named "Session" beside the password field, after it in the focus chain, exposed to AT-SPI as a menu button with its checked entry; it holds the two sessions as a radio group with the default checked, cosmic-comp's entry with its one line "Workspace overview and Alt+Tab". `StartSession`'s `cmd` is the checked entry's path, read when `StartSession` is sent. SN14 revision 5 removes the menu, but in the change that takes cosmic-comp's session off the greeter (`:190`), not in this port.
+   - *The approved text.* SN14 (`doc_session.md:191-193`): the greeter offers the menu only when `/usr/bin/athanor-sulphur-session` is installed, tested as `session_command` tests its paths (`auth.rs:97-113`). The menu is a button named "Session" beside the password field, after it in the focus chain, exposed to AT-SPI as a menu button with its checked entry; it holds the two sessions as a radio group with the default checked, cosmic-comp's entry with its one line "Workspace overview and Alt+Tab". `StartSession`'s `cmd` is the checked entry's path, read when `StartSession` is sent. SN14 revision 5 removes the menu, but in the change that takes cosmic-comp's session off the greeter (`:190`), not in this port.
    - *The order.* OS19 (`doc_own_stack.md:491-494`) and SN14 revision 5 make that change wait for this port, so P3 cannot land together with it.
    - *Today.* The GTK greeter draws the menu when the own compositor's script is installed (`ui.rs#session_menu`; `auth.rs#sessions_offered`). The rig installs no such script, so the committed Orca and AT-SPI references hold no session menu.
    - *What this plan does (maintainer decision, 2026-11-26).* P3 ports the session menu to Sal under SN14 as approved: the same rule, entries, names, focus order and `cmd`. The menu leaves with the SN14 revision 5 change, as the text says, and no amendment is needed. `auth.rs`'s `Session` and its tests stay. P3 merges on its own, and records the Orca and AT-SPI walks that reach the menu as references (section 3.7).
@@ -336,7 +336,7 @@ The last pull request of this plan, P4, retires no entry. The entry this plan re
 
 ## 6. Questions, decided by the maintainer on 2026-11-26
 
-**G1. The grant that admits the greeter to Sulphur's greeter mode** (decision 41 leaves it to this port, `doc_own_stack.md:2231-2262`).
+**G1. The grant that admits the greeter to Sulphur's greeter mode** (decision 41 leaves it to this port, `doc_own_stack.md:2233-2264`).
 - (a) A grant of the mode's own. At start, the compositor reads its own logind session scope from its cgroup, and admits only a client whose executable is `/usr/bin/athanor-greeter-ui` and which runs in that scope. No allow-list line.
 - (b) A fixed-name scope made with `systemd-run --user --scope` in the `greetd` user's manager, named by a line of the shipped allow-list.
 - (c) A `session-*.scope` unit form in OS4's grammar.

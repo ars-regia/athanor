@@ -1,0 +1,16 @@
+[package]
+name = "athanor-preferences-import"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The one-shot import of the user's COSMIC preferences into the preference store, before Sulphur starts (ADR-0150)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+# The store and the import; without its gtk feature.
+athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false }
+athanor-unit = { path = "../athanor-unit" }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

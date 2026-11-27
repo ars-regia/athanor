@@ -22,11 +22,12 @@ athanor-layout-chooser 0
 athanor-lock 1
 athanor-osd 7
 athanor-portal 3
+athanor-preferences-import 0
 athanor-preview 15
 athanor-preview-render 16
 athanor-sal 356
 athanor-search 9
-athanor-services 24
+athanor-services 23
 athanor-sessiond 0
 athanor-settings 0
 athanor-settings-core 1

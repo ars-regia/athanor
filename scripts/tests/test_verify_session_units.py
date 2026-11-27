@@ -215,6 +215,38 @@ class SessionUnitsTest(unittest.TestCase):
         self.assertEqual(problems({}, table=table), [("x-gone.service", "class")])
 
 
+IMPORT = (
+    "[Unit]\nBefore=athanor-sulphur.service\nPartOf=graphical-session.target\n"
+    "[Service]\nType=oneshot\n"
+    "[Install]\nWantedBy=athanor-sulphur.service\n"
+)
+IMPORT_TABLE = dict(TABLE, **{"x-import.service": ("step", False, "compositor-preset")})
+
+
+class CompositorPresetTest(unittest.TestCase):
+    """A unit that runs before the compositor (ADR-0150 point 6)."""
+
+    def run_with(self, unit, enabled=("athanor-bar.service", "x-import.service")):
+        return problems({"x-import.service": unit}, enabled=enabled, table=IMPORT_TABLE)
+
+    def test_a_unit_wanted_by_the_compositor_and_ordered_before_it_passes(self):
+        self.assertEqual(self.run_with(IMPORT), [])
+
+    def test_one_no_preset_enables_fails(self):
+        self.assertEqual(
+            self.run_with(IMPORT, enabled=("athanor-bar.service",)),
+            [("x-import.service", "install")],
+        )
+
+    def test_one_wanted_by_the_session_target_fails(self):
+        unit = IMPORT.replace("WantedBy=athanor-sulphur.service", "WantedBy=athanor-session.target")
+        self.assertIn(("x-import.service", "install"), self.run_with(unit))
+
+    def test_one_not_ordered_before_the_compositor_fails(self):
+        unit = IMPORT.replace("Before=athanor-sulphur.service\n", "")
+        self.assertEqual(self.run_with(unit), [("x-import.service", "order")])
+
+
 class ExemptTest(unittest.TestCase):
     FOUND = [(("x.service", "class"), "RestartSec=30, too slow")]
 

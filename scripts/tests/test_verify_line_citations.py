@@ -587,6 +587,17 @@ class Moved(unittest.TestCase):
         out = self.found(text, hunks, extra=notes, before=reworded)
         self.assertIn("edited or removed: place it again", out[0])
 
+    def test_a_cited_line_that_only_renumbers_a_citation_without_backticks_is_not_an_edit(self):
+        text = "The `note` is at `notes.md:1`."
+        notes = {"notes.md": "| a `note` | (src/x.rs:124); other |\nnext\n"}
+        before = {"notes.md": "| a `note` | (src/x.rs:120); other |\nnext\n"}
+        hunks = {"notes.md": [(1, 1, 1)]}
+        self.assertEqual(self.found(text, hunks, extra=notes, before=before), [])
+        untracked = {"notes.md": "| a `note` | (src/y.rs:124); other |\nnext\n"}
+        was = {"notes.md": "| a `note` | (src/y.rs:120); other |\nnext\n"}
+        out = self.found(text, hunks, extra=untracked, before=was)
+        self.assertIn("edited or removed: place it again", out[0])
+
     def test_a_short_number_after_a_cited_file_counts_as_its_citation_number(self):
         text = "The `note` is at `notes.md:1`."
         now = {"notes.md": "see `src/x.rs:120`, listens on `:9090`\nnext\n"}
