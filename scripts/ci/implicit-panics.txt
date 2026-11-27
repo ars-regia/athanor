@@ -21,6 +21,7 @@ athanor-layout 1
 athanor-layout-chooser 0
 athanor-lock 1
 athanor-osd 7
+athanor-polkit-agent 0
 athanor-portal 3
 athanor-preferences-import 0
 athanor-preview 15

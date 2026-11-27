@@ -317,6 +317,15 @@ item = "OD17"
 purpose = "The Athanor on-screen display: the volume, microphone and brightness keys' overlay on Sal"
 
 [[component]]
+path = "forge/specs/athanor-polkit-agent"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP11"
+purpose = "The polkit authentication agent, written in Sal, and its guard user unit; installed and not enabled until cosmic-osd's retirement (LP18 step 5)"
+
+[[component]]
 path = "forge/specs/athanor-recovery"
 kind = "rpm spec"
 area = "signing-update"
