@@ -7354,14 +7354,14 @@ LINE_CITATIONS_UPSTREAM = {
 
 def sets_other_value(text, token):
     """Whether lines of `text` that are no `#` or `;` comment set the key of the `Key=value` token
-    `token`, and none lists its value among its space-separated values (`CAP_A CAP_B`). Limits: a
-    key inside a longer string (a JSON value), or after a comment that does not start its line,
-    counts as set."""
+    `token`, and none lists its value among its space-separated values (`CAP_A CAP_B`), quoted or
+    not. Limits: a key inside a longer string (a JSON value), after a comment that does not start
+    its line or a `//` comment, or as a named argument of a call (`f(a=1)`), counts as set."""
     if "=" not in token:
         return False
     key, value = token.split("=", 1)
-    settings = re.findall(rf"(?m)^(?![ \t]*[#;]).*?(?<![\w-]){re.escape(key)}=(.*)$", text)
-    return bool(settings) and not any(value in s.split() for s in settings)
+    settings = re.findall(rf"(?m)^(?![ \t]*[#;]).*?(?<![\w.-]){re.escape(key)}=(.*)$", text)
+    return bool(settings) and not any(value in [v.strip("\"'") for v in s.split()] for s in settings)
 
 
 def holds_token(text, token, quoted=False):

@@ -303,6 +303,10 @@ class Names(unittest.TestCase):
         # a value that a setting lists after its first is not another value
         caps = {"unit/f.service": "[Service]\nCapabilityBoundingSet=CAP_A CAP_B\n"}
         self.assertEqual(messages("It keeps `CapabilityBoundingSet=CAP_B` (`unit/f.service:2`).", caps), [])
+        # a quoted value is the value, and a dotted name sets no key of its own
+        quoted = {"unit/g.service": "[Service]\nEnvironment=\"RUST_LOG=info\"\nX.Mode=2\n"}
+        self.assertEqual(messages("It sets `Environment=RUST_LOG=info` (`unit/g.service:2`).", quoted), [])
+        self.assertEqual(messages("It sets `Mode=1` (`unit/g.service:3`).", quoted), [])
 
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
