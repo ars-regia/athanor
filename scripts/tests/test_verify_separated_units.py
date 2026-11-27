@@ -20,6 +20,7 @@ REFUSALS = next(
     for line in SHIPPED.read_text().splitlines()
     if line.startswith("SystemCallFilter=~")
 )
+NBSP = "\N{NO-BREAK SPACE}"
 KEPT = (
     "NoNewPrivileges=yes\nSystemCallArchitectures=native\nSystemCallFilter=@system-service\n"
     + REFUSALS
@@ -132,13 +133,22 @@ class SeparatedUnitsTest(unittest.TestCase):
         # and breaks one of its values.
         text = SHIPPED.read_text()
         for old, new in (
-            ("RestrictAddressFamilies=AF_UNIX\n", "RestrictAddressFamilies=AF_UNIX AF_INET\n"),
-            ("RestrictAddressFamilies=AF_UNIX\n", "RestrictAddressFamilies=AF_UNIX\nRestrictAddressFamilies=AF_NETLINK\n"),
+            (
+                "RestrictAddressFamilies=AF_UNIX\n",
+                "RestrictAddressFamilies=AF_UNIX AF_INET\n",
+            ),
+            (
+                "RestrictAddressFamilies=AF_UNIX\n",
+                "RestrictAddressFamilies=AF_UNIX\nRestrictAddressFamilies=AF_NETLINK\n",
+            ),
             ("RestrictAddressFamilies=AF_UNIX\n", "RestrictAddressFamilies=~AF_INET\n"),
             (REFUSALS, ""),
             (" chmod:EPERM", ""),
             (" removexattrat:EPERM", ""),
-            ("SystemCallFilter=@system-service\n", "SystemCallFilter=@system-service @mount\n"),
+            (
+                "SystemCallFilter=@system-service\n",
+                "SystemCallFilter=@system-service @mount\n",
+            ),
             (REFUSALS, REFUSALS + "SystemCallFilter=chmod\n"),
             ("SystemCallFilter=@system-service\n", "SystemCallFilter=~@mount\n"),
         ):
@@ -162,7 +172,9 @@ class SeparatedUnitsTest(unittest.TestCase):
         self.assertEqual(
             problems(
                 {LOCK: unit(KEPT)},
-                {f"athanor-lock/{LOCK}.d/50-x.conf": "[Service]\nSystemCallFilter=~@mount\n"},
+                {
+                    f"athanor-lock/{LOCK}.d/50-x.conf": "[Service]\nSystemCallFilter=~@mount\n"
+                },
             ),
             [],
         )
@@ -207,7 +219,10 @@ class SeparatedUnitsTest(unittest.TestCase):
         self.assertEqual(
             problems(
                 {LOCK: without},
-                {"zz/service.d/10-allow.conf": allow, f"aa/{LOCK}.d/90-refuse.conf": refuse},
+                {
+                    "zz/service.d/10-allow.conf": allow,
+                    f"aa/{LOCK}.d/90-refuse.conf": refuse,
+                },
             ),
             [],
         )
@@ -215,7 +230,10 @@ class SeparatedUnitsTest(unittest.TestCase):
             len(
                 problems(
                     {LOCK: without},
-                    {f"aa/{LOCK}.d/10-refuse.conf": refuse, "zz/service.d/90-allow.conf": allow},
+                    {
+                        f"aa/{LOCK}.d/10-refuse.conf": refuse,
+                        "zz/service.d/90-allow.conf": allow,
+                    },
                 )
             ),
             1,
@@ -331,10 +349,141 @@ class SeparatedUnitsTest(unittest.TestCase):
             with self.subTest(directory=directory):
                 found = problems(
                     {LOCK: unit(KEPT)},
-                    {f"{DATA}/{directory}/50-x.conf": "[Service]\nRestrictRealtime=yes\n"},
+                    {
+                        f"{DATA}/{directory}/50-x.conf": "[Service]\nRestrictRealtime=yes\n"
+                    },
                 )
                 self.assertEqual(len(found), 1, found)
                 self.assertIn("cannot merge it", found[0])
+
+    def test_words_split_where_systemd_splits_them(self):
+        # A no-break space is not systemd's whitespace: `@chown:EPERM<NBSP>chmod:EPERM` is one
+        # word, which it drops, so neither call is refused.
+        text = SHIPPED.read_text()
+        self.assertEqual(text.count("~@chown:EPERM chmod:EPERM"), 1)
+        found = problems(
+            {
+                LOCK: text.replace(
+                    "~@chown:EPERM chmod:EPERM", f"~@chown:EPERM{NBSP}chmod:EPERM"
+                )
+            }
+        )
+        self.assertEqual(len(found), 2, found)
+        self.assertIn(f"refuses @chown:EPERM{NBSP}chmod:EPERM,", found[0])
+        self.assertIn("refusals missing: @chown, chmod", found[1])
+        # Nor around a key: systemd reads `<NBSP>PrivateTmp` as a key of its own.
+        found = problems({LOCK: unit(KEPT + f"{NBSP}PrivateTmp=yes\n")})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"{NBSP}PrivateTmp=yes", found[0])
+
+    def test_a_refusal_with_an_error_number_other_than_eperm_fails(self):
+        text = SHIPPED.read_text()
+        for word in ("chmod:NOTANERRNO", "chmod:EACCES", "chmod:1", "chmod:"):
+            with self.subTest(word=word):
+                found = problems({LOCK: text.replace(" chmod:EPERM", f" {word}")})
+                self.assertTrue(found, found)
+                self.assertTrue(any(f"refuses {word}," in p for p in found), found)
+        # The negative control: a call alone, or with :EPERM, counts.
+        self.assertEqual(problems({LOCK: text.replace(" chmod:EPERM", " chmod")}), [])
+
+    def test_exec_start_runs_one_plain_command(self):
+        for prefix in ("+", "!", "!!", ":", "-", "@", "|"):
+            with self.subTest(prefix=prefix):
+                found = problems(
+                    {LOCK: unit(KEPT).replace("ExecStart=/", f"ExecStart={prefix}/")}
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("ExecStart=", found[0])
+        for dropin in (
+            "[Service]\nExecStart=\nExecStart=+/usr/bin/athanor-lock\n",
+            "[Service]\nExecStart=/usr/bin/other\n",
+            "[Service]\nExecStart=\n",
+        ):
+            with self.subTest(dropin=dropin):
+                found = problems(
+                    {LOCK: unit(KEPT)}, {f"athanor-lock/{LOCK}.d/50-x.conf": dropin}
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("ExecStart=", found[0])
+        # The negative control: a drop-in that resets the command to another plain one.
+        self.assertEqual(
+            problems(
+                {LOCK: unit(KEPT)},
+                {
+                    f"athanor-lock/{LOCK}.d/50-x.conf": "[Service]\nExecStart=\nExecStart=/usr/libexec/athanor-lock\n"
+                },
+            ),
+            [],
+        )
+
+    def test_files_that_may_ship_an_unnamed_drop_in_fail(self):
+        # The spec writes its drop-in in %install, which no copy shows, and %files ships it
+        # without naming it.
+        install = f"%install\necho '[Service]' > %{{buildroot}}%{{_userunitdir}}/{LOCK}.d/50-x.conf\n"
+        for files in (
+            "%files -f list\n",
+            "%files -n other -f %{name}.files\n",
+            "%files\n%{_prefix}/lib/systemd/user\n",
+            "%files\n%{_userunitdir}/\n",
+            "%files\n/usr/lib/systemd/user/*\n",
+            "%files\n%attr(0644,root,root) /usr/lib/systemd\n",
+            f"%files\n/usr/lib/systemd/user/{LOCK}.d\n",
+            "%files\n/usr/lib/systemd/user/service.d\n",
+            "%files\n%{_libdir}/../lib/systemd/user\n",
+            "%files\n%{_mydir}\n",
+            "%files\n/usr\n",
+        ):
+            with self.subTest(files=files):
+                found = problems({LOCK: unit(KEPT)}, {SPEC: install + files})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(SPEC, found[0])
+                self.assertIn("cannot name or read", found[0])
+        # The negative controls: a list %find_lang writes, a directory listed with %dir, the
+        # unit itself, and paths that lead elsewhere.
+        for files in (
+            "%files -f polkit-1.lang\n",
+            f"%files\n%dir /usr/lib/systemd/user/{LOCK}.d\n%attr(0755,root,root) %dir %{{_userunitdir}}/service.d\n",
+            f"%files\n%{{_userunitdir}}/{LOCK}\n%{{_unitdir}}/x.service\n%{{_datadir}}/x/*\n%license COPYING\n",
+            "%files\n%exclude /usr/lib/systemd/user\n%ghost /usr/lib/systemd/user\n%{_libexecdir}/%{name}\n",
+        ):
+            with self.subTest(files=files):
+                self.assertEqual(
+                    problems(
+                        {LOCK: unit(KEPT)},
+                        {SPEC: f"%install\n%find_lang polkit-1\n{files}"},
+                    ),
+                    [],
+                )
+
+    def test_a_drop_in_that_links_out_of_the_repository_fails(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as away,
+        ):
+            root, outside = pathlib.Path(tmp), pathlib.Path(away) / "50-x.conf"
+            outside.write_text("[Service]\nPrivateTmp=yes\n")
+            data = root / "forge/specs" / DATA
+            tree = data / f"usr/lib/systemd/user/{LOCK}.d"
+            tree.mkdir(parents=True)
+            (tree / "50-x.conf").symlink_to(outside)
+            (data / "20-x.conf").symlink_to(outside)
+            (root / "forge/specs" / SPEC).write_text(
+                f"%install\ninstall -D data/20-x.conf %{{buildroot}}/usr/lib/systemd/user/{LOCK}.d/20-x.conf\n"
+            )
+            found, dropin_problems = verify.separated_unit_dropins(
+                root, {LOCK: unit(KEPT)}
+            )
+        self.assertEqual(found, {LOCK: []})
+        self.assertEqual(len(dropin_problems), 2, dropin_problems)
+        for name in ("20-x.conf", "50-x.conf"):
+            self.assertTrue(
+                any(
+                    f"{LOCK}.d/{name} from forge/specs/{DATA}/" in p
+                    and "a link that leads out of the repository" in p
+                    for p in dropin_problems
+                ),
+                dropin_problems,
+            )
 
     def test_a_continued_line_is_read_whole(self):
         found = problems({LOCK: unit(KEPT + "ReadOnlyPaths=/etc \\\n  /usr\n")})
