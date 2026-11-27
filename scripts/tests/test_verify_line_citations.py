@@ -300,6 +300,9 @@ class Names(unittest.TestCase):
         restart = {"unit/e.service": "[Service]\nRestart=on-failure\n"}
         self.assertEqual(messages("It uses `Restart=on-failure`, not `Restart=always` (`unit/e.service:2`).",
                                   restart), [])
+        # a value that a setting lists after its first is not another value
+        caps = {"unit/f.service": "[Service]\nCapabilityBoundingSet=CAP_A CAP_B\n"}
+        self.assertEqual(messages("It keeps `CapabilityBoundingSet=CAP_B` (`unit/f.service:2`).", caps), [])
 
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
