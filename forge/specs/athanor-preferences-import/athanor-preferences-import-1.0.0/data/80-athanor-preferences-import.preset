@@ -1,0 +1,2 @@
+# ADR-0150 point 6: the import runs before the compositor of every user's session.
+enable athanor-preferences-import.service

@@ -32,6 +32,7 @@ members = [
   "system/athanor-auth",
   "system/athanor-edid",
   "system/athanor-idle",
+  "system/athanor-preferences-import",
   "system/athanor-sessiond",
   "forge/specs/athanor-unlockd/athanor-unlockd-1.0.0",
   "forge/specs/athanor-lock/athanor-lock-1.0.0",
