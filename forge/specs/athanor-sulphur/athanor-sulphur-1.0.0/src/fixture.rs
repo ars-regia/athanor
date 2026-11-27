@@ -188,6 +188,42 @@ mod athanor_workspace_tiling {
     );
 }
 
+/// The client side of athanor-workspace-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_workspace {
+    use wayland_client;
+    use wayland_client::protocol::*;
+    use wayland_protocols::ext::foreign_toplevel_list::v1::client::*;
+    use wayland_protocols::ext::image_capture_source::v1::client::*;
+    use wayland_protocols::ext::workspace::v1::client::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        use wayland_protocols::ext::foreign_toplevel_list::v1::client::__interfaces::*;
+        use wayland_protocols::ext::image_capture_source::v1::client::__interfaces::*;
+        use wayland_protocols::ext::workspace::v1::client::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-sulphur-client/protocols/athanor-workspace-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-sulphur-client/protocols/athanor-workspace-v1.xml"
+    );
+}
+
 /// The client side of athanor-dock-overlap-v1.
 #[allow(
     dead_code,
@@ -437,6 +473,10 @@ struct Client {
     /// The `state` events of every athanor_workspace_tiling_v1 object, in order, `None` for
     /// `removed`.
     tilings: Vec<(ObjectId, Option<u32>)>,
+    /// The events of every athanor_workspace_v1 object, in order.
+    workspace_objects: Vec<(ObjectId, workspace_manager::WorkspaceEvent)>,
+    /// The events of every athanor_workspace_window_v1 object, in order.
+    workspace_windows: Vec<(ObjectId, workspace_manager::WindowEvent)>,
     /// The `overlapped` events of every athanor_dock_overlap_v1 object, in order.
     overlaps: Vec<(ObjectId, u32)>,
     /// The `tier` events of every athanor_material_v1 object, in order.
@@ -1387,7 +1427,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
     athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 \
     zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1 \
-    athanor_dock_overlap_manager_v1 athanor_material_manager_v1\n\
+    athanor_dock_overlap_manager_v1 athanor_material_manager_v1 athanor_workspace_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1 athanor_toplevel_manager_v1 athanor_material_manager_v1\n";
 
@@ -5946,6 +5986,11 @@ mod dock_overlap;
 // Decision 35 and VL13: each output's material tier (athanor-material-v1, `material.rs`).
 #[cfg(test)]
 mod material;
+
+// Decision 32: the overview's workspaces, their windows and a workspace's capture source
+// (athanor-workspace-v1, `workspace_manager.rs`).
+#[cfg(test)]
+mod workspace_manager;
 
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {

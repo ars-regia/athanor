@@ -46,6 +46,10 @@ pub enum Privilege {
     KeyboardGroup,
     /// `athanor_workspace_tiling_manager_v1`: whether each workspace is tiled, read and set.
     WorkspaceTiling,
+    /// `athanor_workspace_manager_v1`: each workspace pinned and moved, each window's workspace
+    /// and place, and a workspace's capture source, the overview's (doc_own_stack.md decision
+    /// 32).
+    WorkspaceControls,
     /// `athanor_dock_overlap_manager_v1`: whether a window covers the dock's rectangle, the
     /// dock's (doc_own_stack.md decision 35).
     DockOverlap,
@@ -68,7 +72,7 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 22] = [
+    const ALL: [(Self, &'static str); 23] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -97,6 +101,7 @@ impl Privilege {
             Self::WorkspaceTiling,
             "athanor_workspace_tiling_manager_v1",
         ),
+        (Self::WorkspaceControls, "athanor_workspace_manager_v1"),
         (Self::DockOverlap, "athanor_dock_overlap_manager_v1"),
         (Self::Material, "athanor_material_manager_v1"),
         (Self::TrustedPrompt, MARK),
