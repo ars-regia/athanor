@@ -334,7 +334,13 @@ impl Bus for SessionBus {
 
     fn run(&mut self, unit: &str, name: &'static str, argv: &[&str]) {
         let auxiliary: Vec<(&str, Vec<(&str, Variant)>)> = Vec::new();
-        let body = (unit, "fail", transient_properties(argv), auxiliary);
+        let mut properties = transient_properties(argv);
+        if name == USER_COMMAND {
+            // A user's line may start a program in the background and let the shell exit, as
+            // `foot &` does: the program outlives the unit's main process.
+            properties.push(("KillMode", Variant::from("process")));
+        }
+        let body = (unit, "fail", properties, auxiliary);
         let sent = self.send(|connection| {
             zbus::block_on(connection.call_method(
                 Some(SYSTEMD),
@@ -390,7 +396,10 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
             Job::Shell(line) => {
                 runs += 1;
                 let unit = unit_name(USER_COMMAND, pid, runs);
-                bus.run(&unit, USER_COMMAND, &["/bin/sh", "-c", line]);
+                // The user manager expands `$` in each word of `ExecStart` and turns `$$` into
+                // `$`: doubled, every `$` reaches the shell as the user wrote it.
+                let line = line.replace('$', "$$");
+                bus.run(&unit, USER_COMMAND, &["/bin/sh", "-c", &line]);
             }
         }
         while pending.len() < QUEUE {
@@ -459,7 +468,7 @@ mod tests {
         fn run(&mut self, unit: &str, name: &'static str, argv: &[&str]) {
             assert!(unit.contains(&name.replace('-', r"\x2d")), "{unit}");
             if name == USER_COMMAND {
-                assert_eq!(argv, ["/bin/sh", "-c", "foot --server"]);
+                assert_eq!(argv, ["/bin/sh", "-c", "foot --title $$HOME"]);
             }
             self.sent.push(name);
         }
@@ -503,11 +512,11 @@ mod tests {
         );
     }
 
-    /// A user's command runs through `/bin/sh -c` at each press, and one asked before the
-    /// session locked is dropped.
+    /// A user's command runs through `/bin/sh -c` at each press, its `$` doubled for the user
+    /// manager, and one asked before the session locked is dropped.
     #[test]
     fn a_users_command_runs_each_press_and_never_from_before_a_lock() {
-        let shell = |epoch| at(Job::Shell("foot --server".to_owned()), epoch);
+        let shell = |epoch| at(Job::Shell("foot --title $HOME".to_owned()), epoch);
         assert_eq!(
             worked(vec![shell(1), shell(1)], 1, None),
             [USER_COMMAND, USER_COMMAND]

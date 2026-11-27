@@ -309,7 +309,10 @@ fn matching(
     locked: bool,
     table: &[(Trigger, Action)],
 ) -> Option<Action> {
-    let table = if locked { DEFAULTS } else { table };
+    // A protected key is read on every sym it matches by, so that a user's binding on the sym a
+    // non-Latin layout gives it (Super+Alt+Cyrillic_ie under a Russian layout) cannot take it.
+    let kept = protected(mods, raw) || latin.is_some_and(|latin| protected(mods, &[latin]));
+    let table = if locked || kept { DEFAULTS } else { table };
     let action = terminal_switch(mods, modified).or_else(|| {
         table
             .iter()
@@ -652,5 +655,27 @@ mod tests {
             "the set of modifiers is exact"
         );
         assert_eq!(plain(SUPER, Keysym::t, false), None);
+    }
+
+    /// A user's binding on the sym a Russian layout gives a protected key does not take it:
+    /// Super+Alt+T reveals, and Super+Alt+A, which no default serves, does nothing.
+    #[test]
+    fn a_user_binding_takes_no_protected_key_by_another_layouts_sym() {
+        let user = [
+            (on(SUPER | ALT, Keysym::Cyrillic_ie), Action::Spawn(0)),
+            (on(SUPER | ALT, Keysym::Cyrillic_ef), Action::Spawn(1)),
+            (on(SUPER, Keysym::Cyrillic_ie), Action::Spawn(2)),
+        ];
+        let russian = |mods, sym, latin| matching(mods, sym, &[sym], Some(latin), false, &user);
+        assert_eq!(
+            russian(SUPER | ALT, Keysym::Cyrillic_ie, Keysym::t),
+            Some(Action::Reveal)
+        );
+        assert_eq!(russian(SUPER | ALT, Keysym::Cyrillic_ef, Keysym::a), None);
+        assert_eq!(
+            russian(SUPER, Keysym::Cyrillic_ie, Keysym::t),
+            Some(Action::Spawn(2)),
+            "an unprotected key is the user's"
+        );
     }
 }

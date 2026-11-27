@@ -158,19 +158,30 @@ pub(super) fn keys(keys: &str) -> Result<String, String> {
     Ok(parts.join("+"))
 }
 
+/// The key names xkbcommon gives the characters of the protected keys.
+const NAMED: &[(&str, &str)] = &[("=", "equal"), ("-", "minus")];
+
+/// The modifiers and the key of canonical `keys`, the key as the compositor resolves it: a
+/// name in any case, a character by its name.
+fn split(keys: &str) -> (&str, String) {
+    let (mods, key) = keys.rsplit_once('+').unwrap_or(("", keys));
+    let key = NAMED.iter().find(|(c, _)| *c == key).map_or(key, |(_, name)| name);
+    (mods, key.to_ascii_lowercase())
+}
+
 /// Whether the canonical `keys` are a protected key of `protected`'s list or a terminal
-/// switch, Ctrl+Alt with F1 to F12 and any other modifier.
+/// switch, Ctrl+Alt with F1 to F12 and any other modifier. The compositor checks again as it
+/// reads, by keysym, and skips a protected key spelled otherwise.
 pub(super) fn protected(keys: &str, protected: &[String]) -> bool {
-    let console = keys.rsplit_once('+').is_some_and(|(mods, key)| {
-        let mods: Vec<&str> = mods.split('+').collect();
-        mods.contains(&"Ctrl")
-            && mods.contains(&"Alt")
-            && key
-                .strip_prefix('F')
-                .and_then(|n| n.parse::<u8>().ok())
-                .is_some_and(|n| (1..=12).contains(&n))
-    });
-    console || protected.iter().any(|p| p == keys)
+    let (mods, key) = split(keys);
+    let held: Vec<&str> = mods.split('+').collect();
+    let console = held.contains(&"Ctrl")
+        && held.contains(&"Alt")
+        && key
+            .strip_prefix('f')
+            .and_then(|n| n.parse::<u8>().ok())
+            .is_some_and(|n| (1..=12).contains(&n));
+    console || protected.iter().any(|p| split(p) == (mods, key.clone()))
 }
 
 /// A command line: not empty, with no control character but a tab or a line feed.
@@ -209,12 +220,12 @@ pub(super) fn binding(table: &Table) -> Result<Table, String> {
         Argument::None => {}
         Argument::Workspace => {
             match table.get("workspace") {
-                Some(Value::Integer(n)) if (0..=255).contains(n) => {
+                Some(Value::Integer(n)) if (1..=255).contains(n) => {
                     out.insert("workspace".to_owned(), Value::Integer(*n))
                 }
                 _ => {
                     return Err(format!(
-                        "{written}: workspace is not a number from 0 to 255"
+                        "{written}: workspace is not a number from 1 to 255"
                     ))
                 }
             };
@@ -468,8 +479,16 @@ mod tests {
 
     #[test]
     fn a_terminal_switch_and_a_listed_key_are_protected() {
-        let list = vec!["Super+Escape".to_owned()];
-        for key in ["Ctrl+Alt+F2", "Super+Ctrl+Alt+F12", "Super+Escape"] {
+        let list = vec!["Super+Escape".to_owned(), "Super+equal".to_owned()];
+        for key in [
+            "Ctrl+Alt+F2",
+            "Super+Ctrl+Alt+F12",
+            "Ctrl+Alt+f2",
+            "Super+Escape",
+            "Super+escape",
+            "Super+=",
+            "Super+EQUAL",
+        ] {
             assert!(protected(key, &list), "{key}");
         }
         for key in [
