@@ -7360,6 +7360,54 @@ LINE_CITATIONS_UPSTREAM = {
     ("doc_osd.md", "src/wayland.rs"): "cosmic-settings-daemon's, not athanor-idle's",
     ("doc_settings.md", "src/state.rs"): "cosmic-comp 1.8.0's, not athanor-sulphur's",
 }
+# The bare file citations that several files end with, each (document, path as written) with how
+# many of them the document holds, as the documents held them when the check came (#1574): they are
+# given a longer path, or listed in LINE_CITATIONS_UPSTREAM when another project's, in a later change.
+# More citations than the count fail as new; fewer fail until the count is lowered (or the entry
+# removed at 0), so the list only shrinks.
+LINE_CITATIONS_AMBIGUOUS = {
+    ("doc_accessibility.md", "src/main.rs"): 3,
+    ("doc_control_center.md", "audio.rs"): 1,
+    ("doc_control_center.md", "battery.rs"): 1,
+    ("doc_control_center.md", "bluetooth.rs"): 1,
+    ("doc_control_center.md", "network.rs"): 1,
+    ("doc_control_center.md", "notifications.rs"): 1,
+    ("doc_first_run.md", "main.rs"): 2,
+    ("doc_languages.md", "auth.rs"): 1,
+    ("doc_languages.md", "clock.rs"): 1,
+    ("doc_languages.md", "main.rs"): 1,
+    ("doc_languages.md", "src/state.rs"): 1,
+    ("doc_languages.md", "ui.rs"): 3,
+    ("doc_lock_and_prompts.md", "auth.rs"): 1,
+    ("doc_lock_and_prompts.md", "src/main.rs"): 2,
+    ("doc_lock_and_prompts.md", "src/state.rs"): 1,
+    ("doc_osd.md", "audio.rs"): 2,
+    ("doc_osd.md", "layer.rs"): 1,
+    ("doc_osd.md", "logind.rs"): 3,
+    ("doc_osd.md", "network.rs"): 1,
+    ("doc_osd.md", "power.rs"): 2,
+    ("doc_osd.md", "src/keyboard_group.rs"): 1,
+    ("doc_osd.md", "src/main.rs"): 2,
+    ("doc_osd.md", "src/render.rs"): 1,
+    ("doc_osd.md", "src/shortcuts.rs"): 1,
+    ("doc_osd.md", "src/text.rs"): 1,
+    ("doc_osd.md", "src/theme.rs"): 1,
+    ("doc_overview.md", "src/main.rs"): 3,
+    ("doc_overview.md", "src/state.rs"): 1,
+    ("doc_portal.md", "main.rs"): 1,
+    ("doc_session.md", "auth.rs"): 1,
+    ("doc_session.md", "layer.rs"): 1,
+    ("doc_session.md", "logind.rs"): 2,
+    ("doc_session.md", "src/main.rs"): 1,
+    ("doc_session.md", "src/state.rs"): 2,
+    ("doc_session.md", "state.rs"): 3,
+    ("doc_session_daemons.md", "src/battery.rs"): 1,
+    ("doc_session_daemons.md", "src/main.rs"): 9,
+    ("doc_session_daemons.md", "src/state.rs"): 1,
+    ("doc_settings.md", "input.rs"): 1,
+    ("doc_settings.md", "shortcuts.rs"): 1,
+    ("doc_update_delivery.md", "build-image.sh"): 2,
+}
 
 
 def sets_other_value(text, token):
@@ -7767,7 +7815,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     (an identifier) leaves that file as it was; a file name that resolves to no file, or a
     citation of one, clears it, and a `:N` after that cites nothing and is not checked. A path resolves as written, then under the crate whose full path the line names
     before it, then by the one tracked file whose path ends with it; a name that several files
-    end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
+    end with (`Cargo.toml`, `battery.rs`) is a finding, with `:N` or `#symbol`: give a longer path. A path that starts with a top-level directory of the
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
     file is a finding, as is a bare `*.md` name that no tracked file ends with. A path that
     `upstream` ({(document, path)}, LINE_CITATIONS_UPSTREAM by default) lists for `doc` is another
@@ -7843,7 +7891,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     span LINE_RANGE_LIMIT or more: a long definition holds more words, and proves less. A `#symbol`
     on a line that names no file before it is a finding; after a name that resolves to no file (code
     outside the repository), it is not checked. A `path#symbol` whose path is the end of several tracked
-    files is a finding ("ambiguous"); a `path:N` of one is not. Trade-off: an upstream crate's
+    files is a finding ("ambiguous"), with `:N` as with `#symbol`, unless LINE_CITATIONS_AMBIGUOUS holds it. Trade-off: an upstream crate's
     `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`; a path that
     `upstream` lists for `doc` is another project's, is not ambiguous, and its `#symbol` is not checked.
 
@@ -7950,8 +7998,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
-                if symbol and named and named not in foreign and len(suffixes.get(named, ())) > 1:
-                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{spec}` is ambiguous: "
+                if named and named not in foreign and len(suffixes.get(named, ())) > 1 and (
+                        symbol or lines_kept is None):
+                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{sep}{spec}` is ambiguous: "
                                 "several files end with it, give a longer path"))
                 if named is None and not named_any and (symbol or lines_kept is not None):
                     out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
@@ -8163,7 +8212,7 @@ def check_line_citations():
         shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{path}"], capture_output=True, text=True)
         return shown.stdout if shown.returncode == 0 else ""  # a file the change adds has no base text
 
-    seen = set()
+    seen, held = set(), collections.Counter()
     for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
                        ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
@@ -8172,12 +8221,22 @@ def check_line_citations():
                 base_file=base_file):
             if spec.startswith("#"):
                 continue  # a citation by name, which symbol-citations checks
+            if "is ambiguous" in problem:
+                held[doc.name, path] += 1
+                if held[doc.name, path] > LINE_CITATIONS_AMBIGUOUS.get((doc.name, path), 0):
+                    r.fail(problem)
+                continue
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
             seen.add((doc.name, path, spec, token, n))
             if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    for (doc, path), listed in sorted(LINE_CITATIONS_AMBIGUOUS.items()):
+        if held[doc, path] < listed:
+            now = held[doc, path]
+            r.fail(f"LINE_CITATIONS_AMBIGUOUS names `{path}` of {doc} {listed} times, and it is ambiguous {now}: "
+                   + (f"lower the count to {now}" if now else "remove the entry"))
     for problem in upstream_citation_problems(ROOT, tracked, LINE_CITATIONS_UPSTREAM):
         r.fail(problem)
     return r
