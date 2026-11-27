@@ -123,7 +123,12 @@ impl State {
             keyboard.input_intercept(source, self, code, key_state, |state, modifiers, handle| {
                 let found = match key_state {
                     // The tiling keys are bound on a tiled workspace only (OS13).
-                    KeyState::Pressed => bindings::find(modifiers, &handle, state.lock.is_some())
+                    KeyState::Pressed => bindings::find(
+                        modifiers,
+                        &handle,
+                        state.lock.is_some(),
+                        state.user_bindings.table(),
+                    )
                         .filter(|action| !action.tiling() || state.keyed_tiled()),
                     KeyState::Released => None,
                 };
@@ -136,7 +141,7 @@ impl State {
                 if !past_grab {
                     let released = key_state == KeyState::Released;
                     let protected = !released
-                        && bindings::find(modifiers, &handle, false)
+                        && bindings::find(modifiers, &handle, false, bindings::DEFAULTS)
                             .is_some_and(|action| action.never_inhibited());
                     state
                         .keyboard_monitor

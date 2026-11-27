@@ -4,6 +4,7 @@
 
 pub mod bar;
 pub mod eis;
+pub mod frontend;
 pub mod input;
 pub mod remote_desktop;
 pub mod screenshot;

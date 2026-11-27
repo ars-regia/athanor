@@ -318,5 +318,32 @@ class Check(unittest.TestCase):
         self.assertEqual(verify.check_symbol_citations().problems, [])
 
 
+class Signatures(unittest.TestCase):
+    def test_a_function_runs_past_a_signature_line_followed_by_a_where_clause(self):
+        # #1565: the `)` line that closes the arguments is not the end of the function.
+        source = (
+            "fn draw<R>(\n    renderer: &mut R,\n    view: &View,\n) -> Result<Out, Err<R::Error>>\n"
+            "where\n    R: Renderer,\n{\n    match view {\n        View::Locked => 1,\n    }\n}\n\n"
+            "fn next() {}\n"
+        )
+        files = {"src/y.rs": source}
+        found = {
+            n: (f, e)
+            for names, f, e in verify.symbol_definitions("src/y.rs", files["src/y.rs"])
+            for n in names
+        }
+        self.assertEqual(found["draw"], (1, 11))
+        self.assertEqual(found["next"], (13, 13))
+
+    def test_a_function_runs_past_a_signature_line_followed_by_its_brace(self):
+        source = "fn draw(\n    view: &View,\n) -> Out\n{\n    1\n}\n"
+        found = {
+            n: (f, e)
+            for names, f, e in verify.symbol_definitions("src/y.rs", source)
+            for n in names
+        }
+        self.assertEqual(found["draw"], (1, 6))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1796,12 +1796,7 @@ def rust_code(text):
             i += 1
     flat = "".join(masked)
     for attr in re.finditer(r"#\[cfg\(test\)\]", flat):
-        start = attr.end()
-        brace, semi = flat.find("{", start), flat.find(";", start)
-        if brace < 0 or 0 <= semi < brace:
-            end = n if semi < 0 else semi + 1
-        else:
-            end = block_end(flat, brace)
+        end = item_end(flat, attr.end())
         blank(code, attr.start(), end)
         blank(masked, attr.start(), end)
     return "".join(code), "".join(masked)
@@ -3328,13 +3323,13 @@ INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
 COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
 # code outside that crate makes the call, written as a method or as a path: athanor-sulphur-
-# client binds the capture globals at the first `Client::capture`, the window actions at the
+# client binds the capture globals of a window at the first `Client::capture` or `Client::capture_pixels`, those of the outputs at the first `Client::capture_outputs`, the window actions at the
 # first action of `Client::window_actions`, the keyboard group at the first
 # `Client::watch_keyboard_group`, athanor-sulphur's accessibility manager at the first
 # `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
-# capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
-# every name of them in the crate. workspaces.rs binds the workspace manager when a client
+# capture.rs, capture/outputs.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and
+# windows.rs hold every name of them in the crate. workspaces.rs binds the workspace manager when a client
 # connects with `Client::connect` or `Client::connect_wayland`, so it counts for a target only
 # when the target's files outside the crate, taken together, name `Client`, under any alias,
 # and call a `::connect` or `::connect_wayland`, in the same file or in another, as an alias
@@ -3347,7 +3342,11 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # type's `::connect` counts, the safe side. connection.rs names no privileged global and counts
 # for every target.
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
-             ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*capture(?:_pixels)?\b|::\s*capture(?:_pixels)?\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/capture/outputs.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*capture_outputs\b|::\s*capture_outputs\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
              ("system/athanor-sulphur-client",
               re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)")),
@@ -3368,11 +3367,13 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               (re.compile(r"\bClient\b"), re.compile(r"::\s*connect(?:_wayland)?\b(?!\s*::)")))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
-# first capture, at the first window action, at the first watch of the keyboard group, at the
+# first capture, at the first capture of the outputs, at the first window action, at the first watch of the keyboard group, at the
 # first watch of the accessibility state, at the first watch of the tiling and at the first watch
 # of the windows. Each names at least one, or the check no longer sees what the client binds.
 CLIENT_BINDS = {"system/athanor-sulphur-client/src/workspaces.rs": "at connect",
                 "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
+                "system/athanor-sulphur-client/src/capture/outputs.rs":
+                "at the first capture of the outputs",
                 "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
                 "system/athanor-sulphur-client/src/keyboard_group.rs":
                 "at the first watch of the keyboard group",
@@ -4605,6 +4606,8 @@ STORE_NAMERS = {
         "the compositor's reader of input.toml (doc_own_stack.md, decision 38)",
     "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/window_settings.rs":
         "the compositor's reader of windows.toml (doc_own_stack.md, decision 38)",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/user_bindings.rs":
+        "the compositor's reader of bindings.toml (doc_own_stack.md, decision 38)",
     "forge/specs/athanor-preferences-import/athanor-preferences-import-1.0.0/data/athanor-preferences-import.service":
         "ConfigurationDirectory= of the import's unit, which makes the directory (ADR-0150 point 6)",
 }
@@ -7354,6 +7357,54 @@ LINE_CITATIONS_UPSTREAM = {
     ("doc_osd.md", "src/wayland.rs"): "cosmic-settings-daemon's, not athanor-idle's",
     ("doc_settings.md", "src/state.rs"): "cosmic-comp 1.8.0's, not athanor-sulphur's",
 }
+# The bare file citations that several files end with, each (document, path as written) with how
+# many of them the document holds, as the documents held them when the check came (#1574): they are
+# given a longer path, or listed in LINE_CITATIONS_UPSTREAM when another project's, in a later change.
+# More citations than the count fail as new; fewer fail until the count is lowered (or the entry
+# removed at 0), so the list only shrinks.
+LINE_CITATIONS_AMBIGUOUS = {
+    ("doc_accessibility.md", "src/main.rs"): 3,
+    ("doc_control_center.md", "audio.rs"): 1,
+    ("doc_control_center.md", "battery.rs"): 1,
+    ("doc_control_center.md", "bluetooth.rs"): 1,
+    ("doc_control_center.md", "network.rs"): 1,
+    ("doc_control_center.md", "notifications.rs"): 1,
+    ("doc_first_run.md", "main.rs"): 2,
+    ("doc_languages.md", "auth.rs"): 1,
+    ("doc_languages.md", "clock.rs"): 1,
+    ("doc_languages.md", "main.rs"): 1,
+    ("doc_languages.md", "src/state.rs"): 1,
+    ("doc_languages.md", "ui.rs"): 3,
+    ("doc_lock_and_prompts.md", "auth.rs"): 1,
+    ("doc_lock_and_prompts.md", "src/main.rs"): 2,
+    ("doc_lock_and_prompts.md", "src/state.rs"): 1,
+    ("doc_osd.md", "audio.rs"): 2,
+    ("doc_osd.md", "layer.rs"): 1,
+    ("doc_osd.md", "logind.rs"): 3,
+    ("doc_osd.md", "network.rs"): 1,
+    ("doc_osd.md", "power.rs"): 2,
+    ("doc_osd.md", "src/keyboard_group.rs"): 1,
+    ("doc_osd.md", "src/main.rs"): 2,
+    ("doc_osd.md", "src/render.rs"): 1,
+    ("doc_osd.md", "src/shortcuts.rs"): 1,
+    ("doc_osd.md", "src/text.rs"): 1,
+    ("doc_osd.md", "src/theme.rs"): 1,
+    ("doc_overview.md", "src/main.rs"): 3,
+    ("doc_overview.md", "src/state.rs"): 1,
+    ("doc_portal.md", "main.rs"): 1,
+    ("doc_session.md", "auth.rs"): 1,
+    ("doc_session.md", "layer.rs"): 1,
+    ("doc_session.md", "logind.rs"): 2,
+    ("doc_session.md", "src/main.rs"): 1,
+    ("doc_session.md", "src/state.rs"): 2,
+    ("doc_session.md", "state.rs"): 3,
+    ("doc_session_daemons.md", "src/battery.rs"): 1,
+    ("doc_session_daemons.md", "src/main.rs"): 9,
+    ("doc_session_daemons.md", "src/state.rs"): 1,
+    ("doc_settings.md", "input.rs"): 1,
+    ("doc_settings.md", "shortcuts.rs"): 1,
+    ("doc_update_delivery.md", "build-image.sh"): 2,
+}
 
 
 def sets_other_value(text, token):
@@ -7504,7 +7555,7 @@ def rust_definitions(rows):
     (`impl Lock`, `impl Drop for Lock`, `impl Dispatch<WlSurface, ()> for Client`).
     An item starts at the attributes and comments right above it and ends on its line when that line
     ends with `;` or `}`, else at the next line of its indent that starts with `}`, `)` or `]` and
-    opens no block. Limit: rustfmt's layout is assumed, and an item-like line inside a string
+    opens no block, unless it is a `)` followed by a `where` clause or a `{` on a line of its own. Limit: rustfmt's layout is assumed, and an item-like line inside a string
     (a raw-string fixture) counts as an item."""
     found = []
     for i, row in enumerate(rows):
@@ -7547,8 +7598,11 @@ def rust_definitions(rows):
                     break
                 if indent_of(rows[j]) == indent:
                     if text[0] in "})]" and not text.endswith("{"):
-                        last = j
-                        break
+                        # A `)` that closes a signature continues into its `where` clause or its `{`.
+                        after = next((r.strip() for r in rows[j + 1:] if r.strip()), "")
+                        if not (text[0] == ")" and after.startswith(("where", "{"))):
+                            last = j
+                            break
                     if not text.startswith(("where", "{", ")", "]", "->")):
                         break
                 last = j
@@ -7761,7 +7815,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     (an identifier) leaves that file as it was; a file name that resolves to no file, or a
     citation of one, clears it, and a `:N` after that cites nothing and is not checked. A path resolves as written, then under the crate whose full path the line names
     before it, then by the one tracked file whose path ends with it; a name that several files
-    end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
+    end with (`Cargo.toml`, `battery.rs`) is a finding, with `:N` or `#symbol`: give a longer path. A path that starts with a top-level directory of the
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
     file is a finding, as is a bare `*.md` name that no tracked file ends with. A path that
     `upstream` ({(document, path)}, LINE_CITATIONS_UPSTREAM by default) lists for `doc` is another
@@ -7837,7 +7891,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     span LINE_RANGE_LIMIT or more: a long definition holds more words, and proves less. A `#symbol`
     on a line that names no file before it is a finding; after a name that resolves to no file (code
     outside the repository), it is not checked. A `path#symbol` whose path is the end of several tracked
-    files is a finding ("ambiguous"); a `path:N` of one is not. Trade-off: an upstream crate's
+    files is a finding ("ambiguous"), with `:N` as with `#symbol`, unless LINE_CITATIONS_AMBIGUOUS holds it. Trade-off: an upstream crate's
     `src/main.rs#main` is reported as ambiguous, and the fix is a longer path or no `#`; a path that
     `upstream` lists for `doc` is another project's, is not ambiguous, and its `#symbol` is not checked.
 
@@ -7944,8 +7998,9 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
-                if symbol and named and named not in foreign and len(suffixes.get(named, ())) > 1:
-                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{spec}` is ambiguous: "
+                if named and named not in foreign and len(suffixes.get(named, ())) > 1 and (
+                        symbol or lines_kept is None):
+                    out.append((number, named, spec, None, f"{doc}:{number}: `{named}{sep}{spec}` is ambiguous: "
                                 "several files end with it, give a longer path"))
                 if named is None and not named_any and (symbol or lines_kept is not None):
                     out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
@@ -8157,7 +8212,7 @@ def check_line_citations():
         shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{path}"], capture_output=True, text=True)
         return shown.stdout if shown.returncode == 0 else ""  # a file the change adds has no base text
 
-    seen = set()
+    seen, held = set(), collections.Counter()
     for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
                        ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
@@ -8166,12 +8221,22 @@ def check_line_citations():
                 base_file=base_file):
             if spec.startswith("#"):
                 continue  # a citation by name, which symbol-citations checks
+            if "is ambiguous" in problem:
+                held[doc.name, path] += 1
+                if held[doc.name, path] > LINE_CITATIONS_AMBIGUOUS.get((doc.name, path), 0):
+                    r.fail(problem)
+                continue
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
             seen.add((doc.name, path, spec, token, n))
             if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    for (doc, path), listed in sorted(LINE_CITATIONS_AMBIGUOUS.items()):
+        if held[doc, path] < listed:
+            now = held[doc, path]
+            r.fail(f"LINE_CITATIONS_AMBIGUOUS names `{path}` of {doc} {listed} times, and it is ambiguous {now}: "
+                   + (f"lower the count to {now}" if now else "remove the entry"))
     for problem in upstream_citation_problems(ROOT, tracked, LINE_CITATIONS_UPSTREAM):
         r.fail(problem)
     return r

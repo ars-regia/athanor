@@ -60,6 +60,7 @@ mod toplevel_state;
 mod touch;
 mod xkb_config;
 mod udev;
+mod user_bindings;
 mod window_settings;
 mod winit;
 mod wl_drm;
@@ -203,6 +204,7 @@ pub fn run() -> Result<(), Error> {
     input_settings::start(&mut state, &event_loop.handle());
     // The user's window settings: the active window's hint (decision 38).
     window_settings::start(&mut state, &event_loop.handle());
+    user_bindings::start(&mut state, &event_loop.handle());
     // The workspace slide's direction, read from the bar's catalog before the first frame.
     workspace::slide::settle_direction();
     let socket = state::listen(&event_loop.handle())?;

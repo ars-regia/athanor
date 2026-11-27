@@ -18,6 +18,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::cosmic_config;
+use crate::store::{self, Error, Store};
+use toml::{Table, Value};
 
 /// The prefix of the per-page desktop entries cosmic-settings ships.
 pub const SETTINGS_PAGE_PREFIX: &str = "com.system76.CosmicSettings.";
@@ -480,6 +482,235 @@ pub fn parse(text: &str) -> Result<Vec<(String, String)>, String> {
     if s.rest.is_empty() { Ok(entries) } else { Err("text after the map".to_owned()) }
 }
 
+mod grammar;
+
+/// The user's key bindings in the store (`doc_own_stack.md` decision 38): `[[binding]]`
+/// tables, each with `keys` in COSMIC's form, a snake-case `action` after COSMIC's and its
+/// argument under its own key, and `[system_actions]`, a system action's command line. This
+/// module is the file's one writer; the compositor reads it (`src/user_bindings.rs`).
+pub const FILE: &str = "bindings.toml";
+
+/// The compositor's defaults in the form of `FILE`, the keys no user binding takes, and
+/// Athanor's own one-time writes into COSMIC's files; a test of athanor-sulphur compares the
+/// defaults with its table both ways.
+const OS13: &str = include_str!("../data/os13-bindings.toml");
+
+/// `OS13` read: the default bindings and Athanor's COSMIC bindings, each checked, the
+/// protected keys and Athanor's COSMIC system actions.
+struct Os13 {
+    bindings: Vec<Table>,
+    protected: Vec<String>,
+    systems: Table,
+}
+
+fn os13() -> Os13 {
+    let read = || -> Result<Os13, String> {
+        let table: Table = toml::from_str(OS13).map_err(|err| err.to_string())?;
+        let tables = |value: Option<&Value>| -> Result<Vec<Table>, String> {
+            value
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|value| value.as_table().ok_or("a binding that is not a table".to_owned()))
+                .map(|table| table.and_then(grammar::binding))
+                .collect()
+        };
+        let cosmic = table.get("cosmic").and_then(Value::as_table);
+        let mut bindings = tables(table.get("binding"))?;
+        bindings.extend(tables(cosmic.and_then(|c| c.get("binding")))?);
+        let protected = table
+            .get("protected")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|key| key.as_str().ok_or("a protected key that is not a string".to_owned()))
+            .map(|key| key.and_then(grammar::keys))
+            .collect::<Result<_, _>>()?;
+        let systems = cosmic
+            .and_then(|c| c.get("system_actions"))
+            .and_then(Value::as_table)
+            .cloned()
+            .unwrap_or_default();
+        Ok(Os13 { bindings, protected, systems })
+    };
+    read().unwrap_or_else(|reason| {
+        tracing::error!("the compiled-in defaults of {FILE} do not read: {reason}");
+        Os13 { bindings: Vec::new(), protected: Vec::new(), systems: Table::new() }
+    })
+}
+
+/// The `[[binding]]` array of the file, started when absent.
+fn bindings_mut<'t>(path: &Path, table: &'t mut Table) -> Result<&'t mut Vec<Value>, Error> {
+    table
+        .entry("binding")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| Error::Refused {
+            path: path.to_owned(),
+            reason: "binding is not an array of tables".to_owned(),
+        })
+}
+
+/// Whether the binding `value` is on `keys` (canonical) and `keycode`.
+fn on_keys(value: &Value, keys: &str, keycode: Option<&Value>) -> bool {
+    let Some(table) = value.as_table() else {
+        return false;
+    };
+    let written = table.get("keys").and_then(Value::as_str);
+    written.is_some_and(|w| grammar::keys(w).is_ok_and(|w| w == keys))
+        && table.get("keycode") == keycode
+}
+
+/// Binds `binding`, a `[[binding]]` table, in place of the user's binding on the same keys.
+/// One the grammar refuses, or on a protected key, is refused and nothing is written; every
+/// other binding, and every other key of the file, is kept.
+pub fn bind(store: &Store, binding: &Table) -> Result<(), Error> {
+    store.update(FILE, |path, table| {
+        let refuse = |reason: String| Error::Refused { path: path.to_owned(), reason };
+        let binding = grammar::binding(binding).map_err(refuse)?;
+        let keys = binding.get("keys").and_then(Value::as_str).unwrap_or_default().to_owned();
+        if grammar::protected(&keys, &os13().protected) {
+            return Err(refuse(format!("{keys} is a protected key")));
+        }
+        let list = bindings_mut(path, table)?;
+        list.retain(|other| !on_keys(other, &keys, binding.get("keycode")));
+        list.push(Value::Table(binding));
+        Ok(())
+    })
+}
+
+/// Removes the user's bindings on `keys` without a key code, so that the default applies.
+pub fn unbind(store: &Store, keys: &str) -> Result<(), Error> {
+    store.update(FILE, |path, table| {
+        let keys = grammar::keys(keys)
+            .map_err(|reason| Error::Refused { path: path.to_owned(), reason })?;
+        bindings_mut(path, table)?.retain(|other| !on_keys(other, &keys, None));
+        Ok(())
+    })
+}
+
+/// Sets the command line of the system action `system`, a snake-case name of COSMIC's, or
+/// removes it with `None`. The lock's and the screen reader's are refused (decision 30).
+pub fn set_command(store: &Store, system: &str, command: Option<&str>) -> Result<(), Error> {
+    store.update(FILE, |path, table| {
+        let refuse = |reason: String| Error::Refused { path: path.to_owned(), reason };
+        if !grammar::SYSTEMS.contains(&system) {
+            return Err(refuse(format!("{system} is not a system action")));
+        }
+        if grammar::KEPT_SYSTEMS.contains(&system) {
+            return Err(refuse(format!("the command of {system} is not the user's to replace")));
+        }
+        let commands = store::table_mut(path, table, "system_actions")?;
+        match command {
+            Some(line) => {
+                grammar::command(line).map_err(refuse)?;
+                commands.insert(system.to_owned(), Value::String(line.to_owned()));
+            }
+            None => {
+                commands.remove(system);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Imports the user's COSMIC bindings under `cosmic`, their `custom` and `system_actions`
+/// copies, into `FILE` (ADR-0150 points 6 to 8): `kept` when the file exists, `absent` without
+/// either copy, `refused` when a copy cannot be read or its shape followed. Of the rest every
+/// entry the grammar takes is imported, but those equal to a default, Athanor's own writes,
+/// and those on a protected key or of the lock's or the screen reader's command, each logged.
+pub(crate) fn import(locked: &store::Locked<'_>, cosmic: Option<&Path>) -> Result<&'static str, Error> {
+    if locked.read(FILE)?.is_some() {
+        return Ok("kept");
+    }
+    let Some(cosmic) = cosmic else {
+        return Ok("absent");
+    };
+    let dirs = [cosmic.to_owned()];
+    let (custom, systems) = match (
+        cosmic_config::key(&dirs, COMPONENT, CUSTOM_KEY),
+        cosmic_config::key(&dirs, COMPONENT, KEY),
+    ) {
+        (Ok(custom), Ok(systems)) => (custom, systems),
+        (Err(err), _) | (_, Err(err)) => {
+            tracing::warn!("the COSMIC bindings are not imported: {err}");
+            return Ok("refused");
+        }
+    };
+    if custom.is_none() && systems.is_none() {
+        return Ok("absent");
+    }
+    let os13 = os13();
+    let default = |binding: &Table| {
+        let mut bare = binding.clone();
+        bare.remove("description");
+        os13.bindings.contains(&bare)
+    };
+    let mut bindings = Vec::new();
+    if let Some(text) = custom {
+        let entries = match grammar::custom(&text) {
+            Ok(entries) => entries,
+            Err(reason) => {
+                tracing::warn!("COSMIC's {CUSTOM_KEY} is not imported: {reason}");
+                return Ok("refused");
+            }
+        };
+        for entry in entries {
+            let checked = entry.and_then(|fields| grammar::binding(&fields)).and_then(|binding| {
+                let keys = binding.get("keys").and_then(Value::as_str).unwrap_or_default();
+                if grammar::protected(keys, &os13.protected) {
+                    Err(format!("{keys} is a protected key"))
+                } else {
+                    Ok(binding)
+                }
+            });
+            match checked {
+                Ok(binding) if default(&binding) => {}
+                Ok(binding) => bindings.push(Value::Table(binding)),
+                Err(reason) => tracing::warn!("a COSMIC binding is not imported: {reason}"),
+            }
+        }
+    }
+    let mut commands = Table::new();
+    if let Some(text) = systems {
+        let entries = match parse(&text) {
+            Ok(entries) => entries,
+            Err(reason) => {
+                tracing::warn!("COSMIC's {KEY} is not imported: {reason}");
+                return Ok("refused");
+            }
+        };
+        for (name, line) in entries {
+            let checked = match grammar::system(&name) {
+                None => Err(format!("{name} is not a system action")),
+                Some(system) if grammar::KEPT_SYSTEMS.contains(&system) => {
+                    Err(format!("the command of {system} is not the user's to replace"))
+                }
+                Some(system) => grammar::command(&line).map(|()| system),
+            };
+            match checked {
+                Ok(system) if os13.systems.get(system).and_then(Value::as_str) == Some(&line) => {}
+                Ok(system) => {
+                    commands.insert(system.to_owned(), Value::String(line));
+                }
+                Err(reason) => tracing::warn!("a COSMIC system action is not imported: {reason}"),
+            }
+        }
+    }
+    if !bindings.is_empty() || !commands.is_empty() {
+        locked.update(FILE, |_, table| {
+            if !bindings.is_empty() {
+                table.insert("binding".to_owned(), Value::Array(bindings));
+            }
+            if !commands.is_empty() {
+                table.insert("system_actions".to_owned(), Value::Table(commands));
+            }
+            Ok(())
+        })?;
+    }
+    Ok("imported")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,5 +1022,149 @@ mod tests {
 
     fn set_in_custom(path: &Path, marker: &Path) -> Option<Binding> {
         once(marker, || bind_custom(path, &["Super"], "c", CC)).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+    use crate::store::tests::scratch;
+
+    fn table(text: &str) -> Table {
+        toml::from_str(text).expect("toml")
+    }
+
+    fn written(dir: &Path) -> Table {
+        table(&fs::read_to_string(dir.join(FILE)).expect("read"))
+    }
+
+    /// The compiled-in copy reads whole: 81 defaults and Athanor's Super+C, eight protected
+    /// keys, the launcher's command.
+    #[test]
+    fn the_defaults_copy_reads() {
+        let os13 = os13();
+        assert_eq!(os13.bindings.len(), 82);
+        assert_eq!(os13.protected.len(), 8);
+        assert!(os13.systems.contains_key("launcher"));
+    }
+
+    /// A binding replaces the user's on the same keys, in any spelling, and keeps every other
+    /// binding and key; `unbind` and `set_command` change their own entry alone.
+    #[test]
+    fn the_writer_keeps_what_it_does_not_change() {
+        let dir = scratch("bindings-write");
+        fs::write(
+            dir.join(FILE),
+            "schema = 1\nfuture = 3\n[[binding]]\nkeys = \"Super+b\"\naction = \"close\"\n",
+        )
+        .expect("seed");
+        let store = Store::at(dir.clone());
+        bind(&store, &table("keys = \"super+T\"\naction = \"spawn\"\ncommand = \"foot\"")).expect("bind");
+        bind(&store, &table("keys = \"Super+t\"\naction = \"spawn\"\ncommand = \"kitty\"")).expect("rebind");
+        set_command(&store, "terminal", Some("foot")).expect("command");
+        let file = written(&dir);
+        assert_eq!(file["future"].as_integer(), Some(3));
+        let list = file["binding"].as_array().expect("bindings");
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!(list[1]["keys"].as_str(), Some("Super+t"));
+        assert_eq!(list[1]["command"].as_str(), Some("kitty"));
+        assert_eq!(file["system_actions"]["terminal"].as_str(), Some("foot"));
+        unbind(&store, "Super+T").expect("unbind");
+        set_command(&store, "terminal", None).expect("remove");
+        let file = written(&dir);
+        assert_eq!(file["binding"].as_array().map(Vec::len), Some(1));
+        assert!(file["system_actions"].as_table().is_some_and(Table::is_empty));
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// A malformed binding, a protected key, the lock's and the screen reader's commands are
+    /// refused, and nothing is written.
+    #[test]
+    fn the_writer_refuses_and_writes_nothing() {
+        let dir = scratch("bindings-refuse");
+        let store = Store::at(dir.clone());
+        for bad in [
+            "keys = \"Super+q\"\naction = \"explode\"",
+            "keys = \"Super+Escape\"\naction = \"spawn\"\ncommand = \"foot\"",
+            "keys = \"Ctrl+Alt+F3\"\naction = \"close\"",
+            "keys = \"alt+super+T\"\naction = \"disable\"",
+        ] {
+            let result = bind(&store, &table(bad));
+            assert!(matches!(result, Err(Error::Refused { .. })), "{bad}: {result:?}");
+        }
+        for system in ["lock_screen", "screen_reader", "rocket"] {
+            assert!(set_command(&store, system, Some("true")).is_err(), "{system}");
+        }
+        assert!(set_command(&store, "terminal", Some("a\u{0}b")).is_err());
+        assert!(!dir.join(FILE).exists(), "nothing written");
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// The COSMIC directory of a test, with `custom` and `system_actions` copies.
+    fn cosmic(dir: &Path, custom: Option<&str>, systems: Option<&str>) -> PathBuf {
+        let cosmic = dir.join("cosmic");
+        let keys = cosmic_config::component(&cosmic, COMPONENT);
+        fs::create_dir_all(&keys).expect("dirs");
+        for (name, text) in [(CUSTOM_KEY, custom), (KEY, systems)] {
+            if let Some(text) = text {
+                fs::write(keys.join(name), text).expect("copy");
+            }
+        }
+        cosmic
+    }
+
+    /// The import takes every entry that reads, and drops one equal to a default, Athanor's
+    /// own writes, a protected key, the lock's command and an entry it cannot read.
+    #[test]
+    fn the_import_takes_the_users_entries_alone() {
+        let dir = scratch("bindings-import");
+        let custom = r#"{
+            (modifiers: [Super], key: "t"): Spawn("foot"),
+            (modifiers: [Super], key: "q"): Disable,
+            (modifiers: [Super], key: "1"): Workspace(1),
+            (modifiers: [Super], key: "c"): Spawn("busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 Toggle"),
+            (modifiers: [Ctrl, Alt], key: "F2"): Spawn("foot"),
+            (modifiers: [Super], key: "y"): Explode,
+            (modifiers: [Super], key: "m"): Maximize,
+        }"#;
+        let systems = r#"{
+            Terminal: "kitty",
+            LockScreen: "true",
+            Launcher: "gdbus call --session --dest os.athanor.Launcher1 --object-path /os/athanor/Launcher1 --method os.athanor.Launcher1.Show",
+            Rocket: "boom",
+        }"#;
+        let cosmic = cosmic(&dir, Some(custom), Some(systems));
+        let store = Store::at(dir.join("store"));
+        let locked = store.lock().expect("lock");
+        assert_eq!(import(&locked, Some(&cosmic)).expect("import"), "imported");
+        let file = written(store.dir());
+        let keys: Vec<&str> = file["binding"]
+            .as_array()
+            .expect("bindings")
+            .iter()
+            .filter_map(|b| b["keys"].as_str())
+            .collect();
+        assert_eq!(keys, ["Super+t", "Super+q", "Super+m"]);
+        let commands = file["system_actions"].as_table().expect("commands");
+        assert_eq!(commands.len(), 1, "{commands:?}");
+        assert_eq!(commands["terminal"].as_str(), Some("kitty"));
+        assert_eq!(import(&locked, Some(&cosmic)).expect("again"), "kept");
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn the_import_outcomes() {
+        let dir = scratch("bindings-outcomes");
+        let store = Store::at(dir.join("store"));
+        let locked = store.lock().expect("lock");
+        assert_eq!(import(&locked, None).expect("no directory"), "absent");
+        let empty = cosmic(&dir, None, None);
+        assert_eq!(import(&locked, Some(&empty)).expect("no copies"), "absent");
+        let bad = cosmic(&dir, Some("{ (modifiers: [Super], key: \"t\") Close }"), None);
+        assert_eq!(import(&locked, Some(&bad)).expect("malformed"), "refused");
+        let defaults = cosmic(&dir, Some("{ (modifiers: [Super], key: \"q\"): Close }"), None);
+        assert_eq!(import(&locked, Some(&defaults)).expect("defaults only"), "imported");
+        assert!(!store.dir().join(FILE).exists(), "nothing to write");
+        fs::remove_dir_all(dir).expect("cleanup");
     }
 }
