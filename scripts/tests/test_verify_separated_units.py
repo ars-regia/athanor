@@ -473,6 +473,10 @@ class SeparatedUnitsTest(unittest.TestCase):
             f"%files\n/usr/lib/systemd/use?/{LOCK}.d/*\n",
             "%files\n%artifact /usr/lib/systemd\n",
             "%files\n%artifact /usr/share/x\n",
+            "%files\n%elfoo\n",
+            "%files\n%iffy\n",
+            "%files\n%(echo /usr/lib/systemd/user)\n",
+            "%files\n%[ 1 ]\n",
         ):
             with self.subTest(files=files):
                 found = problems({LOCK: unit(KEPT)}, {SPEC: install + files})
@@ -496,6 +500,30 @@ class SeparatedUnitsTest(unittest.TestCase):
                     ),
                     [],
                 )
+
+    def test_a_redefined_directory_macro_fails(self):
+        # separated-units reads the directory macros as Fedora's values: a spec that
+        # redefines one could ship a drop-in under it unread.
+        for define, macro in (
+            ("%global _libdir /usr/lib/systemd/user", "%{_libdir}"),
+            ("%define _datadir /usr/lib/systemd/user", "%{_datadir}"),
+        ):
+            with self.subTest(define=define):
+                found = problems(
+                    {LOCK: unit(KEPT)},
+                    {SPEC: f"{define}\n%install\n%files\n{macro}/x\n"},
+                )
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(SPEC, found[0])
+                self.assertIn(f"redefines {macro}", found[0])
+        # The negative control: another macro whose name begins the same way.
+        self.assertEqual(
+            problems(
+                {LOCK: unit(KEPT)},
+                {SPEC: "%global _libdir_extra /x\n%install\n%files\n%{_libdir}/x\n"},
+            ),
+            [],
+        )
 
     def test_a_drop_in_that_links_out_of_the_repository_fails(self):
         with (

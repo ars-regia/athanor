@@ -6152,9 +6152,10 @@ def copied_source(root, spec, word):
 # may stand in %files (spec_files_covering); any other %word there fails closed.
 FILES_SKIPPED = re.compile(r"%(?:dir|exclude|ghost)\s")
 FILES_QUALIFIERS = re.compile(r"^(?:%(?:attr|config|verify|defattr|lang|caps|doc|license)(?:\([^)]*\))?(?:\s+|$))+")
-FILES_CONDITIONALS = re.compile(r"%(?:if\w*|el\w*|endif)\b")
+FILES_CONDITIONALS = re.compile(r"%(?:if|ifarch|ifnarch|ifos|ifnos|elif|elifarch|elifnarch|elifos|elifnos|else|endif)\b")
 # Fedora's values of the directory macros that specs list in %files; another macro there reads
-# as a glob that matches anything (spec_files_covering).
+# as a glob that matches anything (spec_files_covering), and a spec that redefines one of these
+# fails (separated_unit_dropins).
 FILES_DIRS = {"%{_libdir}": "/usr/lib64", "%{_datadir}": "/usr/share", "%{_unitdir}": "/usr/lib/systemd/system",
               "%{_sysusersdir}": "/usr/lib/sysusers.d", "%{_tmpfilesdir}": "/usr/lib/tmpfiles.d"}
 
@@ -6162,7 +6163,7 @@ FILES_DIRS = {"%{_libdir}": "/usr/lib64", "%{_datadir}": "/usr/share", "%{_unitd
 def spec_files_covering(text, directories):
     """Each %files line of a spec that may ship a file into one of `directories` (paths on the
     installed system) without naming it: a list read with -f, unless %find_lang writes it,
-    which names translations alone; a line led by a %word it does not know; and a path, not
+    which names translations alone; a line led by a %word it does not know, %( or %[; and a path, not
     with %dir, %exclude or %ghost, that is one of them or a directory above one, a glob that
     matches one of those or a file in one, a macro that installed_path leaves read as a glob
     that matches anything, or that climbs with `..`."""
@@ -6181,7 +6182,7 @@ def spec_files_covering(text, directories):
         path = FILES_QUALIFIERS.sub("", line)
         if not in_files or not path or line.startswith("#") or FILES_SKIPPED.match(path) or FILES_CONDITIONALS.match(path):
             continue
-        if re.match(r"%[A-Za-z]", path):
+        if re.match(r"%[A-Za-z(\[]", path):
             found.append(line)
             continue
         path = installed_path(path)
@@ -6224,6 +6225,9 @@ def separated_unit_dropins(root, units, separated=SEPARATED_USER_UNITS):
     for spec in sorted(root.glob("forge/specs/*/*.spec")):
         spec_text, where = read(spec), spec.relative_to(root).as_posix()
         if every:
+            for macro in FILES_DIRS:
+                if re.search(rf"^\s*%(?:global|define)\s+{macro[2:-1]}\b", spec_text, re.M):
+                    problems.append(f"{where}: redefines {macro}, which separated-units reads in %files as Fedora's {FILES_DIRS[macro]}, so a drop-in of a separated unit may ship under it unread; keep Fedora's value")
             for line in spec_files_covering(spec_text, targets):
                 problems.append(f"{where}: `{line}` in %files may ship a drop-in of a separated unit that separated-units cannot name or read; list each file of {', '.join(targets)} plainly")
         copies = {}
