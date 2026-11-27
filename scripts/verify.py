@@ -1796,12 +1796,7 @@ def rust_code(text):
             i += 1
     flat = "".join(masked)
     for attr in re.finditer(r"#\[cfg\(test\)\]", flat):
-        start = attr.end()
-        brace, semi = flat.find("{", start), flat.find(";", start)
-        if brace < 0 or 0 <= semi < brace:
-            end = n if semi < 0 else semi + 1
-        else:
-            end = block_end(flat, brace)
+        end = item_end(flat, attr.end())
         blank(code, attr.start(), end)
         blank(masked, attr.start(), end)
     return "".join(code), "".join(masked)
