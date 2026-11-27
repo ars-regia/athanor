@@ -7353,8 +7353,12 @@ LINE_CITATIONS_UPSTREAM = {
 
 
 def sets_key(text, token):
-    """Whether `text` sets the key of the `Key=value` token `token`, to any value."""
-    return "=" in token and re.search(rf"(?<![\w-]){re.escape(token.split('=', 1)[0])}=", text) is not None
+    """Whether a line of `text` that is no `#` or `;` comment sets the key of the `Key=value` token
+    `token`, to any value. Limit: a key inside a longer string (a JSON value) counts as set."""
+    if "=" not in token:
+        return False
+    key = re.escape(token.split("=", 1)[0])
+    return re.search(rf"(?m)^(?![ \t]*[#;]).*(?<![\w-]){key}=", text) is not None
 
 
 def holds_token(text, token, quoted=False):
@@ -8042,9 +8046,13 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
             quoted = path.endswith(".json")
             def usable(items):
                 # a setting is a token whole, though its value names a file (`WantedBy=a.target`),
-                # and stays one while the file sets its key, so a changed value is a finding
-                return [i for i in sorted(items) if ("=" in i[2] or not FILE_LIKE.search(i[2])) and i[2] not in own
-                        and (holds_token(body, i[2], quoted) or sets_key(body, i[2]))]
+                # and stays one while the file sets its key, so a changed value is a finding, unless
+                # another setting of the sentence with that key is held (`a=1`, not `a=2`). Limit: a
+                # value the sentence names only as an example of what the file does not set is a finding
+                kept = [i for i in sorted(items) if ("=" in i[2] or not FILE_LIKE.search(i[2])) and i[2] not in own]
+                held_keys = {i[2].split("=", 1)[0] for i in kept if "=" in i[2] and holds_token(body, i[2], quoted)}
+                return [i for i in kept if holds_token(body, i[2], quoted)
+                        or (sets_key(body, i[2]) and i[2].split("=", 1)[0] not in held_keys)]
 
             tokens = usable(found)
             if listed:
@@ -8099,7 +8107,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             "it by symbol (`path#name`)"))
             elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
                 why = (f"the file sets `{missing.split('=', 1)[0]}` to another value"
-                       if not holds_token(body, missing, quoted) else "the lines moved")
+                       if not holds_token(body, missing, quoted) and sets_key(body, missing) else "the lines moved")
                 out.append((number, path, spec, missing, f"{doc}:{number}: `{path}{sep}{spec}` does not hold "
                             f"`{missing}`, which its sentence names: {why}"))
     return out

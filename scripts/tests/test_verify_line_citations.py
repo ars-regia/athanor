@@ -191,6 +191,7 @@ class Lists(unittest.TestCase):
                 out = self.found(text)
                 self.assertEqual(len(out), 1)
                 self.assertIn("does not hold `gone-pkg`", out[0])
+                self.assertIn("the lines moved", out[0])
 
     def test_a_name_of_another_clause_is_not_part_of_the_run(self):
         self.assertEqual(self.found(f"The `nix` ships in `cosmic-osd` (`{self.PJ}:2`)."), [])
@@ -292,6 +293,13 @@ class Names(unittest.TestCase):
         self.assertIn("the file sets `ProtectSystem` to another value", out[0])
         # a key that the file does not set is no token, as before
         self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/c.service:2`).", unit), [])
+        # a key set only in a comment is not set
+        commented = {"unit/d.service": "[Service]\n# ProtectHome=read-only\nProtectSystem=full\n"}
+        self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/d.service:3`).", commented), [])
+        # a value the sentence sets against the held one is no finding
+        restart = {"unit/e.service": "[Service]\nRestart=on-failure\n"}
+        self.assertEqual(messages("It uses `Restart=on-failure`, not `Restart=always` (`unit/e.service:2`).",
+                                  restart), [])
 
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
