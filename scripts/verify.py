@@ -7362,6 +7362,18 @@ LINE_CITATIONS_UPSTREAM = {
 }
 
 
+def sets_other_value(text, token):
+    """Whether lines of `text` that are no `#` or `;` comment set the key of the `Key=value` token
+    `token`, and none lists its value among its space-separated values (`CAP_A CAP_B`), quoted or
+    not. Limits: a key inside a longer string (a JSON value), after a comment that does not start
+    its line or a `//` comment, or as a named argument of a call (`f(a=1)`), counts as set."""
+    if "=" not in token:
+        return False
+    key, value = token.split("=", 1)
+    settings = re.findall(rf"(?m)^(?![ \t]*[#;]).*?(?<![\w.-]){re.escape(key)}=(.*)$", text)
+    return bool(settings) and not any(value in [v.strip("\"'") for v in s.split()] for s in settings)
+
+
 def holds_token(text, token, quoted=False):
     """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
     inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open. With
@@ -8046,9 +8058,14 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                         continue
             quoted = path.endswith(".json")
             def usable(items):
-                # a setting is a token whole, though its value names a file (`WantedBy=a.target`)
-                return [i for i in sorted(items) if ("=" in i[2] or not FILE_LIKE.search(i[2])) and i[2] not in own
-                        and holds_token(body, i[2], quoted)]
+                # a setting is a token whole, though its value names a file (`WantedBy=a.target`),
+                # and stays one while the file sets its key, so a changed value is a finding, unless
+                # another setting of the sentence with that key is held (`a=1`, not `a=2`). Limit: a
+                # value the sentence names only as an example of what the file does not set is a finding
+                kept = [i for i in sorted(items) if ("=" in i[2] or not FILE_LIKE.search(i[2])) and i[2] not in own]
+                held_keys = {i[2].split("=", 1)[0] for i in kept if "=" in i[2] and holds_token(body, i[2], quoted)}
+                return [i for i in kept if holds_token(body, i[2], quoted)
+                        or (sets_other_value(body, i[2]) and i[2].split("=", 1)[0] not in held_keys)]
 
             tokens = usable(found)
             if listed:
@@ -8102,8 +8119,10 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             "that the cited lines hold: name what it cites in backticks in its sentence, or cite "
                             "it by symbol (`path#name`)"))
             elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
+                why = (f"the file sets `{missing.split('=', 1)[0]}` to another value"
+                       if not holds_token(body, missing, quoted) and sets_other_value(body, missing) else "the lines moved")
                 out.append((number, path, spec, missing, f"{doc}:{number}: `{path}{sep}{spec}` does not hold "
-                            f"`{missing}`, which its sentence names: the lines moved"))
+                            f"`{missing}`, which its sentence names: {why}"))
     return out
 
 

@@ -191,6 +191,7 @@ class Lists(unittest.TestCase):
                 out = self.found(text)
                 self.assertEqual(len(out), 1)
                 self.assertIn("does not hold `gone-pkg`", out[0])
+                self.assertIn("the lines moved", out[0])
 
     def test_a_name_of_another_clause_is_not_part_of_the_run(self):
         self.assertEqual(self.found(f"The `nix` ships in `cosmic-osd` (`{self.PJ}:2`)."), [])
@@ -284,6 +285,28 @@ class Names(unittest.TestCase):
         # known leniency, #1553: a comment that holds the whole setting holds it
         unit = {"unit/b.service": "[Service]\n# ProtectSystem=strict below\nProtectSystem=strict\n"}
         self.assertEqual(messages("It sets `ProtectSystem=strict` (`unit/b.service:2`).", unit), [])
+
+    def test_a_setting_whose_value_changed_is_a_finding(self):
+        unit = {"unit/c.service": "[Service]\nProtectSystem=full\n"}
+        out = messages("It sets `ProtectSystem=strict` (`unit/c.service:2`).", unit)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("the file sets `ProtectSystem` to another value", out[0])
+        # a key that the file does not set is no token, as before
+        self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/c.service:2`).", unit), [])
+        # a key set only in a comment is not set
+        commented = {"unit/d.service": "[Service]\n# ProtectHome=read-only\nProtectSystem=full\n"}
+        self.assertEqual(messages("It sets `ProtectHome=yes` (`unit/d.service:3`).", commented), [])
+        # a value the sentence sets against the held one is no finding
+        restart = {"unit/e.service": "[Service]\nRestart=on-failure\n"}
+        self.assertEqual(messages("It uses `Restart=on-failure`, not `Restart=always` (`unit/e.service:2`).",
+                                  restart), [])
+        # a value that a setting lists after its first is not another value
+        caps = {"unit/f.service": "[Service]\nCapabilityBoundingSet=CAP_A CAP_B\n"}
+        self.assertEqual(messages("It keeps `CapabilityBoundingSet=CAP_B` (`unit/f.service:2`).", caps), [])
+        # a quoted value is the value, and a dotted name sets no key of its own
+        quoted = {"unit/g.service": "[Service]\nEnvironment=\"RUST_LOG=info\"\nX.Mode=2\n"}
+        self.assertEqual(messages("It sets `Environment=RUST_LOG=info` (`unit/g.service:2`).", quoted), [])
+        self.assertEqual(messages("It sets `Mode=1` (`unit/g.service:3`).", quoted), [])
 
     def test_a_file_name_is_no_token(self):
         # `x.rs` is held by line 4, not by line 1
