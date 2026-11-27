@@ -97,6 +97,8 @@ def css(tokens, variant):
 
 # ---------------------------------------------------------------- COSMIC inputs
 
+# The accent is the exception: it is not the token `acc` (Calmo's indigo, which tints the GTK
+# shell) but the factory preset of `[sal.accent]`, purple by VL4, as `sal_rs` resolves it.
 # Builder input <- token. Semantics read in cosmic-theme's ThemeBuilder::build().
 # `bg_color` is the window background and takes `bg1`, not `surf2`: the first draft used
 # `surf2` and COSMIC then derived a container background indistinguishable from the window
@@ -112,10 +114,14 @@ COSMIC_INPUTS = {
 
 def cosmic_inputs(tokens):
     modes = {}
+    factory = tk.presets(tokens)[tokens["sal"]["accent"]["factory"]]
     for mode in ("light", "dark"):
         palette = tk.colors(tokens, mode)
+        palette["acc"] = tk.colors(tokens, mode, factory)["acc"]
         modes[mode] = {
-            key: [round(c, 6) for c in palette[name][:3]]
+            # The accent keeps full precision: the tool builds `variants.json` from the preset's
+            # u8/255, and a 6-digit rounding moved `on_disabled` by one step in two files.
+            key: list(palette[name][:3]) if key == "accent" else [round(c, 6) for c in palette[name][:3]]
             for key, name in COSMIC_INPUTS.items()
         }
     return json.dumps(modes, indent=2, sort_keys=True) + "\n"

@@ -153,6 +153,14 @@ class CosmicTest(unittest.TestCase):
             expected = [round(c, 6) for c in tk.colors(tokens, mode)["bg1"][:3]]
             self.assertEqual(values["bg_color"], expected, mode)
 
+    def test_the_accent_is_the_factory_preset(self):
+        # VL4: the image's default COSMIC theme is purple, not the indigo `[accent]` tints the shell with.
+        tokens = tk.load()
+        factory = tk.presets(tokens)[tokens["sal"]["accent"]["factory"]]
+        inputs = json.loads(generate.cosmic_inputs(tokens))
+        for mode, values in inputs.items():
+            self.assertEqual(values["accent"], list(factory[:3]), mode)
+
     def test_background_points_at_the_shipped_wallpaper(self):
         self.assertIn('Path("/usr/share/backgrounds/athanor/hearth-light.png")', generate.cosmic_background()["all"])
 
