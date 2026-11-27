@@ -3391,11 +3391,11 @@ def top_layer(files):
     return None
 
 
-def spec_installs(spec):
-    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
-    /usr/sbin or /usr/libexec: continued lines joined, a command after `do`, `then` or `else`,
-    quoted words, a target directory given by -t or as the last argument, a destination
-    directory given with or without its trailing slash."""
+def spec_copies(spec):
+    """(sources, destination, target) of each install or cp of a spec: continued lines joined,
+    a command after `do`, `then` or `else`, quoted words; `target` when -t names the
+    destination directory, else the destination is the last argument, a directory or, for one
+    source, maybe the file's new path. An install -d makes directories and is left out."""
     for command in re.split(r"&&|\|\||;|\n", spec.replace("\\\n", " ")):
         words = [w.strip("\"'") for w in command.split()]
         if words[:1] in (["do"], ["then"], ["else"]):
@@ -3429,17 +3429,22 @@ def spec_installs(spec):
             i += 1
         if not args:
             continue  # install -d makes directories
-        if directory is None:
-            if len(args) < 2:
-                continue
-            *sources, directory = args
-            if len(sources) == 1 and not directory.endswith("/") and \
-                    executable_path(directory) not in EXEC_DIRS.values():
-                if executable_path(directory).startswith(EXEC_ROOTS):
-                    yield sources[0], executable_path(directory)
-                continue
-        else:
-            sources = args
+        if directory is not None:
+            yield args, directory, True
+        elif len(args) >= 2:
+            yield args[:-1], args[-1], False
+
+
+def spec_installs(spec):
+    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
+    /usr/sbin or /usr/libexec (spec_copies), a destination directory given with or without its
+    trailing slash."""
+    for sources, directory, target in spec_copies(spec):
+        if not target and len(sources) == 1 and not directory.endswith("/") and \
+                executable_path(directory) not in EXEC_DIRS.values():
+            if executable_path(directory).startswith(EXEC_ROOTS):
+                yield sources[0], executable_path(directory)
+            continue
         for source in sources:
             executable = executable_path(f"{directory}/{source.rsplit('/', 1)[-1]}")
             if executable.startswith(EXEC_ROOTS):
@@ -5478,20 +5483,57 @@ HEREDOC = re.compile(
 )
 
 
-def unit_directives(text):
-    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+def unit_lines(text):
+    """The logical lines of a unit or drop-in, read as systemd's conf-parser reads them: lines
+    end at a newline, a carriage return or a NUL; a comment line is skipped, inside a continued
+    line too; and a line whose last character is a backslash that no backslash escapes continues
+    on the next, the backslash read as a space."""
+    lines, continued = [], None
+    for raw in re.split(r"\r\n|[\n\r\0]", text):
+        if raw.lstrip(" \t")[:1] in ("#", ";"):
+            continue
+        line = raw if continued is None else continued + raw
+        escaped = False
+        for char in line:
+            escaped = not escaped and char == "\\"
+        if escaped:
+            continued = line[:-1] + " "
+        else:
+            lines.append(line)
+            continued = None
+    return lines if continued is None else [*lines, continued]
+
+
+# The whitespace of systemd's conf-parser and of its word lists, " \t\n\r" (WHITESPACE in
+# systemd's string-util.h): str.strip() and str.split() take Unicode's, which would split a word
+# at a no-break space that systemd keeps inside it.
+UNIT_WHITESPACE = " \t\n\r"
+
+
+def unit_words(value):
+    """The words of a unit's list value, split where systemd splits them (UNIT_WHITESPACE)."""
+    return [word for word in re.split(r"[ \t\n\r]+", value) if word]
+
+
+def unit_assignments(text):
+    """(section, key, value) of every assignment of a unit or drop-in, in order; the section is
+    None before the first header."""
     section, found = None, []
-    # A trailing backslash continues the line (systemd.syntax(7)): join before parsing.
-    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
-        line = line.strip()
+    for line in unit_lines(text):
+        line = line.strip(UNIT_WHITESPACE)
         if not line or line[0] in "#;":
             continue
         if line.startswith("[") and line.endswith("]"):
             section = line[1:-1]
-        elif section == "Service" and "=" in line:
+        elif "=" in line:
             key, value = line.split("=", 1)
-            found.append((key.strip(), value.strip()))
+            found.append((section, key.strip(UNIT_WHITESPACE), value.strip(UNIT_WHITESPACE)))
     return found
+
+
+def unit_directives(text):
+    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+    return [(key, value) for section, key, value in unit_assignments(text) if section == "Service"]
 
 
 # Capabilities that give root back to a process that keeps them (doc_threat_model.md).
@@ -5903,6 +5945,8 @@ USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|targe
 # A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
 USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
 USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir|systemd_user")
+# A drop-in directory of the user unit directory, or a file in one, on the installed system.
+USER_DROPIN_FILE = re.compile(r"/usr/lib/systemd/user/([^/]+\.d)(?:/([^/]+))?")
 
 
 def spec_user_units(text):
@@ -5927,6 +5971,34 @@ def spec_user_units(text):
         elif not USER_DROPIN_PATH.fullmatch(path):
             problems.append(line)
     return names, problems
+
+
+def installed_path(destination):
+    """`destination` of a spec's %install or %files as the path it has on the installed
+    system, the user unit directory's macro and /etc's included (executable_path)."""
+    destination = re.sub(r"%(_\w+)", r"%{\1}", destination)
+    destination = destination.replace("%{_userunitdir}", "/usr/lib/systemd/user")
+    return executable_path(destination.replace("%{_sysconfdir}", "/etc"))
+
+
+def spec_user_dropins(text):
+    """Each drop-in directory or file of the user unit directory that a spec's %files lists,
+    as installed_path gives it."""
+    found, in_files = [], False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%files"):
+            in_files = True
+            continue
+        if FILES_END.match(line):
+            in_files = False
+        if not in_files or line.startswith("#"):
+            continue
+        path = FILES_DIRECTIVES.sub("", line)
+        path = re.sub(r"^%dir\s+", "", path)
+        if USER_DROPIN_PATH.fullmatch(path):
+            found.append(installed_path(path))
+    return found
 
 
 def shipped_user_units(root):
@@ -6093,6 +6165,11 @@ def check_session_units():
 # Properties that put a user unit in namespaces of its own. Under the user manager each one
 # gives the unit a user namespace, a sibling of every other unit's, and the kernel refuses a
 # ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
+# ProtectProc=, ProcSubset= and PrivateBPF= stay in the pattern although each, set alone in a
+# transient user unit on systemd 262 on the reference desktop on 2026-11-26, kept the host's user
+# namespace (#1570's description, "What was measured"): the pattern errs toward a finding of
+# peer-exe, its only reader, and narrowing it belongs to a change of that check. separated-units
+# does not read it; it admits only SEPARATED_UNIT_KEYS.
 NAMESPACING_PROPERTY = re.compile(
     r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
     r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage"
@@ -6205,6 +6282,262 @@ def check_peer_exe():
         r.fail(problem)
     for (unit, program), why in FOREIGN_PROGRAMS.items():
         r.note(f"foreign: {unit}: {program}: {why}")
+    return r
+
+
+# The per-user units that must stay apart from the user's other processes (doc_lock_and_prompts.md
+# D43, #1558). Under the user manager a namespacing property puts the unit in a user namespace
+# the user owns, where every process of the same uid holds CAP_SYS_PTRACE, so a non-dumpable flag
+# and Yama's scope 1 no longer keep them from attaching. Such a unit confines itself in process.
+# The polkit agent's unit joins when it ships (LP11); the greeter has no unit of its own.
+SEPARATED_USER_UNITS = ("athanor-lock.service",)
+# The keys a separated unit may set, by section. Each was measured on systemd 262, on the
+# reference desktop on 2026-11-26, to keep the host's user namespace under the user manager:
+# set alone in a transient user unit, then the lock's whole unit in one, `/proc/<pid>/ns/user`
+# compared with the session's (#1558; the list is in #1570's description, "What was
+# measured"). Any other key fails until it is measured and added: BindLogSockets=,
+# NetworkNamespacePath= and the properties of NAMESPACING_PROPERTY measured, other than
+# ProtectProc=, ProcSubset= and PrivateBPF=, created one, IPCNamespacePath= and
+# UserNamespacePath= kept the unit from running, and JoinsNamespaceOf= joins another unit's
+# namespaces. Those three kept the host's, and are left out as no separated unit sets them.
+# WantedBy= acts only when the unit is enabled.
+SEPARATED_UNIT_KEYS = {
+    "Unit": frozenset({
+        "Description", "Documentation", "After", "Before", "Wants", "Requires", "Requisite",
+        "BindsTo", "PartOf", "StartLimitIntervalSec", "StartLimitBurst", "OnFailure",
+    }),
+    "Service": frozenset({
+        "ExecStart", "Type", "Environment", "UnsetEnvironment", "NotifyAccess", "Restart",
+        "RestartSec", "RestartSteps", "RestartMaxDelaySec", "Slice", "MemoryMax", "UMask",
+        "KeyringMode", "RemoveIPC", "NoNewPrivileges", "SystemCallArchitectures",
+        "SystemCallFilter", "SystemCallErrorNumber", "RestrictAddressFamilies", "LockPersonality",
+        "RestrictRealtime", "RestrictSUIDSGID", "RestrictNamespaces", "MemoryDenyWriteExecute",
+    }),
+    "Install": frozenset({"WantedBy"}),
+}
+# The filter each separated unit keeps once its drop-ins apply, the lock's of LP15
+# (doc_lock_and_prompts.md): the native architecture alone, since systemd installs a filter for
+# the architectures of SystemCallArchitectures= alone and, without `native`, a 32-bit socketcall
+# made through int 0x80 opened a UDP socket past RestrictAddressFamilies=AF_UNIX, measured on
+# systemd 262 (#1558); the local socket family alone; and the system-service set, less the
+# calls that Landlock does not mediate. A separated unit that needs another filter records it
+# here. The three keys are lists that accumulate, an empty assignment resetting them
+# (systemd.exec(5)), so a drop-in may not reset one.
+SEPARATED_FILTER = {
+    "SystemCallArchitectures": frozenset({"native"}),
+    "RestrictAddressFamilies": frozenset({"AF_UNIX"}),
+    "SystemCallFilter": frozenset({"@system-service"}),
+}
+SEPARATED_REFUSED_CALLS = frozenset({
+    "@chown", "chmod", "fchmod", "fchmodat", "fchmodat2", "utime", "utimes", "utimensat",
+    "futimesat", "setxattr", "lsetxattr", "fsetxattr", "setxattrat", "removexattr",
+    "lremovexattr", "fremovexattr", "removexattrat",
+})
+
+
+def separated_unit_dirs(unit):
+    """The user drop-in directories that apply to `unit`, the most specific first
+    (systemd.unit(5)): `<unit>.d`, each `<prefix>-.service.d` of its name, then `service.d`."""
+    stem, kind = unit.rsplit(".", 1)
+    parts = stem.split("-")
+    return [f"{unit}.d"] + [f"{'-'.join(parts[:n])}-.{kind}.d" for n in range(len(parts) - 1, 0, -1)] + [f"{kind}.d"]
+
+
+def copied_source(root, spec, word):
+    """The one file of the repository that a source word of `spec`'s %install names, read from
+    the root, the spec's directory or a directory in it, as rpmbuild may run there, as that path
+    (a link is not followed); None when the word is absolute, holds a macro, a variable or a
+    glob, or names no file or more than one."""
+    if not word or word.startswith("/") or any(c in word for c in "%$*?[`"):
+        return None
+    paths = [root / word, spec.parent / word, *(d / word for d in spec.parent.iterdir() if d.is_dir())]
+    found = {p.resolve(): p for p in paths if p.is_file()}
+    return found.popitem()[1] if len(found) == 1 else None
+
+
+# What precedes a %files path that ships no file, what qualifies one, and the conditionals that
+# may stand in %files (spec_files_covering); any other %word there fails closed.
+FILES_SKIPPED = re.compile(r"%(?:dir|exclude|ghost)\s")
+FILES_QUALIFIERS = re.compile(r"^(?:%(?:attr|config|verify|defattr|lang|caps|doc|license)(?:\([^)]*\))?(?:\s+|$))+")
+FILES_CONDITIONALS = re.compile(r"%(?:if|ifarch|ifnarch|ifos|ifnos|elif|elifarch|elifnarch|elifos|elifnos|else|endif)\b")
+# Fedora's values of the directory macros that specs list in %files; another macro there reads
+# as a glob that matches anything (spec_files_covering), and a spec that redefines one of these
+# fails (separated_unit_dropins).
+FILES_DIRS = {"%{_libdir}": "/usr/lib64", "%{_datadir}": "/usr/share", "%{_unitdir}": "/usr/lib/systemd/system",
+              "%{_sysusersdir}": "/usr/lib/sysusers.d", "%{_tmpfilesdir}": "/usr/lib/tmpfiles.d"}
+
+
+def spec_files_covering(text, directories):
+    """Each %files line of a spec that may ship a file into one of `directories` (paths on the
+    installed system) without naming it: a list read with -f, unless %find_lang writes it,
+    which names translations alone; a line led by a %word it does not know, %( or %[; and a path, not
+    with %dir, %exclude or %ghost, that is one of them or a directory above one, a glob that
+    matches one of those or a file in one, a macro that installed_path leaves read as a glob
+    that matches anything, or that climbs with `..`."""
+    above = {"/"} | {"/".join(d.split("/")[:n]) for d in directories for n in range(2, d.count("/") + 2)}
+    langs = {f"{name}.lang" for name in re.findall(r"^\s*%find_lang\s+(\S+)", text, re.M)}
+    found, in_files = [], False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%files"):
+            in_files = True
+            if any(f not in langs for f in re.findall(r"\s-f\s*(\S+)", line)):
+                found.append(line)
+            continue
+        if FILES_END.match(line):
+            in_files = False
+        path = FILES_QUALIFIERS.sub("", line)
+        if not in_files or not path or line.startswith("#") or FILES_SKIPPED.match(path) or FILES_CONDITIONALS.match(path):
+            continue
+        if re.match(r"%[A-Za-z(\[]", path):
+            found.append(line)
+            continue
+        path = installed_path(path)
+        for macro, value in FILES_DIRS.items():
+            path = path.replace(macro, value)
+        path = re.sub(r"%\{[^}]*\}|%\w+", "*", path)
+        parent = path.rpartition("/")[0]
+        if path.startswith(("/", "*")) and (".." in path.split("/") or any(fnmatch.fnmatchcase(d, path) for d in above)
+                                              or any(c in path for c in "*?[") and any(fnmatch.fnmatchcase(d, parent) for d in directories)):
+            found.append(line)
+    return found
+
+
+def separated_unit_dropins(root, units, separated=SEPARATED_USER_UNITS):
+    """({unit: [(where, text)]}, problems): the user drop-ins of each separated unit, in
+    systemd's order, by file name (systemd.unit(5)), a file of a more specific directory
+    (separated_unit_dirs) replacing one of the same name. A drop-in is each file that a spec
+    under forge/specs installs or lists in %files in one of those directories, read from the
+    source its install or cp copies there, else from the file at that path under the spec's
+    directory; and each file at such a path under a spec's `systemd/user/`. A problem, so that
+    no drop-in passes unread: a drop-in whose source the check cannot find, a destination in
+    one of those directories it cannot place, a %files line that may ship a file into one
+    without naming it (spec_files_covering), two sources for one drop-in, a source that is a
+    link out of the repository, and a file in one of those directories elsewhere under
+    forge/specs that no install copies."""
+    dirs = {unit: separated_unit_dirs(unit) for unit in separated if unit in units}
+    every = {d for ds in dirs.values() for d in ds}
+    shipped, problems = {}, []
+
+    base = root.resolve()
+
+    def ship(directory, name, path, where):
+        source = path.resolve()
+        if not source.is_relative_to(base):
+            problems.append(f"{where}: ships /usr/lib/systemd/user/{directory}/{name} from {path.relative_to(root)}, a link that leads out of the repository to {source}, which separated-units does not read; ship the file itself")
+        elif shipped.setdefault((directory, name), source) != source:
+            problems.append(f"{where}: ships /usr/lib/systemd/user/{directory}/{name} from {source.relative_to(base)}, and another spec or file ships it from {shipped[(directory, name)].relative_to(base)}")
+
+    targets = sorted(f"/usr/lib/systemd/user/{d}" for d in every)
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        spec_text, where = read(spec), spec.relative_to(root).as_posix()
+        if every:
+            for macro in FILES_DIRS:
+                if re.search(rf"^\s*%(?:global|define)\s+{macro[2:-1]}\b", spec_text, re.M):
+                    problems.append(f"{where}: redefines {macro}, which separated-units reads in %files as Fedora's {FILES_DIRS[macro]}, so a drop-in of a separated unit may ship under it unread; keep Fedora's value")
+            for line in spec_files_covering(spec_text, targets):
+                problems.append(f"{where}: `{line}` in %files may ship a drop-in of a separated unit that separated-units cannot name or read; list each file of {', '.join(targets)} plainly")
+        copies = {}
+        for sources, destination, target in spec_copies(spec_text):
+            path = installed_path(destination)
+            into = target or len(sources) > 1 or destination.endswith("/") or path.endswith(".d")
+            for word in sources:
+                placed = installed_path(f"{destination}/{word.rsplit('/', 1)[-1]}") if into else path
+                m = USER_DROPIN_FILE.fullmatch(placed)
+                if m and m.group(1) in every and m.group(2):
+                    copies[placed] = word
+                elif any(c in placed for c in "%$") and every & set(destination.split("/")):
+                    problems.append(f"{where}: installs {word} to {destination}, which separated-units cannot place; name the drop-in's path under %{{buildroot}}/usr/lib/systemd/user/ plainly")
+        for path in sorted(set(copies) | set(spec_user_dropins(spec_text))):
+            m = USER_DROPIN_FILE.fullmatch(path)
+            if not m or m.group(1) not in every or not m.group(2):
+                continue
+            directory, name = m.groups()
+            if path in copies:
+                source = copied_source(root, spec, copies[path])
+            else:
+                at = [p for p in walk(spec.parent, name) if p.parts[-4:] == ("systemd", "user", directory, name) and "skel" not in p.parts]
+                source = at[0] if len(at) == 1 else None
+            if source is None:
+                problems.append(f"{where}: ships {path}, and separated-units cannot find the file of the repository that its %install copies there; copy it with install or cp from a file named plainly")
+            else:
+                ship(directory, name, source, where)
+    for conf in walk(root / "forge" / "specs", ".conf"):
+        if conf.parent.name not in every or conf.parts[-4:-2] == ("systemd", "system"):
+            continue
+        where = conf.relative_to(root).as_posix()
+        if conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
+            ship(conf.parent.name, conf.name, conf, where)
+        elif conf.resolve() not in shipped.values():
+            problems.append(f"{where}: a drop-in of a separated unit's directory that no spec's %install copies into /usr/lib/systemd/user/{conf.parent.name}/, so separated-units cannot merge it; install it there from the spec, or move its lines into the unit")
+    found = {}
+    for unit, ds in dirs.items():
+        chosen = {}
+        for (directory, name), source in shipped.items():
+            if directory in ds and (name not in chosen or ds.index(directory) < chosen[name][0]):
+                chosen[name] = (ds.index(directory), source)
+        found[unit] = [(source.relative_to(base).as_posix(), read(source)) for _, (_, source) in sorted(chosen.items())]
+    return found, problems
+
+
+def separated_unit_problems(units, dropins=None, separated=SEPARATED_USER_UNITS):
+    """A separated unit that no spec ships; or that, its drop-ins (separated_unit_dropins)
+    merged, sets a key outside SEPARATED_UNIT_KEYS, or does not keep SEPARATED_FILTER: its
+    architectures and families those alone, its system calls those allowed by lines that all
+    come before the first refusal, with every call of SEPARATED_REFUSED_CALLS refused after
+    them, each refusal a call alone or a call and :EPERM; or whose ExecStart= is not one
+    command named by its absolute path, with no prefix; and a drop-in that resets a key of
+    SEPARATED_FILTER. Words split where systemd splits them (unit_words)."""
+    problems = []
+    for unit in separated:
+        if unit not in units:
+            problems.append(f"{unit}: listed in SEPARATED_USER_UNITS and shipped by no spec under forge/specs")
+            continue
+        merged = units[unit] + "".join("\n" + dropin for _, dropin in (dropins or {}).get(unit, ()))
+        lists = {key: [] for key in (*SEPARATED_FILTER, "ExecStart")}
+        for section, key, value in unit_assignments(merged):
+            if key not in SEPARATED_UNIT_KEYS.get(section, ()):
+                problems.append(f"{unit}: [{section}] {key}={value} is not measured for separated units: measure that it keeps the host's user namespace under the user manager, where a namespace of the user's lets a process of the same uid attach, and add it to SEPARATED_UNIT_KEYS (doc_lock_and_prompts.md D43)")
+            elif key in lists:
+                lists[key] = lists[key] + [value] if value else []
+        for where, dropin in (dropins or {}).get(unit, ()):
+            for _, key, value in unit_assignments(dropin):
+                if key in SEPARATED_FILTER and not value:
+                    problems.append(f"{where}: resets {key}= of {unit} with an empty assignment, which drops the unit's filter (doc_lock_and_prompts.md LP15); add to the list, or change the unit")
+        architectures = {word for value in lists["SystemCallArchitectures"] for word in unit_words(value)}
+        if architectures != SEPARATED_FILTER["SystemCallArchitectures"]:
+            problems.append(f"{unit}: filters its calls without SystemCallArchitectures=native alone, so a 32-bit call through int 0x80 escapes the filter, as a socketcall escaped RestrictAddressFamilies=AF_UNIX (doc_lock_and_prompts.md LP15)")
+        families = lists["RestrictAddressFamilies"]
+        if any(value.startswith("~") for value in families) or \
+                {word for value in families for word in unit_words(value)} != SEPARATED_FILTER["RestrictAddressFamilies"]:
+            problems.append(f"{unit}: RestrictAddressFamilies= is {' then '.join(families) or 'unset'} once its drop-ins apply, not AF_UNIX alone (doc_lock_and_prompts.md LP15)")
+        calls = lists["SystemCallFilter"]
+        allowed = [value for value in calls if not value.startswith("~")]
+        refusals = [word for value in calls if value.startswith("~") for word in unit_words(value[1:])]
+        refused = {word.removesuffix(":EPERM") for word in refusals}
+        for word in sorted({word for word in refusals if ":" in word.removesuffix(":EPERM")}):
+            problems.append(f"{unit}: SystemCallFilter= refuses {word}, a word other than a call alone or a call and :EPERM, which systemd drops when its error number is not one it knows (doc_lock_and_prompts.md LP15)")
+        if calls[:len(allowed)] != allowed or not refused >= SEPARATED_REFUSED_CALLS or \
+                {word for value in allowed for word in unit_words(value)} != SEPARATED_FILTER["SystemCallFilter"]:
+            missing = ", ".join(sorted(SEPARATED_REFUSED_CALLS - refused)) or "none"
+            problems.append(f"{unit}: SystemCallFilter= is not @system-service alone, then refusals of every call Landlock does not mediate, once its drop-ins apply (refusals missing: {missing}); a call allowed after a refusal is allowed again (doc_lock_and_prompts.md LP15)")
+        commands = lists["ExecStart"]
+        if len(commands) != 1 or not commands[0].startswith("/") or ";" in unit_words(commands[0]):
+            problems.append(f"{unit}: ExecStart= is {' then '.join(commands) or 'unset'} once its drop-ins apply, not one command named by its absolute path without a prefix: `+` runs it outside the sandbox, the filter included, `!`, `!!`, `-`, `@`, `:` and `|` change how it runs, and a `;` word starts a second command, which may carry its own prefix (systemd.service(5), doc_lock_and_prompts.md LP15)")
+        if any(key == "Type" and value == "oneshot" for _, key, value in unit_assignments(merged)):
+            problems.append(f"{unit}: Type=oneshot, under which ExecStart= runs one command after another; a separated unit runs one long-lived command (systemd.service(5), doc_lock_and_prompts.md LP15)")
+    return problems
+
+
+@check("separated-units", "A per-user unit kept apart from the user's other processes sets only keys measured to keep the host's user namespace, and keeps the filter of LP15 (D43)")
+def check_separated_units():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    dropins, dropin_problems = separated_unit_dropins(ROOT, units)
+    for problem in problems + dropin_problems + separated_unit_problems(units, dropins):
+        r.fail(problem)
+    for unit in SEPARATED_USER_UNITS:
+        r.note(f"separated: {unit}")
     return r
 
 

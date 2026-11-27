@@ -1,12 +1,16 @@
 //! The lock confines itself only while it has one thread (LP15, plan decision M3). A binary
 //! without libtest's harness, whose `main` is the process's only thread: with a second thread
 //! alive the confinement is refused and nothing is applied; once that thread has gone it is
-//! applied, writes leave only the runtime directory and no core file can be written. The process
-//! stays dumpable, for Sulphur to identify it at connect; `main.rs` tests the change after.
+//! applied, writes leave only the runtime directory, TCP and the abstract Unix sockets of the
+//! session are refused, path sockets stay open, and no core file can be written (D43). The
+//! process stays dumpable, for Sulphur to identify it at connect; `main.rs` tests the change
+//! after.
 
 use std::fs;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::net::{TcpListener, TcpStream};
+use std::os::linux::net::SocketAddrExt;
+use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
@@ -18,9 +22,24 @@ fn threads() -> usize {
 }
 
 fn main() {
-    let base =
-        Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("confine-{}", std::process::id()));
+    // The temporary directory, not the target's: a path socket's name holds 107 bytes
+    // (`sun_path`), which a target deep in a worktree exceeds.
+    let base = std::env::temp_dir().join(format!("athanor-lock-confine-{}", std::process::id()));
+    let socket = base.join("path.sock");
+    assert!(
+        socket.as_os_str().len() <= 107,
+        "{} is longer than a path socket's name",
+        socket.display()
+    );
     let (runtime, outside) = (base.join("runtime"), base.join("outside"));
+    // A container numbers its processes from 1 again, and keeps its temporary directory
+    // between runs when it is the host's, so a run can meet the directory, and the bound
+    // socket, of an earlier run with the same pid.
+    match fs::remove_dir_all(&base) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("remove {}: {e}", base.display()),
+    }
     fs::create_dir_all(&runtime).expect("mkdir runtime");
     fs::create_dir_all(&outside).expect("mkdir outside");
 
@@ -30,6 +49,16 @@ fn main() {
     if hard == 0 {
         println!("confine: the hard core limit is 0 already, so its lowering is not observed");
     }
+
+    // What the session offers before the confinement: a TCP listener, an abstract Unix socket
+    // and a path socket, as the buses and the Wayland socket are.
+    let tcp = TcpListener::bind("127.0.0.1:0").expect("tcp bind");
+    let port = tcp.local_addr().expect("tcp address").port();
+    let abstract_address =
+        SocketAddr::from_abstract_name(format!("athanor-lock-confine-{}", std::process::id()))
+            .expect("abstract name");
+    let abstract_socket = UnixListener::bind_addr(&abstract_address).expect("abstract bind");
+    let path_socket = UnixListener::bind(&socket).expect("path bind");
 
     // A second thread, as the logind thread started before the confinement would be.
     let (release, wait) = channel::<()>();
@@ -46,6 +75,15 @@ fn main() {
     assert!(
         nix::sys::prctl::get_dumpable().expect("get_dumpable"),
         "a refused confinement leaves the process as it was"
+    );
+    assert!(
+        TcpStream::connect(("127.0.0.1", port)).is_ok()
+            && UnixStream::connect_addr(&abstract_address).is_ok(),
+        "a refused confinement leaves the network as it was"
+    );
+    assert!(
+        fs::write("/proc/self/comm", b"confine").is_ok(),
+        "a refused confinement leaves procfs writable"
     );
     assert_eq!(
         getrlimit(Resource::RLIMIT_CORE).expect("getrlimit"),
@@ -86,6 +124,31 @@ fn main() {
         "writes beneath the runtime directory stay open"
     );
     assert!(fs::read(outside.join("before")).is_ok(), "reads stay open");
+    // procfs is a filesystem Landlock mediates: the writes `ProtectKernelTunables=` and
+    // `ProtectControlGroups=` refused are refused here too, shown on a file the process owns.
+    assert_eq!(
+        fs::write("/proc/self/comm", b"confine")
+            .expect_err("a write to procfs")
+            .kind(),
+        ErrorKind::PermissionDenied
+    );
+    assert_eq!(
+        TcpStream::connect(("127.0.0.1", port))
+            .expect_err("TCP is refused")
+            .kind(),
+        ErrorKind::PermissionDenied
+    );
+    assert_eq!(
+        UnixStream::connect_addr(&abstract_address)
+            .expect_err("an abstract socket of the session is refused")
+            .kind(),
+        ErrorKind::PermissionDenied
+    );
+    assert!(
+        UnixStream::connect(&socket).is_ok(),
+        "path sockets, the buses' and Wayland's, stay open"
+    );
+    drop((tcp, abstract_socket, path_socket));
     assert_eq!(
         getrlimit(Resource::RLIMIT_CORE).expect("getrlimit"),
         (0, 0),
