@@ -199,7 +199,7 @@ confirmed by the status of ADR-Y.
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
 | ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098, ADR-0104, ADR-0127 | build, signing, security |
-| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103 | security, update, product |
+| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103, ADR-0151 | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
 | ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | amended by ADR-0098 | security, process |

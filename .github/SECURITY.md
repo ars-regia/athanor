@@ -16,11 +16,11 @@ date the line is placed on the market, with the Fedora base rebased forward with
 (ADR-0081). Only the latest release of the line is supported; moving to it is a free,
 in-place update.
 
-- The support end date is the `SUPPORT_END` field of `/usr/lib/os-release` of every image
-  from 1.0 on (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release`, the single
-  source). The 1.0 release sets it to five years after its own date, and the release notes
-  of each release state it. Images before 1.0 carry no `SUPPORT_END` and promise no
-  support period. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* `SUPPORT_END` arrives with #1662, in 1.1.
+- The support end date of the 1.0 product line (five years from placement on the market, ADR-0081)
+  is stated in this file and in each release's release notes. The `SUPPORT_END` field of
+  `/usr/lib/os-release` (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release`, the single
+  source) arrives from 1.1 (#1662, ADR-0151); 1.0 and earlier images carry no `SUPPORT_END` field,
+  and images before 1.0 promise no support period.
 
 ## Reporting a vulnerability
 

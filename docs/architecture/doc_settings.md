@@ -356,8 +356,8 @@ On a fresh install in the dev VM and on the reference laptop athanor-ref. **CI**
 6. **CI** Under the unit's sandbox, a write to `$HOME/test`, a TCP connect to 127.0.0.1 and `pkexec true` all fail.
 7. **ref** Changing the scale of the internal display and choosing nothing reverts it after 15 s; killing Settings during the countdown still reverts it within the deadline.
 8. **ref** "Identify" shows the same numbers on the screens as in the arrangement (after `athanor-osd` ships).
-9. **CI** Every page that a missing service backs is absent: with no BlueZ fixture no Bluetooth page, with no fwupd no Firmware page, with no reader no fingerprint section.
-10. **ref** Enrolling a finger asks the user's own password once; afterwards the lock offers the finger (LP9) and the greeter does not.
+9. **CI** Every page that a missing service backs is absent: with no BlueZ fixture no Bluetooth page, with no fwupd no Firmware page, with no reader no fingerprint section. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* Firmware (SE22) and the fingerprint section (SE20) move to 1.1.
+10. **ref** Enrolling a finger asks the user's own password once; afterwards the lock offers the finger (LP9) and the greeter does not. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* Fingerprint enrolment moves to 1.1 (SE20).
 11. **CI** Setting the time zone, the hostname or the system language asks for an administrator through polkit; after the retirement step no rule in `/usr/share/polkit-1/rules.d` grants `hostname1` actions without authentication.
 12. **CI** The notification page's changes reach `os.athanor.Notifications1`, which admits `athanor-settings.service` and refuses the same call from another unit.
 13. **ref** Changing the accent changes the shell, Settings and the other applications that follow the accent, and the window borders together (VL4; revision 2: the libadwaita applications), and the hearth wallpaper follows it.

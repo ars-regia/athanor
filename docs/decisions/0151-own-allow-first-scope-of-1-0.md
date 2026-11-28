@@ -130,6 +130,9 @@ The estimate the maintainer accepted for an empty list, with this scope, is late
   for 1.0.
 - The lock's fingerprint path of `doc_lock_and_prompts.md` LP9 is unchanged.
 - Amended:
+  - [ADR-0081](0081-cra-compliance-posture.md) decision 2: `SUPPORT_END` in `os-release` moves to
+    1.1 (#1662); the five-year support period of the 1.0 product line still stands (published in
+    `SECURITY.md` and the release notes);
   - [ADR-0141](0141-everything-own-in-1-0.md) decision 1, criterion 3, which applies from 1.1;
     decision 2, its table: the prompter of the session row, the file manager with its file chooser
     in the first-party row, the portal backend's file chooser, and "Nautilus leaves in 1.0";
@@ -138,4 +141,4 @@ The estimate the maintainer accepted for an empty list, with this scope, is late
   - [ADR-0143](0143-pre-1-0-audit-decisions.md), its "Tracking corrections": #128 returns to
     "After 1.0", and the bootc part of P6 with it;
   - [ADR-0103](0103-audit-5-decisions.md) D26, whose re-cut gate kept the bootc part of P6 in 1.0.
-- The status lines and the index name this record for ADR-0103, ADR-0141, ADR-0143 and ADR-0147.
+- The status lines and the index name this record for ADR-0081, ADR-0103, ADR-0141, ADR-0143 and ADR-0147.
