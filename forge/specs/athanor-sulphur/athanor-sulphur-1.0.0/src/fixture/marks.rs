@@ -23,8 +23,8 @@ delegate_noop!(Client: wp_alpha_modifier_surface_v1::WpAlphaModifierSurfaceV1);
 /// `focus_theme::FACTORY_WIDTH`.
 const ACCENT: [u8; 4] = [0x91, 0x41, 0xac, 255];
 const OUTLINE: i32 = 3;
-/// Calmo's dark `bg_divider`, which the divider takes before a theme is read.
-const DIVIDER: [u8; 4] = [0x39, 0x3b, 0x4a, 255];
+/// The divider of Calmo's light, normal-contrast theme, which the divider takes before a theme is read.
+const DIVIDER: [u8; 4] = [0xc3, 0xc5, 0xd1, 255];
 pub(super) const BLACK: [u8; 4] = [0, 0, 0, 255];
 pub(super) const WHITE: [u8; 4] = [255, 255, 255, 255];
 const GREY: [u8; 4] = [0x80, 0x80, 0x80, 255];
@@ -725,8 +725,9 @@ fn a_window_above_covers_the_marks_below() {
     run.stop();
 }
 
-/// A change of the theme's files reaches the frame without a new client: the width and the
-/// colour of the outline, the divider's colour, and the setting that turns the outline off.
+/// A change of `appearance.toml` and `windows.toml` reaches the frame without a new client: the
+/// width and the colour of the outline, a mode and an accent, the divider's colour of a contrast,
+/// and the hint that turns the outline off.
 #[test]
 fn the_outline_follows_a_theme_change() {
     let mut run = Running::start(None);
@@ -739,26 +740,44 @@ fn the_outline_follows_a_theme_change() {
 
     let dir = std::env::temp_dir().join(format!("athanor-marks-{}", std::process::id()));
     drop(std::fs::remove_dir_all(&dir));
-    let theme = dir.join(focus_theme::DARK).join("v2");
-    let setting = dir.join(focus_theme::COMP);
-    std::fs::create_dir_all(&theme).expect("the theme");
-    std::fs::create_dir_all(&setting).expect("the setting");
+    std::fs::create_dir_all(&dir).expect("the store");
+    // The file is in its own subdirectory, made after the watch, as the first apply makes it.
+    let theme = dir.join("appearance").join("appearance.toml");
+    let windows = dir.join("windows.toml");
     let handle = run.state.loop_handle.clone();
-    focus_theme::follow(&mut run.state, &handle, dir.clone());
+    focus_theme::follow(&mut run.state, &handle, theme.clone());
+    crate::window_settings::follow(&mut run.state, &handle, windows.clone());
+    std::fs::create_dir_all(theme.parent().expect("a subdirectory")).expect("the subdirectory");
 
-    std::fs::write(theme.join("active_hint"), "6").expect("a width");
-    std::fs::write(theme.join("window_hint"), "Some(\"#00FF00FF\")").expect("a colour");
+    std::fs::write(
+        &theme,
+        "schema = 1\nactive_hint = 6\nwindow_hint = \"#00ff00\"\n",
+    )
+    .expect("a width and a colour");
     let green = [0, 255, 0, 255];
     settled(&mut run, "the new outline", |shown| {
         at(shown, x - 6, middle) == green
     });
 
-    std::fs::write(theme.join("background"), "(divider: \"#FF0000FF\")").expect("a divider");
-    settled(&mut run, "the new divider", |shown| {
-        at(shown, x, middle) == [255, 0, 0, 255]
+    // A high-contrast change of the dark mode: the divider's colour.
+    std::fs::write(&theme, "schema = 1\nactive_hint = 6\ndivider = \"#767884ff\"\n")
+        .expect("a divider");
+    settled(&mut run, "the high-contrast divider", |shown| {
+        at(shown, x, middle) == [0x76, 0x78, 0x84, 255]
     });
 
-    std::fs::write(setting.join("active_hint"), "false").expect("the setting");
+    // The light mode, teal: no window hint, so the outline takes the accent.
+    std::fs::write(
+        &theme,
+        "schema = 1\nis_dark = false\naccent = \"#2190a4\"\nactive_hint = 6\n\
+         divider = \"#ff0000ff\"\n",
+    )
+    .expect("a mode and an accent");
+    settled(&mut run, "the teal outline and the divider", |shown| {
+        at(shown, x - 6, middle) == [0x21, 0x90, 0xa4, 255] && at(shown, x, middle) == [255, 0, 0, 255]
+    });
+
+    std::fs::write(&windows, "schema = 1\nactive_hint = false\n").expect("the hint");
     settled(&mut run, "no outline", |shown| {
         background(&at(shown, x - 1, middle))
     });
@@ -1054,12 +1073,12 @@ fn a_bell_on_a_full_screen_window_is_dropped() {
     run.stop();
 }
 
-/// With COSMIC's `active_hint` off, which draws no outline, a bell is dropped.
+/// With `windows.toml`'s `active_hint` off, which draws no outline, a bell is dropped.
 #[test]
 fn a_bell_with_the_outline_off_is_dropped() {
     let mut run = Running::start(None);
     let (mut local, _toplevel) = belled(&mut run);
-    run.state.focus_theme.enabled = false;
+    run.state.focus_theme.hint = false;
     ring(&mut run, &mut local, true);
     assert!(run.state.bell.rung.is_none(), "not honoured");
     run.stop();
@@ -1072,11 +1091,11 @@ fn a_bell_at_an_outline_width_of_zero_is_dropped() {
     let (mut local, _toplevel) = belled(&mut run);
     let dir = std::env::temp_dir().join(format!("athanor-bell-{}", std::process::id()));
     drop(std::fs::remove_dir_all(&dir));
-    let theme = dir.join(focus_theme::DARK).join("v2");
-    std::fs::create_dir_all(&theme).expect("the theme");
+    std::fs::create_dir_all(&dir).expect("the store");
+    let theme = dir.join("appearance.toml");
     let handle = run.state.loop_handle.clone();
-    focus_theme::follow(&mut run.state, &handle, dir.clone());
-    std::fs::write(theme.join("active_hint"), "0").expect("a width");
+    focus_theme::follow(&mut run.state, &handle, theme.clone());
+    std::fs::write(&theme, "schema = 1\nactive_hint = 0\n").expect("a width");
     settled(&mut run, "no outline", hidden);
     ring(&mut run, &mut local, true);
     assert!(run.state.bell.rung.is_none(), "not honoured");

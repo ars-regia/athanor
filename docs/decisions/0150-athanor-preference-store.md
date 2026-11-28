@@ -99,7 +99,10 @@ those links is #1380, not yet decided. The store must not depend on it.
      `focus_theme.rs` reads today from `CosmicTheme`, derived by its writer from the VL4 keys,
      which stay the store of the appearance; it holds no choice of its own and is not imported.
      #1455 counts the theme among the stores to import; deriving it is a departure from the
-     issue, since its values already have a store in VL4's keys.
+     issue, since its values already have a store in VL4's keys. *Amended on 2026-11-27 (proposed, to be approved by the maintainer with the pull request that records it):* the appearance is
+     imported once, at the upgrade, from the user's own COSMIC theme keys when `appearance.toml` is absent
+     (never over an existing file, and never `active_hint`), as `doc_own_stack.md` decision 38's
+     amendment records; a user with no such keys is `absent` and gets the factory appearance.
    The directory keeps decision 38's name, after its first reader, so neither of its files moves.
    Each family's keys are specified in the specification of the family (SE14 to SE16, LN9, AX10,
    decision 38, VL4), and one table in `doc_own_stack.md` decision 38 lists every file of the
@@ -198,7 +201,7 @@ those links is #1380, not yet decided. The store must not depend on it.
    - **The families imported** are the keyboard, the magnifier and the bindings. cosmic-comp's
      input and workspace keys are not imported, so decision 38's two modules gain no COSMIC reader
      and the compositor's defaults apply. The theme is not imported: its file is derived from the
-     VL4 keys by its writer (point 2). The colour filter is imported once into AX10's keys by the
+     VL4 keys by its writer (point 2). *Amended on 2026-11-27 (proposed, to be approved by the maintainer with the pull request that records it):* the appearance is imported once from the user's COSMIC theme keys, as the amendment of point 2 states. The colour filter is imported once into AX10's keys by the
      bar's accessibility module, which holds them, with a `migrated` key, as the wallpaper and
      idle imports do; for it the bar gains a read grant on
      `$XDG_STATE_HOME/cosmic-comp/a11y_screen_filter.ron`, or on its nearest existing parent, as

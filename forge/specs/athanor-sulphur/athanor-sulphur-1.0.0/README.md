@@ -310,10 +310,9 @@ are logged. While the touchpad key holds the touchpads off, it wins over their `
 `state = "disabled"`, the key cannot turn them on.
 `athanor/sulphur/windows.toml` (`src/window_settings.rs`) is read and followed the same way. Of
 SE14's keys it holds only `active_hint`, on by default, which turns decision 31's focus outline
-off; every other key of SE14 is refused as unknown until the compositor applies it. Until a
-follow-up of #1133 moves the hint to `windows.toml` alone, cosmic-comp's `active_hint` is read
-too and the outline is drawn only while both are on: `windows.toml` cannot turn it on over
-cosmic-comp's `false`.
+off; every other key of SE14 is refused as unknown until the compositor applies it. The outline
+is drawn while it is on and the theme's width is above 0; cosmic-comp's `active_hint` is no
+longer read.
 
 The keys and the values the two files accept, snake_case names after COSMIC's fields, flattened
 from its nested settings
@@ -339,6 +338,29 @@ and `window_management` match.
 | `map_to_output` | `[[device]]` | the name of an output, such as `"eDP-1"` |
 | `numlock_state` | `[keyboard]` | `"boot_on"`, `"boot_off"` |
 | `active_hint` | top level of `windows.toml` | `true`, `false` |
+
+`athanor/sulphur/appearance/appearance.toml` (`src/focus_theme.rs`, `doc_visual_language.md` VL4),
+in a subdirectory of its own so that the processes that write it need no grant on the rest of the
+store, is read and followed the same way, even before the subdirectory exists, and holds the values the focus outline and the windows' corners and divider
+are drawn with, which `athanor_sulphur_client::theme` derives from the appearance of VL4 and
+Calmo's built theme of the mode and contrast. A key that is absent takes the value of Calmo's
+light, purple theme, the factory appearance: the accent `#9141ac`, a width of 3, corners of 8 and
+the divider `#c3c5d1ff`; an absent
+`window_hint` means the theme sets none, so the outline takes the accent. A key of the wrong type
+or out of range is skipped alone, the last value staying (a refused `window_hint` too), and an
+unknown key is skipped; both are logged. The corners are those of `radius_s`, which a window widens by 4 from 4 up, as cosmic-comp
+does. `is_dark` is only parsed, its type logged when wrong: nothing reads the mode, the other
+values being those of that mode already.
+
+| Appearance key | Accepted values |
+| --- | --- |
+| `schema` | `1` |
+| `is_dark` | `true`, `false` |
+| `accent` | a string `#rrggbb` |
+| `window_hint` | a string `#rrggbb`; absent when the theme sets none |
+| `active_hint` | an integer from 0 to 32, the outline's width in logical pixels |
+| `radius_s` | an array of four numbers from 0 to 64 |
+| `divider` | a string `#rrggbbaa` |
 
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
@@ -577,8 +599,8 @@ an error rather than show nothing; a monitor that cannot be set up later is logg
 and tried again at the next scan of the connectors.
 
 The compositor draws two marks around windows (`src/marks.rs`, `doc_own_stack.md` decision 31):
-the outline of the window with the keyboard focus, from the theme, which `src/focus_theme.rs`
-reads and follows, and a border of three fixed lines on every window and popup of a client in a
+the outline of the window with the keyboard focus, from `appearance.toml` and `windows.toml`,
+which `src/focus_theme.rs` reads and follows, and a border of three fixed lines on every window and popup of a client in a
 security context, and of xwayland-satellite. `marks::stack` builds the stack of a frame for
 `draw_view` and for the DRM path alike.
 
