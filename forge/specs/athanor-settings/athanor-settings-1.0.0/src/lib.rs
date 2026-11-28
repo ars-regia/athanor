@@ -2,7 +2,10 @@
 //! binary (`main.rs`) owns `os.athanor.Settings1` and confines the process; the probe of spike
 //! SE-S1 (`examples/cold_start.rs`) opens the same window with neither.
 
+pub mod gsettings;
 pub mod i18n;
 pub mod info;
 pub mod look;
+pub mod pages;
+pub mod row;
 pub mod window;

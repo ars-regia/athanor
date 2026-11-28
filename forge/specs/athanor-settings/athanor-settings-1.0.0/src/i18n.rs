@@ -19,6 +19,7 @@ pub fn init() {
         })
     });
     let _first = athanor_settings_core::i18n::set_catalog(catalog);
+    athanor_controls::i18n::set_catalog(catalog);
 }
 
 fn catalog() -> &'static Catalog {

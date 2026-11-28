@@ -12,11 +12,13 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
 
 use athanor_sal::driver;
+use athanor_services::battery::BACKLIGHT_ROOT;
+use athanor_services::Runtime;
 use athanor_settings::window::{self, First, Settings};
 use athanor_settings::{i18n, info, look};
 use athanor_settings_core::registry::Registry;
@@ -24,6 +26,7 @@ use athanor_settings_core::target;
 use athanor_settings_core::window_state;
 use athanor_style::appearance::Appearance;
 use athanor_sulphur_client::glib_loop::GlibSource;
+use athanor_sulphur_client::store::Store;
 use athanor_unit::dirs::{self, Dirs};
 use athanor_unit::{journal, sandbox};
 
@@ -99,6 +102,23 @@ fn stopped(service_result: Option<&str>, runtime_directory: Option<&str>) -> Exi
     ExitCode::SUCCESS
 }
 
+/// `$XDG_DATA_HOME` per XDG Base Directory Specification: `XDG_DATA_HOME` if absolute, else
+/// `$HOME/.local/share`.
+fn data_home(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let absolute = |name: &str| var(name).map(PathBuf::from).filter(|dir| dir.is_absolute());
+    absolute("XDG_DATA_HOME").or_else(|| absolute("HOME").map(|home| home.join(".local/share")))
+}
+
+/// The user configuration and data directories SE6 grants for writing when present (`doc_settings.md:67-71`).
+/// The preference store directory comes from `athanor_sulphur_client::store::Store` (ADR-0150).
+fn se6_write_dirs(dirs: &Dirs, data_home: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = vec![dirs.config.join("athanor"), dirs.config.join("autostart")];
+    if let Some(data) = data_home {
+        paths.push(data.join("backgrounds"));
+    }
+    paths
+}
+
 fn main() -> ExitCode {
     athanor_unit::panic::install();
     journal::init();
@@ -123,16 +143,35 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the cache");
         return ExitCode::FAILURE;
     };
-    // SE6: before any thread. Step 1 writes its state file and dconf's flag under the runtime
-    // directory, and fontconfig's cache; the other grants of SE6 come with the pages that write.
+    // SE6: before any thread. Grants the runtime state and dconf flag, fontconfig's cache, and
+    // any existing SE6 user configuration/data directories (`doc_settings.md:65-73`).
     let mut write = dirs::private_dirs(&dirs.runtime, &["athanor-settings", "dconf"]);
-    write.extend(dirs::existing(&[dirs.cache.as_path()], dirs::owned_dir));
+    let mut se6 = se6_write_dirs(&dirs, data_home(|name| env::var_os(name)).as_deref());
+    match Store::from_env().and_then(|store| store.dir_for_confinement()) {
+        Ok(store_dir) => se6.push(store_dir),
+        Err(err) => tracing::warn!(
+            error = %err,
+            "cannot resolve sulphur preference store directory for confinement",
+        ),
+    }
+    let mut existing_dirs: Vec<&Path> = Vec::with_capacity(se6.len().saturating_add(1));
+    existing_dirs.push(dirs.cache.as_path());
+    existing_dirs.extend(se6.iter().map(PathBuf::as_path));
+    write.extend(dirs::existing(&existing_dirs, dirs::owned_dir));
     let confined = sandbox::ensure_single_threaded()
         .and_then(|()| sandbox::restrict_writes(&write, &[]))
         .and_then(|()| sandbox::deny_tcp());
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine Settings with Landlock; refusing to run unconfined");
         return ExitCode::FAILURE;
+    }
+    // After single-thread confinement: start the Tokio runtime for `athanor-services` models.
+    match Runtime::start() {
+        Ok(runtime) => athanor_controls::bridge::install(
+            runtime.handle().clone(),
+            PathBuf::from(BACKLIGHT_ROOT),
+        ),
+        Err(err) => tracing::error!(error = %err, "cannot start the runtime of the models"),
     }
     i18n::init();
     let registry = Registry::new();
@@ -178,7 +217,8 @@ fn main() -> ExitCode {
         info,
         shows,
         Some(state_dir),
-    );
+    )
+    .with_services(athanor_controls::bridge::services());
     // Resident (SE5): the run outlives the window, which the next `Show` builds again in this
     // process, and ends with the unit.
     match driver::run_with(settings, glib) {
@@ -276,5 +316,28 @@ mod tests {
             Ok("about".to_owned())
         );
         assert_eq!(show_target([]), Ok(String::new()));
+    }
+
+    #[test]
+    fn se6_write_dirs_names_the_user_directories() {
+        let dirs = Dirs::from_vars("athanor-settings", |name| match name {
+            "HOME" => Some(OsString::from("/home/ada")),
+            "XDG_RUNTIME_DIR" => Some(OsString::from("/run/user/1000")),
+            _ => None,
+        })
+        .expect("dirs");
+        let data = data_home(|name| match name {
+            "HOME" => Some(OsString::from("/home/ada")),
+            _ => None,
+        });
+        assert_eq!(data.as_deref(), Some(Path::new("/home/ada/.local/share")));
+        assert_eq!(
+            se6_write_dirs(&dirs, data.as_deref()),
+            vec![
+                PathBuf::from("/home/ada/.config/athanor"),
+                PathBuf::from("/home/ada/.config/autostart"),
+                PathBuf::from("/home/ada/.local/share/backgrounds"),
+            ]
+        );
     }
 }

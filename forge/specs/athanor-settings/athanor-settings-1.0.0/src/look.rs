@@ -62,6 +62,20 @@ impl Look {
         self.small(ui, label, 400);
     }
 
+    /// The secondary line's text style (`caption`).
+    pub fn caption(&self) -> TextStyle {
+        TextStyle {
+            scale: SMALL / BODY,
+            weight: 400,
+            ..TextStyle::default()
+        }
+    }
+
+    /// The secondary line's ink (`ink2`).
+    pub fn secondary(&self) -> Rgba {
+        self.secondary
+    }
+
     fn small(&self, ui: &mut Ui, label: WidgetId, weight: u16) {
         let style = TextStyle {
             scale: SMALL / BODY,

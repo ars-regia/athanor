@@ -50,9 +50,12 @@ const fn entry(page: &'static str, schema: &'static str, key: &'static str, kind
     }
 }
 
-/// Every key Settings may write.
-pub const TABLE: &[Entry] = &[
-    // Accessibility: the GSettings keys of doc_accessibility.md AX2 whose schema is installed.
+/// Every key Settings may write, one slice per page: a page that writes adds its slice and one
+/// line here, so that two pages never change the same lines.
+pub const TABLE: &[&[Entry]] = &[ACCESSIBILITY, DESKTOP, WALLPAPER, POWER];
+
+/// Accessibility: the GSettings keys of doc_accessibility.md AX2 whose schema is installed.
+const ACCESSIBILITY: &[Entry] = &[
     entry(
         "accessibility",
         A11Y_APPS,
@@ -128,16 +131,33 @@ pub const TABLE: &[Entry] = &[
         "always-show-universal-access-status",
         Type::Bool,
     ),
-    // Desktop: the hot corner (SE14).
-    entry("desktop", INTERFACE, "enable-hot-corners", Type::Bool),
-    // Wallpaper (SE13): picture and same-on-all; per-output joins the table with its type.
+];
+
+/// Desktop: the hot corner (SE14).
+const DESKTOP: &[Entry] = &[entry(
+    "desktop",
+    INTERFACE,
+    "enable-hot-corners",
+    Type::Bool,
+)];
+
+/// Wallpaper (SE13): picture and same-on-all; per-output joins the table with its type.
+const WALLPAPER: &[Entry] = &[
     entry("wallpaper", BACKGROUND, "picture", Type::Str),
     entry("wallpaper", BACKGROUND, "same-on-all", Type::Bool),
-    // Power: blank and suspend (`power/idle`).
+];
+
+/// Power: blank and suspend (`power/idle`).
+const POWER: &[Entry] = &[
     entry("power", IDLE, "blank-after", Type::UInt(0, 7200)),
     entry("power", IDLE, "suspend-after-battery", Type::UInt(0, 14400)),
     entry("power", IDLE, "suspend-after-ac", Type::UInt(0, 14400)),
 ];
+
+/// Every entry of the table, page by page.
+fn entries() -> impl Iterator<Item = &'static Entry> {
+    TABLE.iter().flat_map(|page| page.iter())
+}
 
 /// A value refused before it is written.
 #[derive(Clone, Debug, PartialEq)]
@@ -182,50 +202,26 @@ impl<T> Handle<T> {
     }
 }
 
-impl Handle<bool> {
-    pub fn check(&self, value: bool) -> Result<bool, Invalid> {
-        Ok(value)
-    }
-}
-
-impl Handle<i32> {
-    pub fn check(&self, value: i32) -> Result<i32, Invalid> {
-        match self.entry.kind {
-            Type::Int(Some((min, max))) if !(min..=max).contains(&value) => {
-                Err(self.invalid(value))
-            }
-            _ => Ok(value),
+impl<T: Value> Handle<T> {
+    /// `value`, when the key's schema accepts it.
+    pub fn check(&self, value: T) -> Result<T, Invalid> {
+        if value.within(self.entry.kind) {
+            Ok(value)
+        } else {
+            Err(self.invalid(value))
         }
-    }
-}
-
-impl Handle<u32> {
-    pub fn check(&self, value: u32) -> Result<u32, Invalid> {
-        match self.entry.kind {
-            Type::UInt(min, max) if !(min..=max).contains(&value) => Err(self.invalid(value)),
-            _ => Ok(value),
-        }
-    }
-}
-
-impl Handle<f64> {
-    pub fn check(&self, value: f64) -> Result<f64, Invalid> {
-        match self.entry.kind {
-            Type::Double(min, max) if (min..=max).contains(&value) => Ok(value),
-            _ => Err(self.invalid(value)),
-        }
-    }
-}
-
-impl Handle<String> {
-    pub fn check(&self, value: String) -> Result<String, Invalid> {
-        Ok(value)
     }
 }
 
 /// The value type of a handle, tied to the schema's type.
-pub trait Value {
+pub trait Value: fmt::Display {
     fn fits(kind: Type) -> bool;
+
+    /// Whether the value lies in the range of `kind`, a type it fits; a type with no range
+    /// takes every value.
+    fn within(&self, _kind: Type) -> bool {
+        true
+    }
 }
 
 impl Value for bool {
@@ -238,17 +234,36 @@ impl Value for i32 {
     fn fits(kind: Type) -> bool {
         matches!(kind, Type::Int(_))
     }
+
+    fn within(&self, kind: Type) -> bool {
+        match kind {
+            Type::Int(Some((min, max))) => (min..=max).contains(self),
+            _ => true,
+        }
+    }
 }
 
 impl Value for u32 {
     fn fits(kind: Type) -> bool {
         matches!(kind, Type::UInt(..))
     }
+
+    fn within(&self, kind: Type) -> bool {
+        match kind {
+            Type::UInt(min, max) => (min..=max).contains(self),
+            _ => true,
+        }
+    }
 }
 
 impl Value for f64 {
     fn fits(kind: Type) -> bool {
         matches!(kind, Type::Double(..))
+    }
+
+    /// NaN is in no range.
+    fn within(&self, kind: Type) -> bool {
+        matches!(kind, Type::Double(min, max) if (min..=max).contains(self))
     }
 }
 
@@ -261,8 +276,7 @@ impl Value for String {
 /// The handle page `page` writes `schema key` through, when the table gives it that key with
 /// values of type `T`.
 pub fn handle<T: Value>(page: &str, schema: &str, key: &str) -> Option<Handle<T>> {
-    TABLE
-        .iter()
+    entries()
         .find(|entry| entry.page == page && entry.schema == schema && entry.key == key)
         .filter(|entry| T::fits(entry.kind))
         .map(|entry| Handle {
@@ -273,8 +287,7 @@ pub fn handle<T: Value>(page: &str, schema: &str, key: &str) -> Option<Handle<T>
 
 /// The keys page `page` writes, as `schema key`.
 pub fn keys_of(page: &str) -> Vec<String> {
-    TABLE
-        .iter()
+    entries()
         .filter(|entry| entry.page == page)
         .map(|entry| format!("{} {}", entry.schema, entry.key))
         .collect()
@@ -311,8 +324,9 @@ mod tests {
 
     #[test]
     fn each_key_is_in_the_table_once() {
-        for (index, entry) in TABLE.iter().enumerate() {
-            let again = TABLE
+        let table: Vec<&Entry> = entries().collect();
+        for (index, entry) in table.iter().enumerate() {
+            let again = table
                 .iter()
                 .skip(index + 1)
                 .any(|other| other.schema == entry.schema && other.key == entry.key);

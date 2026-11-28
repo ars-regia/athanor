@@ -1,2 +1,9 @@
+src/pages/about.rs
 src/window.rs
 ../../../../system/athanor-settings-core/src/registry.rs
+../../../../system/athanor-controls/src/labels.rs
+../../../../system/athanor-controls/src/sal/audio.rs
+../../../../system/athanor-controls/src/sal/battery.rs
+../../../../system/athanor-controls/src/sal/bluetooth.rs
+../../../../system/athanor-controls/src/sal/network.rs
+../../../../system/athanor-controls/src/sal/widgets.rs

@@ -8,12 +8,218 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+#: ../../../../system/athanor-controls/src/labels.rs:11
+#, rust-format
+msgid "{percent} %"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:29
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:32
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:34
+msgid "Charging"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:35
+msgid "Fully charged"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:42
+#, fuzzy
+msgid "Power saver"
+msgstr "Energia"
+
+#: ../../../../system/athanor-controls/src/labels.rs:43
+msgid "Performance"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:44
+msgid "Balanced"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Mute output"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Output"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Output volume"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Input"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Input volume"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Mute microphone"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:234
+#, rust-format
+msgid "{device}, in use"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:390
+msgid "Next track"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:390
+#: ../../../../system/athanor-controls/src/sal/audio.rs:512
+msgid "Pause"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:390
+msgid "Previous track"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:512
+msgid "Play"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:765
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:816
+#: ../../../../system/athanor-controls/src/sal/network.rs:1114
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:108
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:121
+msgid "The action did not complete."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/battery.rs:141
+#, fuzzy
+msgid "Power mode"
+msgstr "Modalità sviluppatore"
+
+#: ../../../../system/athanor-controls/src/sal/battery.rs:158
+#: ../../../../system/athanor-controls/src/sal/battery.rs:163
+msgid "Screen brightness"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:226
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:749
+#, rust-format
+msgid "{device}, connected"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:338
+#: ../../../../system/athanor-settings-core/src/registry.rs:131
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:341
+#, fuzzy
+msgid "Nearby devices"
+msgstr "Dispositivi USB"
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:377
+#: ../../../../system/athanor-controls/src/sal/network.rs:430
+msgid "Cancel"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:378
+msgid "Pair"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:558
+#, rust-format
+msgid "Pair with {device}?"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:560
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:567
+#, rust-format
+msgid "Pairing with {device}"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:569
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:226
+#: ../../../../system/athanor-controls/src/sal/network.rs:1396
+#, rust-format
+msgid "{network}, connected"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:227
+#, rust-format
+msgid "{network}, connecting"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:228
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:229
+#, rust-format
+msgid "{network}, secured"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:376
+#: ../../../../system/athanor-settings-core/src/registry.rs:130
+msgid "Network"
+msgstr "Rete"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:380
+msgid "Wi-Fi"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:387
+#, fuzzy
+msgid "Airplane mode"
+msgstr "Modalità schermo"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:420
+msgid "The password was not accepted. Try again."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:423
+msgid "Password"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:431
+#, fuzzy
+msgid "Connect"
+msgstr "Connessioni"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:712
+#, rust-format
+msgid "Password for {network}"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:729
+msgid "Wired: connected"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:730
+msgid "Wired: not connected"
+msgstr ""
+
 #: ../../../../system/athanor-settings-core/src/registry.rs:33
 msgid "Connections"
 msgstr "Connessioni"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:34
-#: src/window.rs:284
+#: src/pages/about.rs:35
 msgid "Device"
 msgstr "Dispositivo"
 
@@ -22,21 +228,13 @@ msgid "Personalisation"
 msgstr "Personalizzazione"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:37
-#: src/window.rs:292 src/window.rs:294
+#: src/pages/about.rs:43 src/pages/about.rs:45
 msgid "System"
 msgstr "Sistema"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:130
-msgid "Network"
-msgstr "Rete"
-
-#: ../../../../system/athanor-settings-core/src/registry.rs:130
 msgid "network;wi-fi;wifi;wireless;ethernet;wired;internet;vpn;wireguard;hotspot;proxy;dns;mobile broadband;"
 msgstr "rete;wi-fi;wifi;senza fili;ethernet;cablata;internet;vpn;wireguard;hotspot;proxy;dns;banda larga mobile;"
-
-#: ../../../../system/athanor-settings-core/src/registry.rs:131
-msgid "Bluetooth"
-msgstr "Bluetooth"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:131
 msgid "bluetooth;pairing;headphones;wireless;"
@@ -179,7 +377,7 @@ msgid "firmware;bios;uefi;fwupd;device updates;"
 msgstr "firmware;bios;uefi;fwupd;aggiornamenti dei dispositivi;"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:149
-#: src/window.rs:281
+#: src/pages/about.rs:32
 msgid "About"
 msgstr "Informazioni"
 
@@ -235,114 +433,114 @@ msgstr "Spegnimento e sospensione"
 msgid "blank screen;screen off;suspend;sleep;idle;"
 msgstr "spegnimento schermo;schermo spento;sospensione;riposo;inattività;"
 
-#: src/window.rs:104 src/window.rs:232
-msgid "Settings"
-msgstr "Impostazioni"
-
-#: src/window.rs:111
-msgid "Search settings"
-msgstr "Cerca nelle impostazioni"
-
-#: src/window.rs:112
-msgid "Pages"
-msgstr "Pagine"
-
-#: src/window.rs:235 src/window.rs:236
-msgid "Your account"
-msgstr "Il tuo account"
-
-#: src/window.rs:242 src/window.rs:243 src/window.rs:247
-msgid "This device"
-msgstr "Questo dispositivo"
-
-#: src/window.rs:260
-msgid "Groups"
-msgstr "Gruppi"
-
-#: src/window.rs:286
+#: src/pages/about.rs:37
 msgid "Device name"
 msgstr "Nome del dispositivo"
 
-#: src/window.rs:287
+#: src/pages/about.rs:38
 msgid "Manufacturer"
 msgstr "Produttore"
 
-#: src/window.rs:288
+#: src/pages/about.rs:39
 msgid "Model"
 msgstr "Modello"
 
-#: src/window.rs:295
+#: src/pages/about.rs:46
 msgid "System integrity"
 msgstr "Integrità del sistema"
 
-#: src/window.rs:300
+#: src/pages/about.rs:51
 msgid "Processor"
 msgstr "Processore"
 
-#: src/window.rs:301
+#: src/pages/about.rs:52
 msgid "Memory"
 msgstr "Memoria"
 
-#: src/window.rs:307
+#: src/pages/about.rs:58
 msgid "Graphics"
 msgstr "Grafica"
 
-#: src/window.rs:309
+#: src/pages/about.rs:60
 msgid "Disk capacity"
 msgstr "Capacità del disco"
 
-#: src/window.rs:310
+#: src/pages/about.rs:61
 msgid "Hardware"
 msgstr "Hardware"
 
-#: src/window.rs:381 src/window.rs:388 src/window.rs:405 src/window.rs:700
-#: src/window.rs:733
+#: src/pages/about.rs:90 src/pages/about.rs:94 src/pages/about.rs:112
+#: src/pages/about.rs:171 src/pages/about.rs:206
 msgid "Not verified"
 msgstr "Non verificato"
 
-#: src/window.rs:385 src/window.rs:728
-msgid "Signed, but pinned to one build: it receives no updates"
-msgstr "Firmato, ma fermo su una sola build: non riceve aggiornamenti"
-
-#: src/window.rs:387 src/window.rs:702
+#: src/pages/about.rs:93 src/pages/about.rs:173
 msgid "Verified"
 msgstr "Verificato"
 
-#: src/window.rs:389 src/window.rs:722 src/window.rs:725
+#: src/pages/about.rs:95 src/pages/about.rs:193 src/pages/about.rs:196
 msgid "Not verified yet"
 msgstr "Non ancora verificato"
 
-#: src/window.rs:391 src/window.rs:739
+#: src/pages/about.rs:97 src/pages/about.rs:212
 msgid "Not verified: installed from media"
 msgstr "Non verificato: installato da supporto"
 
-#: src/window.rs:392
+#: src/pages/about.rs:98
 msgid "Not verified: no signature"
 msgstr "Non verificato: nessuna firma"
 
-#: src/window.rs:393
+#: src/pages/about.rs:99
 msgid "Not verified: its key is not in the policy"
 msgstr "Non verificato: la sua chiave non è nella policy"
 
-#: src/window.rs:394
+#: src/pages/about.rs:100
 msgid "Not verified: fetched under a permissive policy"
 msgstr "Non verificato: scaricato con una policy permissiva"
 
-#: src/window.rs:396
+#: src/pages/about.rs:102
 msgid "Not verified: the image is outside the policy's scope"
 msgstr "Non verificato: l'immagine è fuori dall'ambito della policy"
 
-#: src/window.rs:398
+#: src/pages/about.rs:104
 msgid "Not verified: the system was changed on this machine"
 msgstr "Non verificato: il sistema è stato modificato su questa macchina"
 
-#: src/window.rs:400
+#: src/pages/about.rs:106
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr "Non verificato: in attesa della pubblicazione del canale stabile"
 
-#: src/window.rs:403
+#: src/pages/about.rs:109
 msgid "Not verified: this machine does not verify its updates"
 msgstr "Non verificato: questa macchina non verifica i suoi aggiornamenti"
+
+#: src/pages/about.rs:111 src/pages/about.rs:201
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr "Firmato, ma fermo su una sola build: non riceve aggiornamenti"
+
+#: src/window.rs:62 src/window.rs:293
+msgid "Settings"
+msgstr "Impostazioni"
+
+#: src/window.rs:69
+msgid "Search settings"
+msgstr "Cerca nelle impostazioni"
+
+#: src/window.rs:70
+msgid "Pages"
+msgstr "Pagine"
+
+#: src/window.rs:296 src/window.rs:297
+msgid "Your account"
+msgstr "Il tuo account"
+
+#: src/window.rs:303 src/window.rs:304 src/window.rs:308
+msgid "This device"
+msgstr "Questo dispositivo"
+
+#: src/window.rs:321
+msgid "Groups"
+msgstr "Gruppi"
 
 #~ msgid "The last update was refused by the policy"
 #~ msgstr "L'ultimo aggiornamento è stato rifiutato dalla politica"
