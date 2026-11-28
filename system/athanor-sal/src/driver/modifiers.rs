@@ -15,6 +15,9 @@ pub struct KeyModifiers {
     pub alt: bool,
     /// The logo key, Super.
     pub logo: bool,
+    /// Caps Lock is on, as the keyboard's xkb state has it: a lock, not a modifier held with
+    /// the key, which a password prompt warns of.
+    pub caps_lock: bool,
 }
 
 impl From<Modifiers> for KeyModifiers {
@@ -24,6 +27,7 @@ impl From<Modifiers> for KeyModifiers {
             shift: held.shift,
             alt: held.alt,
             logo: held.logo,
+            caps_lock: held.caps_lock,
         }
     }
 }
@@ -33,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_locks_are_not_modifiers_of_a_key() {
+    fn caps_lock_is_reported_and_num_lock_is_not() {
         let held = Modifiers {
             ctrl: true,
             caps_lock: true,
@@ -42,8 +46,18 @@ mod tests {
         };
         let want = KeyModifiers {
             ctrl: true,
+            caps_lock: true,
             ..KeyModifiers::default()
         };
         assert_eq!(KeyModifiers::from(held), want);
+    }
+
+    #[test]
+    fn caps_lock_off_is_reported_off() {
+        let held = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(!KeyModifiers::from(held).caps_lock);
     }
 }
