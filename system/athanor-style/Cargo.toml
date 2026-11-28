@@ -8,7 +8,7 @@ authors = ["Athanor Architect <architect@athanor.os>"]
 
 [features]
 default = ["gtk"]
-# The GTK stylesheets and the pre-Calmo glass theme with its engines. Without it, the
+# The GTK stylesheets and the pre-Calmo accent and appearance engines. Without it, the
 # appearance and the variants build with GIO alone, for a surface that does not use GTK.
 gtk = [
     "dep:gtk4",
