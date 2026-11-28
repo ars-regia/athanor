@@ -7,6 +7,7 @@
 
 mod clipboard;
 mod dialog;
+mod globals;
 mod layout;
 mod modifiers;
 
@@ -88,10 +89,11 @@ use smithay_client_toolkit::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::ops::RangeInclusive;
 use wayland_client::{
-    globals::registry_queue_init,
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
-    Connection, Proxy, QueueHandle,
+    globals::{registry_queue_init, BindError},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_surface},
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
 
 /// What a single window does with each event; it may change the widgets. See [`run_window`].
@@ -437,8 +439,8 @@ fn run_on(
 
     let shm = Shm::bind(&globals, &qh)?;
     let shell = Shell {
-        #[cfg(feature = "gpu")]
         conn: conn.clone(),
+        registry: globals.registry().clone(),
         #[cfg(feature = "gpu")]
         gpu,
         qh: qh.clone(),
@@ -615,8 +617,9 @@ impl<O: PartialEq, S: Copy + PartialEq> PerOutput<O, S> {
 /// The surfaces open, and what opening one takes. The application reaches the widgets of each
 /// through it.
 pub struct Shell {
-    #[cfg(feature = "gpu")]
     conn: Connection,
+    /// The registry, which [`Shell::bind_global`] binds an application's global from.
+    registry: wl_registry::WlRegistry,
     /// [`RENDERER`] asks for vello_gpu.
     #[cfg(feature = "gpu")]
     gpu: bool,
@@ -911,6 +914,40 @@ impl Shell {
     /// [`Application::layout_changed`] tells when it changes.
     pub fn keyboard_layout(&self) -> Option<(u32, String)> {
         self.layouts.active()
+    }
+
+    /// A queue of the application's own on the driver's connection, for a global bound through
+    /// [`Shell::bind_global`] and the objects made from it, whose events go to the application's
+    /// own `Dispatch` implementations on `D`. The driver reads and flushes the connection; the
+    /// application calls [`EventQueue::dispatch_pending`] in [`Application::turn`], which follows
+    /// each read, and never `roundtrip` nor `blocking_dispatch`, which would read the connection
+    /// behind the driver's back.
+    // ponytail: with the `gpu` feature wgpu may read the connection outside the loop, and an
+    // event it reads for this queue waits for the next turn; no gpu client binds a global today.
+    pub fn event_queue<D>(&self) -> EventQueue<D> {
+        self.conn.new_event_queue()
+    }
+
+    /// Binds a global the driver does not, found by the name of `I`'s interface, at the highest
+    /// version of `version` the compositor offers, on a `queue` of [`Shell::event_queue`]: a
+    /// protocol of the application's own, on the driver's one connection, which a compositor
+    /// that admits clients by their connection, as athanor-sulphur does, admits as it admits the
+    /// driver. A global the compositor does not announce to this client is
+    /// [`BindError::NotPresent`]; one below `version`, or a `version` past what `I`'s description
+    /// knows, is [`BindError::UnsupportedVersion`]. Of a global announced more than once, the
+    /// first.
+    pub fn bind_global<I, D, U>(
+        &self,
+        queue: &QueueHandle<D>,
+        version: RangeInclusive<u32>,
+        data: U,
+    ) -> Result<I, BindError>
+    where
+        I: Proxy + 'static,
+        D: Dispatch<I, U> + 'static,
+        U: Send + Sync + 'static,
+    {
+        globals::bind(&self.registry, queue, version, data)
     }
 
     /// The surface the open menu was opened from, if a menu is open.
@@ -5083,6 +5120,7 @@ mod tests {
     ) -> std::thread::JoinHandle<std::io::Result<Vec<Request>>> {
         std::thread::spawn(move || {
             let mut requests = Vec::new();
+            let mut registry = 0;
             loop {
                 let mut header = [0; 8];
                 match server.read_exact(&mut header) {
@@ -5099,6 +5137,7 @@ mod tests {
                 match (object, opcode) {
                     // wl_display.get_registry: the globals, named from 1.
                     (1, 1) => {
+                        registry = new_id;
                         for (name, (interface, version)) in (1u32..).zip(globals) {
                             let mut global = name.to_ne_bytes().to_vec();
                             global.extend(string(interface));
@@ -5113,6 +5152,12 @@ mod tests {
                         let mut done = message(new_id, 0, &0u32.to_ne_bytes());
                         done.extend(message(1, 1, &new_id.to_ne_bytes()));
                         server.write_all(&done)?;
+                    }
+                    // wl_registry.bind of wl_shm: one wl_shm.format, argb8888, to the new
+                    // object, the last word, as a compositor announces its formats.
+                    (object, 0) if object == registry && args.get(8..15) == Some(b"wl_shm\0") => {
+                        let id = args.len().checked_sub(4).and_then(|at| word(&args, at));
+                        server.write_all(&message(id.unwrap_or(0), 0, &0u32.to_ne_bytes()))?;
                     }
                     _ => {}
                 }
@@ -5181,6 +5226,107 @@ mod tests {
     }
 
     const WITH_ACTIVATION: &[(&str, u32)] = &[("wl_compositor", 4), ("xdg_activation_v1", 1)];
+
+    /// The application's own state for a global the driver does not bind: the formats its
+    /// wl_shm announced.
+    #[derive(Default)]
+    struct Formats(Vec<wayland_client::WEnum<wl_shm::Format>>);
+
+    impl wayland_client::Dispatch<wl_shm::WlShm, ()> for Formats {
+        fn event(
+            state: &mut Self,
+            _: &wl_shm::WlShm,
+            event: wl_shm::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            if let wl_shm::Event::Format { format } = event {
+                state.0.push(format);
+            }
+        }
+    }
+
+    wayland_client::delegate_noop!(Formats: ignore wl_seat::WlSeat);
+
+    impl wayland_client::Dispatch<wl_registry::WlRegistry, wayland_client::globals::GlobalListContents>
+        for Client
+    {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &wayland_client::globals::GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    /// The compositor's thread, as [`compositor`] returns it.
+    type Thread = std::thread::JoinHandle<std::io::Result<Vec<Request>>>;
+
+    /// A connection to a [`compositor`] that offers `offered`, its registry read, and the
+    /// driver's queue in an event loop, as [`run`] has them.
+    fn driver_on(
+        offered: &'static [(&'static str, u32)],
+    ) -> Result<(EventLoop<'static, Client>, Connection, wl_registry::WlRegistry, Thread), Error> {
+        let (client, server) = UnixStream::pair()?;
+        let thread = compositor(server, offered);
+        let conn = Connection::from_socket(client)?;
+        let (globals, queue) = registry_queue_init::<Client>(&conn)?;
+        let event_loop = EventLoop::try_new()?;
+        WaylandSource::new(conn.clone(), queue)
+            .insert(event_loop.handle())
+            .map_err(|e| e.error.to_string())?;
+        Ok((event_loop, conn, globals.registry().clone(), thread))
+    }
+
+    /// #1504, T1 (b'): a global bound for the application on the driver's connection delivers
+    /// its events to the application's queue once the driver's loop has read them; the
+    /// application's queue reads nothing itself.
+    #[test]
+    fn a_global_bound_for_the_application_reaches_its_queue() -> Result<(), Error> {
+        let (mut event_loop, conn, registry, thread) = driver_on(&[("wl_shm", 1)])?;
+        let mut queue = conn.new_event_queue::<Formats>();
+        let shm: wl_shm::WlShm = globals::bind(&registry, &queue.handle(), 1..=2, ())?;
+        assert_eq!(shm.version(), 1, "the highest the compositor offers");
+        let mut formats = Formats::default();
+        for _ in 0..100 {
+            dispatch(&mut event_loop, &conn, Some(Duration::from_millis(10)), &mut Client)?;
+            queue.dispatch_pending(&mut formats)?;
+            if !formats.0.is_empty() {
+                break;
+            }
+        }
+        let argb = wayland_client::WEnum::Value(wl_shm::Format::Argb8888);
+        assert_eq!(formats.0, [argb]);
+        drop((shm, queue, registry, event_loop, conn));
+        thread.join().map_err(|_| "the compositor's thread panicked")??;
+        Ok(())
+    }
+
+    /// A global not announced, or out of reach, is an error, never the panic of
+    /// wayland-client's `GlobalList::bind` on a version past the interface's description.
+    #[test]
+    fn a_global_absent_or_out_of_reach_is_refused() -> Result<(), Error> {
+        let (event_loop, conn, registry, thread) = driver_on(&[("wl_shm", 1)])?;
+        let queue = conn.new_event_queue::<Formats>();
+        let qh = queue.handle();
+        let seat = globals::bind::<wl_seat::WlSeat, _, _>(&registry, &qh, 1..=1, ());
+        assert!(matches!(seat, Err(BindError::NotPresent)), "{seat:?}");
+        let above = globals::bind::<wl_shm::WlShm, _, _>(&registry, &qh, 2..=2, ());
+        assert!(matches!(above, Err(BindError::UnsupportedVersion)), "{above:?}");
+        let unknown = wl_shm::WlShm::interface().version + 1;
+        let past = globals::bind::<wl_shm::WlShm, _, _>(&registry, &qh, 1..=unknown, ());
+        assert!(matches!(past, Err(BindError::UnsupportedVersion)), "{past:?}");
+        #[allow(clippy::reversed_empty_ranges)]
+        let empty = globals::bind::<wl_shm::WlShm, _, _>(&registry, &qh, 1..=0, ());
+        assert!(matches!(empty, Err(BindError::UnsupportedVersion)), "{empty:?}");
+        drop((qh, queue, registry, event_loop, conn));
+        thread.join().map_err(|_| "the compositor's thread panicked")??;
+        Ok(())
+    }
 
     /// SL2: a window is raised with the token it is given, on its own wl_surface.
     #[test]
