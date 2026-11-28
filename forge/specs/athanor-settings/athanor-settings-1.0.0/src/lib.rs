@@ -5,4 +5,5 @@
 pub mod i18n;
 pub mod info;
 pub mod look;
+mod pages;
 pub mod window;

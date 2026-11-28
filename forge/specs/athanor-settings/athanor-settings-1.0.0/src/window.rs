@@ -1,33 +1,26 @@
 //! The window of doc_settings.md SE3: the sidebar, its search, and the page beside it, which is
 //! the landing page until a page is opened. Only the pages this build draws are listed and
-//! opened ([`BUILT`]); the rest of the registry joins as SE26 builds it.
+//! opened ([`pages::PAGES`]); the rest of the registry joins as SE26 builds it.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use athanor_sal::driver::Role;
-use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, WindowButton, Wrap};
+use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, WindowButton};
 use athanor_settings_core::registry::{Group, Page, Registry};
 use athanor_settings_core::target::{self, Target};
 use athanor_settings_core::window_state;
 use athanor_style::appearance::Appearance;
-use athanor_trust_state::{Badge, ReadError, Reason, State};
 
 use crate::i18n::tr;
-use crate::info::{self, Hardware, Info};
+use crate::info::{self, Info};
 use crate::look::{self, Look};
+use crate::pages::{self, Ctx};
 
 /// The application id, as the name of Settings' `.desktop` file.
 pub const APP_ID: &str = "os.athanor.Settings";
-
-/// The pages this build draws (SE26, step 1).
-pub const BUILT: &[&str] = &["about"];
-
-/// A row of a read-only page: its label, and its value when one was read.
-type Line = (String, Option<String>);
 
 /// The target of the oldest queued `Show`, which leaves the queue.
 pub fn take_show(registry: &Registry, shows: &RefCell<VecDeque<String>>) -> Option<Target> {
@@ -39,7 +32,7 @@ pub fn take_show(registry: &Registry, shows: &RefCell<VecDeque<String>>) -> Opti
 /// the landing page, with one journal line (SE4).
 pub fn resolve(registry: &Registry, text: &str) -> Target {
     match target::parse(registry, text) {
-        Ok(target) if target.page().is_none_or(|page| BUILT.contains(&page)) => target,
+        Ok(target) if target.page().is_none_or(pages::built) => target,
         Ok(target) => {
             tracing::warn!(%target, "this page is not built yet; the landing page opens");
             Target::Landing
@@ -52,7 +45,7 @@ pub fn resolve(registry: &Registry, text: &str) -> Target {
 }
 
 fn listed(page: &Page) -> bool {
-    BUILT.contains(&page.id)
+    pages::built(page.id)
 }
 
 /// The first page the window shows.
@@ -102,8 +95,8 @@ pub struct Settings {
     current: Target,
     info: Rc<RefCell<Info>>,
     system: Option<String>,
-    /// Read when About is first drawn: pci.ids alone is over a megabyte.
-    hardware: Option<Hardware>,
+    /// Every page of the build, made once and kept while the process lives (SE5).
+    pages: Vec<(&'static str, Box<dyn pages::Page>)>,
     /// The targets `Show` was called with since the last turn.
     shows: Rc<RefCell<VecDeque<String>>>,
     /// Where the current target is written (SE5); `None` writes nothing.
@@ -138,7 +131,7 @@ impl Settings {
             current: Target::Landing,
             info,
             system: info::system(),
-            hardware: None,
+            pages: pages::PAGES.iter().map(|page| (page.id, (page.new)())).collect(),
             shows,
             state_dir,
             reopening: false,
@@ -228,11 +221,30 @@ impl Settings {
     fn draw_page(&mut self, ui: &mut Ui) {
         ui.remove_children(self.page);
         self.page_links.clear();
-        match self.current.page() {
-            Some("about") => self.about(ui),
-            _ => self.landing(ui),
+        let column = self.page;
+        if !self.on_page(|page, ctx| page.draw(ctx, ui, column)) {
+            self.landing(ui);
         }
         ui.layout();
+    }
+
+    /// Runs `f` on the open page with what the window lends it; `false` when the window shows
+    /// the landing page.
+    fn on_page(&mut self, f: impl FnOnce(&mut dyn pages::Page, &Ctx)) -> bool {
+        let Some(id) = self.current.page() else {
+            return false;
+        };
+        let Some((_, page)) = self.pages.iter_mut().find(|(page, _)| *page == id) else {
+            return false;
+        };
+        let ctx = Ctx {
+            look: &self.look,
+            registry: &self.registry,
+            info: &self.info,
+            system: self.system.as_deref(),
+        };
+        f(page.as_mut(), &ctx);
+        true
     }
 
     fn title(&self, ui: &mut Ui, text: &str) {
@@ -282,63 +294,6 @@ impl Settings {
             let label = group.heading().unwrap_or_else(|| first.title.clone());
             let button = ui.add(groups, Kind::Button(label));
             self.page_links.push((button, Target::Page(first.id)));
-        }
-    }
-
-    /// About (SE22), read-only: what the system says of itself with no privilege.
-    fn about(&mut self, ui: &mut Ui) {
-        let hardware = self.hardware.get_or_insert_with(info::hardware);
-        let info = self.info.borrow();
-        let title = self
-            .registry
-            .page("about")
-            .map_or_else(|| tr("About"), |page| page.title.clone());
-        let mut rows: Vec<(String, Vec<Line>)> = vec![
-            (
-                tr("Device"),
-                vec![
-                    (tr("Device name"), info.device_name().map(str::to_owned)),
-                    (tr("Manufacturer"), info.vendor.clone()),
-                    (tr("Model"), info.model.clone()),
-                ],
-            ),
-            (
-                tr("System"),
-                vec![
-                    (tr("System"), self.system.clone()),
-                    (tr("System integrity"), Some(trust_text(info.trust.as_ref(), now()))),
-                ],
-            ),
-        ];
-        let mut parts = vec![
-            (tr("Processor"), hardware.processor.clone()),
-            (tr("Memory"), hardware.memory.clone()),
-        ];
-        parts.extend(
-            hardware
-                .graphics
-                .iter()
-                .map(|name| (tr("Graphics"), Some(name.clone()))),
-        );
-        parts.push((tr("Disk capacity"), hardware.disk.clone()));
-        rows.push((tr("Hardware"), parts));
-        drop(info);
-
-        self.title(ui, &title);
-        for (name, lines) in rows {
-            let group = ui.add(self.page, Kind::Group(name.clone()));
-            let heading = ui.add(group, Kind::Label(name));
-            self.look.heading(ui, heading);
-            // ponytail: two labels side by side until Sal's preference row (SL4) reads them as
-            // one control named by its title.
-            for (label, value) in lines {
-                let Some(value) = value else { continue };
-                let row = ui.add(group, Kind::Row);
-                let label = ui.add(row, Kind::Label(label));
-                self.look.note(ui, label);
-                let value = ui.add(row, Kind::Label(value));
-                ui.set_wrap(value, Some(Wrap::default()));
-            }
         }
     }
 
@@ -411,46 +366,6 @@ impl Settings {
     }
 }
 
-/// The trust state as About words it (SE22): the shield's own classification
-/// (`athanor_trust_state::badge`, at `now`), so "Verified" only where the shield shows the
-/// system as verified. A refused update is the shield's to say, not About's, so that badge
-/// reads plain "Not verified", as every state that was not read or not trusted does.
-fn trust_text(read: Option<&Result<State, ReadError>>, now: i64) -> String {
-    let Some(Ok(state)) = read else {
-        return tr("Not verified");
-    };
-    match athanor_trust_state::badge(state, now) {
-        Badge::Check => tr("Verified"),
-        Badge::Cross => tr("Not verified"),
-        Badge::Attention if state.verified.value => tr("Not verified yet"),
-        Badge::Attention => match state.verified.reason {
-            Reason::Media => tr("Not verified: installed from media"),
-            Reason::NoSignature => tr("Not verified: no signature"),
-            Reason::KeyNotInPolicy => tr("Not verified: its key is not in the policy"),
-            Reason::PolicyNotInForce => tr("Not verified: fetched under a permissive policy"),
-            Reason::ReferenceOutOfScope => {
-                tr("Not verified: the image is outside the policy's scope")
-            }
-            Reason::LocalChanges => tr("Not verified: the system was changed on this machine"),
-            Reason::ChannelAbsent => {
-                tr("Not verified: waiting for the stable channel to be published")
-            }
-            Reason::OriginNotEnforcing => {
-                tr("Not verified: this machine does not verify its updates")
-            }
-            Reason::PinnedBuild => tr("Signed, but pinned to one build: it receives no updates"),
-            Reason::Signature => tr("Not verified"),
-        },
-    }
-}
-
-/// Seconds since the epoch, as the shield counts the age of the last check.
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX))
-}
-
 /// Whether a Close of `surface` closes Settings' window (SE5): the window has no id before its
 /// first frame, so any surface is it then; afterwards only the one it drew on. Generic, as
 /// `SurfaceId` has no constructor outside Sal.
@@ -501,14 +416,16 @@ impl Application for Settings {
                     self.navigate(ui, target);
                 }
             }
-            Event::Selected(id) | Event::Clicked(id) => {
+            Event::Selected(id) | Event::Clicked(id) if self.link(id).is_some() => {
                 if let Some(target) = self.link(id) {
                     if target != self.current {
                         self.navigate(ui, target);
                     }
                 }
             }
-            _ => {}
+            event => {
+                self.on_page(|page, ctx| page.event(ctx, ui, &event));
+            }
         }
     }
 
@@ -555,9 +472,18 @@ impl Application for Settings {
 mod tests {
     use super::*;
     use athanor_style::appearance::Appearance;
-    use athanor_trust_state::{
-        state_reply, Deployment, ErrorCode, Policy, SecureBoot, UpdateState, Verified, SCHEMA,
-    };
+
+    impl Settings {
+        /// About as if it had read `hardware`, so that it reads nothing of the host.
+        fn about(&mut self, hardware: info::Hardware) {
+            let about = pages::about::About {
+                hardware: Some(hardware),
+            };
+            if let Some((_, page)) = self.pages.iter_mut().find(|(id, _)| *id == "about") {
+                *page = Box::new(about);
+            }
+        }
+    }
 
     fn settings(first: Target) -> Settings {
         Settings::new(
@@ -678,7 +604,7 @@ mod tests {
     #[test]
     fn a_long_hardware_name_wraps_inside_the_window() {
         let mut settings = settings(Target::Landing);
-        settings.hardware = Some(info::Hardware {
+        settings.about(info::Hardware {
             processor: None,
             memory: None,
             graphics: vec!["NVIDIA Corporation AD103 [GeForce RTX 4080 SUPER] ".repeat(4)],
@@ -753,7 +679,7 @@ Group(\"Hardware\") 400@1.000
     fn about_draws_its_rows_in_order_and_skips_the_values_not_read() {
         let mut settings = settings(Target::Landing);
         settings.system = Some("Athanor 1.0".into());
-        settings.hardware = Some(info::Hardware {
+        settings.about(info::Hardware {
             processor: Some("CPU 8 cores".into()),
             memory: None,
             graphics: vec!["GPU A".into(), "GPU B".into()],
@@ -864,89 +790,5 @@ Group(\"Hardware\") 400@1.000
         assert!(closes_window(None, 7), "before the first frame any surface is the window");
         assert!(closes_window(Some(7), 7));
         assert!(!closes_window(Some(7), 8), "a dialog's Close leaves the window open");
-    }
-
-    const NOW: i64 = 1_800_000_000;
-
-    /// A state the shield shows as verified, with the update service at rest.
-    fn state(verified: Verified) -> State {
-        let booted = Deployment {
-            image: "registry.example/athanor-system:stable".into(),
-            digest: format!("sha256:{}", "1".repeat(64)),
-            version: "43.20260915.2".into(),
-            build_time: NOW - 86_400,
-        };
-        State {
-            schema: SCHEMA,
-            booted,
-            downloaded: None,
-            previous: None,
-            verified,
-            update: UpdateState::None,
-            policy: Policy {
-                path: "/etc/containers/policy.json".into(),
-                sha256: "ab".repeat(32),
-                shipped: true,
-            },
-            secure_boot: SecureBoot {
-                secure_boot: Some(1),
-                setup_mode: Some(0),
-                mok_sb_state: None,
-                lockdown: Some("integrity".into()),
-            },
-            newest_booted_build_time: NOW - 86_400,
-            last_successful_check: Some(NOW - 3_600),
-            last_error: ErrorCode::None,
-            last_error_host: None,
-            automatic_security_updates: true,
-            postpone: None,
-        }
-    }
-
-    #[test]
-    fn only_a_verified_state_from_root_reads_verified() {
-        let json = serde_json::to_string(&state(Reason::Signature.into())).expect("serialises");
-        let not_verified = tr("Not verified");
-        let read = state_reply(Ok(&json), Some(0));
-        assert_eq!(trust_text(Some(&read), NOW), tr("Verified"));
-        for read in [
-            state_reply(Ok(&json), Some(1000)),
-            state_reply(Ok(&json), None),
-            state_reply(Err(None), Some(0)),
-            state_reply(Err(Some("os.athanor.Update1.Error.NoState")), Some(0)),
-            state_reply(Err(Some("os.athanor.Update1.Error.Untrusted")), Some(0)),
-            state_reply(Err(Some("os.athanor.Update1.Error.Unreadable")), Some(0)),
-            state_reply(Ok("{"), Some(0)),
-        ] {
-            assert_eq!(trust_text(Some(&read), NOW), not_verified, "{read:?}");
-        }
-        assert_eq!(trust_text(None, NOW), not_verified, "not yet read");
-    }
-
-    #[test]
-    fn verified_reads_verified_only_where_the_shield_shows_it() {
-        let words = |state: State| trust_text(Some(&Ok(state)), NOW);
-        let mut stale = state(Reason::Signature.into());
-        stale.last_successful_check = Some(NOW - 15 * 86_400);
-        assert_eq!(words(stale), tr("Not verified yet"));
-        let mut older = state(Reason::Signature.into());
-        older.newest_booted_build_time = NOW;
-        assert_eq!(words(older), tr("Not verified yet"));
-        // Through the parser, as a real read goes: it refuses a pair that disagrees.
-        let json = serde_json::to_string(&state(Reason::PinnedBuild.into())).expect("serialises");
-        assert_eq!(
-            trust_text(Some(&state_reply(Ok(&json), Some(0))), NOW),
-            tr("Signed, but pinned to one build: it receives no updates")
-        );
-        // The update verdict is the shield's, not About's.
-        let mut refused = state(Reason::Signature.into());
-        refused.update = UpdateState::Refused;
-        assert_eq!(words(refused), tr("Not verified"));
-    }
-
-    #[test]
-    fn a_state_that_is_not_verified_gives_its_reason() {
-        let read = Ok(state(Reason::Media.into()));
-        assert_eq!(trust_text(Some(&read), NOW), tr("Not verified: installed from media"));
     }
 }
