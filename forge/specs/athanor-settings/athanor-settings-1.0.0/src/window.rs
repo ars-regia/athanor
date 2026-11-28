@@ -690,6 +690,90 @@ mod tests {
         assert_eq!(ui.layout().0, width, "the window keeps its width");
     }
 
+    /// The widgets under `id`, one line each, indented by depth: what each is and shows, and
+    /// its text's weight and scale. Rects are left out: they follow the fonts installed.
+    fn outline(ui: &Ui, id: WidgetId, depth: usize, out: &mut String) {
+        let widget = ui.widget(id);
+        let style = widget.text_style();
+        let kind = match &widget.kind {
+            Kind::Label(text) => format!("Label({text:?})"),
+            Kind::Group(name) => format!("Group({name:?})"),
+            Kind::Row => "Row".to_owned(),
+            _ => "another kind".to_owned(),
+        };
+        out.push_str(&format!(
+            "{}{kind} {}@{:.3}\n",
+            "  ".repeat(depth),
+            style.weight,
+            style.scale
+        ));
+        for &child in &widget.children {
+            outline(ui, child, depth + 1, out);
+        }
+    }
+
+    const ABOUT: &str = "\
+Label(\"About\") 700@1.360
+Group(\"Device\") 400@1.000
+  Label(\"Device\") 600@0.885
+  Row 400@1.000
+    Label(\"Device name\") 400@0.885
+    Label(\"Desk\") 400@1.000
+  Row 400@1.000
+    Label(\"Manufacturer\") 400@0.885
+    Label(\"Maker\") 400@1.000
+  Row 400@1.000
+    Label(\"Model\") 400@0.885
+    Label(\"Model 7\") 400@1.000
+Group(\"System\") 400@1.000
+  Label(\"System\") 600@0.885
+  Row 400@1.000
+    Label(\"System\") 400@0.885
+    Label(\"Athanor 1.0\") 400@1.000
+  Row 400@1.000
+    Label(\"System integrity\") 400@0.885
+    Label(\"Not verified\") 400@1.000
+Group(\"Hardware\") 400@1.000
+  Label(\"Hardware\") 600@0.885
+  Row 400@1.000
+    Label(\"Processor\") 400@0.885
+    Label(\"CPU 8 cores\") 400@1.000
+  Row 400@1.000
+    Label(\"Graphics\") 400@0.885
+    Label(\"GPU A\") 400@1.000
+  Row 400@1.000
+    Label(\"Graphics\") 400@0.885
+    Label(\"GPU B\") 400@1.000
+  Row 400@1.000
+    Label(\"Disk capacity\") 400@0.885
+    Label(\"512 GB\") 400@1.000
+";
+
+    #[test]
+    fn about_draws_its_rows_in_order_and_skips_the_values_not_read() {
+        let mut settings = settings(Target::Landing);
+        settings.system = Some("Athanor 1.0".into());
+        settings.hardware = Some(info::Hardware {
+            processor: Some("CPU 8 cores".into()),
+            memory: None,
+            graphics: vec!["GPU A".into(), "GPU B".into()],
+            disk: Some("512 GB".into()),
+        });
+        {
+            let mut info = settings.info.borrow_mut();
+            info.pretty_hostname = Some("Desk".into());
+            info.vendor = Some("Maker".into());
+            info.model = Some("Model 7".into());
+        }
+        let mut ui = settings.ui.take().expect("not started");
+        settings.navigate(&mut ui, Target::Page("about"));
+        let mut drawn = String::new();
+        for &child in &ui.widget(settings.page).children {
+            outline(&ui, child, 0, &mut drawn);
+        }
+        assert_eq!(drawn, ABOUT);
+    }
+
     #[test]
     fn a_reopened_page_is_built_after_the_connection_inside_the_marker() {
         let nanos = std::time::SystemTime::now()
