@@ -5289,6 +5289,8 @@ mod tests {
         #[allow(clippy::reversed_empty_ranges)]
         let empty = globals::bind::<wl_shm::WlShm, _, _>(&registry, &qh, 1..=0, ());
         assert!(matches!(empty, Err(BindError::UnsupportedVersion)), "{empty:?}");
+        let zero = globals::bind::<wl_shm::WlShm, _, _>(&registry, &qh, 0..=0, ());
+        assert!(matches!(zero, Err(BindError::UnsupportedVersion)), "{zero:?}");
         drop((qh, queue, registry, event_loop, conn));
         thread.join().map_err(|_| "the compositor's thread panicked")??;
         Ok(())
