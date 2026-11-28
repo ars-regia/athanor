@@ -26,6 +26,7 @@ use athanor_settings_core::target;
 use athanor_settings_core::window_state;
 use athanor_style::appearance::Appearance;
 use athanor_sulphur_client::glib_loop::GlibSource;
+use athanor_sulphur_client::store::Store;
 use athanor_unit::dirs::{self, Dirs};
 use athanor_unit::{journal, sandbox};
 
@@ -109,12 +110,9 @@ fn data_home(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
 }
 
 /// The user configuration and data directories SE6 grants for writing when present (`doc_settings.md:67-71`).
+/// The preference store directory comes from `athanor_sulphur_client::store::Store` (ADR-0150).
 fn se6_write_dirs(dirs: &Dirs, data_home: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = vec![
-        dirs.config.join("athanor"),
-        dirs.config.join("athanor/sulphur"),
-        dirs.config.join("autostart"),
-    ];
+    let mut paths = vec![dirs.config.join("athanor"), dirs.config.join("autostart")];
     if let Some(data) = data_home {
         paths.push(data.join("backgrounds"));
     }
@@ -148,7 +146,10 @@ fn main() -> ExitCode {
     // SE6: before any thread. Grants the runtime state and dconf flag, fontconfig's cache, and
     // any existing SE6 user configuration/data directories (`doc_settings.md:65-73`).
     let mut write = dirs::private_dirs(&dirs.runtime, &["athanor-settings", "dconf"]);
-    let se6 = se6_write_dirs(&dirs, data_home(|name| env::var_os(name)).as_deref());
+    let mut se6 = se6_write_dirs(&dirs, data_home(|name| env::var_os(name)).as_deref());
+    if let Ok(store_dir) = Store::from_env().and_then(|store| store.dir_for_confinement()) {
+        se6.push(store_dir);
+    }
     let mut existing_dirs: Vec<&Path> = Vec::with_capacity(1 + se6.len());
     existing_dirs.push(dirs.cache.as_path());
     existing_dirs.extend(se6.iter().map(PathBuf::as_path));
@@ -330,7 +331,6 @@ mod tests {
             se6_write_dirs(&dirs, data.as_deref()),
             vec![
                 PathBuf::from("/home/ada/.config/athanor"),
-                PathBuf::from("/home/ada/.config/athanor/sulphur"),
                 PathBuf::from("/home/ada/.config/autostart"),
                 PathBuf::from("/home/ada/.local/share/backgrounds"),
             ]
