@@ -150,7 +150,7 @@ fn main() -> ExitCode {
     if let Ok(store_dir) = Store::from_env().and_then(|store| store.dir_for_confinement()) {
         se6.push(store_dir);
     }
-    let mut existing_dirs: Vec<&Path> = Vec::with_capacity(1 + se6.len());
+    let mut existing_dirs: Vec<&Path> = Vec::with_capacity(se6.len().saturating_add(1));
     existing_dirs.push(dirs.cache.as_path());
     existing_dirs.extend(se6.iter().map(PathBuf::as_path));
     write.extend(dirs::existing(&existing_dirs, dirs::owned_dir));
