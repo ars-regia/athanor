@@ -4509,7 +4509,7 @@ COSMIC_ALLOWED = (
     "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings/cosmic.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
-COSMIC_APPLICATION_ID = re.compile(r"com\.system76\.\w+\.desktop\b|app-athanor-com\.system76\.\w+\*@\.service\b")
+COSMIC_APPLICATION_ID = re.compile(r"com\.system76\.\w+\.desktop\b|app-athanor-com\.system76\.\w+(?:\*@|@[\w-]+)\.service\b")
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
                      "build-dependencies", "build_dependencies")
 
@@ -4555,7 +4555,7 @@ def boundary_problems(root):
             for i, line in enumerate(read(path).split("\n"), 1):
                 # A desktop id names an application, not a configuration (the favourites'
                 # successors of COSMIC's former default apps, doc_bar.md BR7), and so does the
-                # family of units an allow-list line names for it.
+                # family of units an allow-list line names for it, and a unit of that family.
                 if "com.system76" in COSMIC_APPLICATION_ID.sub("", line.split("//")[0]):
                     problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
                                     f"through athanor-sulphur-client")

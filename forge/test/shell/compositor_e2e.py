@@ -60,12 +60,12 @@ failures = []
 
 
 def probe(*steps, display=None, unit=False):
-    """Runs cc-probe, with `unit` as rig-cc-probe.service; returns its exit code and its JSON
-    lines."""
+    """Runs cc-probe, with `unit` as rig-cc-probe.service, or as the unit `unit` names; returns
+    its exit code and its JSON lines."""
     env = dict(os.environ)
     if display:
         env["WAYLAND_DISPLAY"] = display
-    command = [str(IN_UNIT), "rig-cc-probe.service", PROBE] if unit else [PROBE]
+    command = [str(IN_UNIT), "rig-cc-probe.service" if unit is True else unit, PROBE] if unit else [PROBE]
     run = subprocess.run([*command, *steps], env=env, capture_output=True, text=True, timeout=60)
     lines = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
     if run.stderr.strip():
@@ -333,6 +333,16 @@ def athanor():
     expect("athanor: outside its unit the keyboard group is refused",
            code == 1 and len(errors) == 1
            and "does not offer athanor_keyboard_group_manager_v1" in errors[0], lines)
+    # A line of the allow-list names rig-user-cc-probe.service too, which fake_systemd.py answers
+    # as a unit the user defined under ~/.config/systemd/user: the origin check refuses it, so
+    # the probe there is granted nothing, and the compositor says why (OS4, #1560).
+    code, lines = probe("snapshot", unit="rig-user-cc-probe.service")
+    expect("athanor: in a unit the user defined the probe sees no window, nor the own compositor",
+           code == 0 and snapshot(lines).get("windows") == []
+           and snapshot(lines).get("own_compositor") is False, lines)
+    log = Path(f"/out/{os.environ.get('RIG_TAG', 'scene')}-compositor.log").read_text(encoding="utf-8")
+    expect("athanor: the origin check refused the unit the user defined, by its file",
+           "rig-user-cc-probe.service is defined by" in log and "/.config/systemd/user/" in log, [])
 
 
 def sway():

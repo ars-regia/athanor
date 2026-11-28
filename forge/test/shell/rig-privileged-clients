@@ -10,3 +10,6 @@
 /usr/bin/wtype rig-wtype.service zwp_virtual_keyboard_manager_v1
 # cc-probe reads and acts on the windows of compositor_e2e.py, run by in-unit.sh as rig-cc-probe.service.
 /usr/bin/cc-probe rig-cc-probe.service ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 ext_workspace_manager_v1 athanor_workspace_tiling_manager_v1
+# The same grants in rig-user-cc-probe.service, which fake_systemd.py --origin answers as a unit the
+# user defined under ~/.config/systemd/user: the compositor's origin check refuses it (#1560).
+/usr/bin/cc-probe rig-user-cc-probe.service ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 ext_workspace_manager_v1 athanor_workspace_tiling_manager_v1

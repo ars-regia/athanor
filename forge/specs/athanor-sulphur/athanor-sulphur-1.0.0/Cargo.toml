@@ -41,6 +41,9 @@ toml = { workspace = true }
 # WAYLAND_DISPLAY to the user manager (`ready.rs`), each in a `zbus::block_on` call: the
 # multi-threaded runtime keeps serving the keyboard monitor's connection between those calls.
 zbus = { workspace = true, features = ["tokio-multithread"] }
+# The bound of the whole origin check (`origin.rs`), on the runtime that `zbus::block_on` runs:
+# the time feature alone, which zbus already turns on, so the binary builds no crate more.
+tokio = { version = "1.54.1", default-features = false, features = ["time"] }
 # The keyboard monitor's reader of name changes (`keyboard_monitor.rs`).
 futures-util = { workspace = true }
 tracing = { workspace = true }

@@ -182,6 +182,18 @@ impl Process for Proc {
     }
 }
 
+/// A peer as [`identify`] reads it.
+#[derive(Debug)]
+pub struct Peer {
+    pub identity: Identity,
+    /// What the allow-list grants it, before the origin check.
+    pub grants: Grants,
+    /// Its pidfd, and the pid it named when it was read, which the origin check asks the user's
+    /// systemd about (`origin.rs`).
+    pub pidfd: OwnedFd,
+    pub pid: i32,
+}
+
 /// The identity of the process at the other end of `socket`, and what `list` grants it. The
 /// executable, the cgroup and, for a grant, the executable's file are read through the pid of
 /// the peer's pidfd, which is then read again: unless it still names the same live process,
@@ -190,7 +202,7 @@ pub fn identify(
     socket: BorrowedFd<'_>,
     process: &dyn Process,
     list: &AllowList,
-) -> Result<(Identity, Vec<Privilege>), Error> {
+) -> Result<Peer, Error> {
     let pidfd = so_peerpidfd(socket)?;
     let pid = pidfd_pid(pidfd.as_fd())?;
     let executable = process.executable(pid)?;
@@ -203,7 +215,12 @@ pub fn identify(
     if pidfd_pid(pidfd.as_fd())? != pid {
         return Err("the peer exited while it was read".into());
     }
-    Ok((identity, grants))
+    Ok(Peer {
+        identity,
+        grants,
+        pidfd,
+        pid,
+    })
 }
 
 /// The peer's pidfd, from `SO_PEERPIDFD` (Linux 6.5, older than every kernel Athanor ships).
@@ -302,6 +319,52 @@ fn names_unit(grant: &str, unit: &str) -> bool {
     }
 }
 
+/// The lines of the shipped allow-list whose unit is transient: no file of the image defines
+/// it, so the origin check (`origin.rs`) could never admit its process. Each is granted on its
+/// executable, its unit and its file alone, as every line was before #1560, until its client
+/// gets a unit of the image (#1681). Every other line is granted only once the origin check
+/// admits the process as the main process of its unit, defined beneath `/usr/lib/systemd/user`
+/// (doc_own_stack.md OS4). Each entry is the executable and the unit of its line, then why that
+/// unit is transient; a new transient line that is not listed here is refused.
+pub(crate) const TRANSIENT: [(&str, &str, &str); 2] = [
+    (
+        "/usr/bin/cosmic-greeter",
+        "cosmic-greeter-locker.scope",
+        "session-components starts the locker with `systemd-run --user --scope`: a scope, which \
+         no unit file defines (privileged-clients, the locker's line)",
+    ),
+    (
+        "/usr/bin/cosmic-randr",
+        "app-athanor-com.system76.CosmicSettings*@.service",
+        "the launcher starts Settings and each of its pages in a transient unit of its own, in \
+         which Settings runs cosmic-randr (privileged-clients, cosmic-randr's line; #880)",
+    ),
+];
+
+/// Whether the allow-list's line of `executable` and `unit` is one of [`TRANSIENT`].
+fn transient(executable: &Path, unit: &str) -> bool {
+    TRANSIENT
+        .iter()
+        .any(|(path, name, _)| executable == Path::new(path) && unit == *name)
+}
+
+/// What the allow-list grants a process, in two parts: the interfaces of its lines of
+/// [`TRANSIENT`], granted when it connects, and those of its other lines, granted only once the
+/// origin check admits it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Grants {
+    pub exempt: Vec<Privilege>,
+    pub by_origin: Vec<Privilege>,
+}
+
+impl Grants {
+    /// Both parts, as the fixture grants them: its fake process stands for an admitted one.
+    #[cfg(test)]
+    pub fn all(&self) -> Vec<Privilege> {
+        self.exempt.iter().chain(&self.by_origin).copied().collect()
+    }
+}
+
 /// The allow-list: which executable in which unit is granted which privileged globals. One
 /// grant per line, `<executable> <unit> <interface>...`, separated by spaces; `#` starts a
 /// comment line. The executable is an absolute path under `/usr`, the unit a `.service` or
@@ -368,10 +431,12 @@ impl AllowList {
     /// What `identity`, the process `pid`, is granted: the interfaces of every line naming its
     /// executable and unit, where the executable's path, read by `process` in the compositor's
     /// mount namespace, is the very file the process runs. A path alone is not enough: a
-    /// sandbox whose own `/usr` holds a file at the bar's path reads back the bar's path.
-    pub fn grants(&self, identity: &Identity, pid: i32, process: &dyn Process) -> Vec<Privilege> {
+    /// sandbox whose own `/usr` holds a file at the bar's path reads back the bar's path. The
+    /// interfaces of a line of [`TRANSIENT`] are `exempt`, those of any other `by_origin`.
+    pub fn grants(&self, identity: &Identity, pid: i32, process: &dyn Process) -> Grants {
+        let mut grants = Grants::default();
         let Some(unit) = &identity.unit else {
-            return Vec::new();
+            return grants;
         };
         let named: Vec<_> = self
             .0
@@ -379,18 +444,25 @@ impl AllowList {
             .filter(|(executable, u, _)| *executable == identity.executable && names_unit(u, unit))
             .collect();
         if named.is_empty() {
-            return Vec::new();
+            return grants;
         }
         // Only a client that names an allow-listed path and unit gets here: the stat can block
         // on its own file system, and the compositor with it.
         let Ok(file) = process.executable_file(pid) else {
-            return Vec::new();
+            return grants;
         };
-        named
-            .into_iter()
-            .filter(|(executable, _, _)| process.file(executable).is_ok_and(|f| f == file))
-            .flat_map(|(_, _, privileges)| privileges.iter().copied())
-            .collect()
+        for (executable, line_unit, privileges) in named {
+            if !process.file(executable).is_ok_and(|f| f == file) {
+                continue;
+            }
+            let part = if transient(executable, line_unit) {
+                &mut grants.exempt
+            } else {
+                &mut grants.by_origin
+            };
+            part.extend(privileges.iter().copied());
+        }
+        grants
     }
 }
 
@@ -503,24 +575,24 @@ mod tests {
     fn a_grant_needs_both_the_executable_and_the_unit() {
         let list = AllowList::parse(BAR).expect("allow-list");
         assert_eq!(
-            list.grants(&bar(), BAR_PID, &Files),
+            list.grants(&bar(), BAR_PID, &Files).all(),
             [Privilege::TopLayers, Privilege::ToplevelList]
         );
         let other_executable = Identity {
             executable: "/usr/bin/sh".into(),
             ..bar()
         };
-        assert!(list.grants(&other_executable, BAR_PID, &Files).is_empty());
+        assert!(list.grants(&other_executable, BAR_PID, &Files).all().is_empty());
         let other_unit = Identity {
             unit: Some("app-sh.scope".into()),
             ..bar()
         };
-        assert!(list.grants(&other_unit, BAR_PID, &Files).is_empty());
+        assert!(list.grants(&other_unit, BAR_PID, &Files).all().is_empty());
         let no_unit = Identity {
             unit: None,
             ..bar()
         };
-        assert!(list.grants(&no_unit, BAR_PID, &Files).is_empty());
+        assert!(list.grants(&no_unit, BAR_PID, &Files).all().is_empty());
     }
 
     /// The mark of a trusted prompt is granted as an interface is, on its line alone.
@@ -529,12 +601,12 @@ mod tests {
         let line = "/usr/bin/athanor-bar athanor-bar.service trusted-prompt\n";
         let list = AllowList::parse(line).expect("allow-list");
         assert_eq!(
-            list.grants(&bar(), BAR_PID, &Files),
+            list.grants(&bar(), BAR_PID, &Files).all(),
             [Privilege::TrustedPrompt]
         );
         let other = AllowList::parse(BAR).expect("allow-list");
         assert!(!other
-            .grants(&bar(), BAR_PID, &Files)
+            .grants(&bar(), BAR_PID, &Files).all()
             .contains(&Privilege::TrustedPrompt));
     }
 
@@ -543,18 +615,18 @@ mod tests {
     #[test]
     fn a_grant_needs_the_very_file_at_the_executable_s_path() {
         let list = AllowList::parse(BAR).expect("allow-list");
-        assert!(list.grants(&bar(), IMPOSTOR_PID, &Files).is_empty());
+        assert!(list.grants(&bar(), IMPOSTOR_PID, &Files).all().is_empty());
     }
 
     #[test]
     fn a_missing_or_unreadable_allow_list_grants_nothing() {
         let missing = Path::new("/nonexistent/athanor/privileged-clients");
         assert!(AllowList::load(missing)
-            .grants(&bar(), BAR_PID, &Files)
+            .grants(&bar(), BAR_PID, &Files).all()
             .is_empty());
         // A directory cannot be read as a file.
         assert!(AllowList::load(Path::new("/"))
-            .grants(&bar(), BAR_PID, &Files)
+            .grants(&bar(), BAR_PID, &Files).all()
             .is_empty());
     }
 
@@ -576,7 +648,7 @@ mod tests {
             std::fs::write(&path, format!("{BAR}{bad}")).expect("write");
             let loaded = AllowList::load(&path);
             std::fs::remove_file(&path).expect("remove");
-            assert!(loaded.grants(&bar(), BAR_PID, &Files).is_empty(), "{bad}");
+            assert!(loaded.grants(&bar(), BAR_PID, &Files).all().is_empty(), "{bad}");
         }
     }
 
@@ -585,7 +657,7 @@ mod tests {
     fn the_shipped_allow_list_parses() {
         let shipped =
             AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
-        assert!(!shipped.grants(&bar(), BAR_PID, &Files).is_empty());
+        assert!(!shipped.grants(&bar(), BAR_PID, &Files).all().is_empty());
     }
 
     /// The shipped allow-list lets the bar, the dock, the launcher and the control center read
@@ -620,7 +692,7 @@ mod tests {
                 executable: format!("/usr/bin/{name}").into(),
                 unit: Some(format!("{name}.service")),
             };
-            let granted = shipped.grants(&client, BAR_PID, &Any);
+            let granted = shipped.grants(&client, BAR_PID, &Any).all();
             assert!(granted.contains(&Privilege::ToplevelState), "{name} reads");
             assert_eq!(
                 granted.contains(&Privilege::ToplevelActions),
@@ -664,7 +736,7 @@ mod tests {
                 executable: format!("/usr/bin/{name}").into(),
                 unit: Some(format!("{name}.service")),
             };
-            let granted = shipped.grants(&client, BAR_PID, &Any);
+            let granted = shipped.grants(&client, BAR_PID, &Any).all();
             assert_eq!(
                 granted.contains(&Privilege::KeyboardGroup),
                 follows,
@@ -738,7 +810,7 @@ mod tests {
     }
 
     /// What `identify` reads of a peer that `Exits` kills.
-    fn read_a_peer_that_exits(at_the_stat: bool) -> Result<(Identity, Vec<Privilege>), Error> {
+    fn read_a_peer_that_exits(at_the_stat: bool) -> Result<Peer, Error> {
         let path = std::env::temp_dir().join(format!(
             "athanor-identity-{}-{at_the_stat}.sock",
             std::process::id()
@@ -801,8 +873,9 @@ mod tests {
     fn the_identity_of_this_process_is_read_through_its_pidfd() {
         let (server, _client) = UnixStream::pair().expect("socket pair");
         // SO_PEERPIDFD is the only way to the peer's pidfd: an identity proves the kernel has it.
-        let (identity, _) = identify(server.as_fd(), &Proc, &AllowList::default())
-            .expect("identity through SO_PEERPIDFD");
+        let identity = identify(server.as_fd(), &Proc, &AllowList::default())
+            .expect("identity through SO_PEERPIDFD")
+            .identity;
         eprintln!("peer identity through SO_PEERPIDFD: {identity:?}");
         let executable = std::env::current_exe().expect("executable");
         assert_eq!(
@@ -1040,5 +1113,132 @@ mod tests {
                 || (path == Path::new("/usr/bin/cosmic-greeter")
                     && unit == "cosmic-greeter-locker.scope")
         }));
+    }
+
+    /// The two transient lines are granted when their client connects; every other line, the
+    /// bar's here, waits for the origin check.
+    #[test]
+    fn a_transient_line_is_granted_at_once_and_any_other_after_the_origin_check() {
+        /// Every path is the file of every process.
+        struct Any;
+        impl Process for Any {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn executable_file(&self, _: i32) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+            fn file(&self, _: &Path) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+        }
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        let locker = Identity {
+            executable: "/usr/bin/cosmic-greeter".into(),
+            unit: Some("cosmic-greeter-locker.scope".into()),
+        };
+        assert_eq!(
+            shipped.grants(&locker, BAR_PID, &Any),
+            Grants {
+                exempt: vec![Privilege::SessionLock],
+                by_origin: Vec::new(),
+            }
+        );
+        let randr = Identity {
+            executable: "/usr/bin/cosmic-randr".into(),
+            unit: Some("app-athanor-com.system76.CosmicSettings@0123abcd.service".into()),
+        };
+        let granted = shipped.grants(&randr, BAR_PID, &Any);
+        assert!(!granted.exempt.is_empty() && granted.by_origin.is_empty());
+        let granted = shipped.grants(&bar(), BAR_PID, &Any);
+        assert!(granted.exempt.is_empty() && !granted.by_origin.is_empty());
+        // The same executable and unit on a line of another list is not exempt: an entry names
+        // its line, the unit as the line writes it.
+        let other = AllowList::parse(
+            "/usr/bin/cosmic-greeter cosmic-greeter-locker.scope zwlr_layer_shell_v1\n\
+             /usr/bin/cosmic-randr app-athanor-com.system76.CosmicSettings@0123abcd.service \
+             zwlr_output_manager_v1\n",
+        )
+        .expect("allow-list");
+        assert!(other.grants(&locker, BAR_PID, &Any).by_origin.is_empty());
+        assert!(other.grants(&randr, BAR_PID, &Any).exempt.is_empty());
+    }
+
+    /// Every entry of `TRANSIENT` is a line the image ships, with a reason: an entry outlives
+    /// its line only as a blind spot.
+    #[test]
+    fn every_transient_entry_is_a_shipped_line() {
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        for (executable, unit, reason) in TRANSIENT {
+            assert!(
+                shipped
+                    .0
+                    .iter()
+                    .any(|(path, name, _)| path == Path::new(executable) && name == unit),
+                "{executable} {unit} is not a shipped line"
+            );
+            assert!(!reason.is_empty(), "{unit} has no reason");
+        }
+    }
+
+    /// The unit files under `dir`, with the `ExecStart=` lines of each.
+    fn unit_files(dir: &Path, found: &mut Vec<(String, Vec<String>)>) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("entry").path();
+            let name = path.file_name().expect("name").to_string_lossy().into_owned();
+            if path.is_dir() {
+                // Build output and scratch: no file of the image is there.
+                if !matches!(name.as_str(), "target" | ".git" | ".scratch" | "node_modules") {
+                    unit_files(&path, found);
+                }
+            } else if name.ends_with(".service") {
+                let text = std::fs::read_to_string(&path).expect("unit");
+                let starts = text
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("ExecStart="))
+                    .map(str::to_owned)
+                    .collect();
+                found.push((name, starts));
+            }
+        }
+    }
+
+    /// Every shipped line outside `TRANSIENT` names a unit file of the tree whose one
+    /// `ExecStart` runs the line's executable, as the origin check asks of the unit's systemd;
+    /// for a family of templates, a template with its prefix. A line for a transient unit that
+    /// is not listed would never be admitted, and fails here first.
+    #[test]
+    fn every_line_outside_the_transient_list_names_a_unit_file_of_the_tree() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let mut units = Vec::new();
+        for top in ["forge/specs", "system"] {
+            unit_files(&root.join(top), &mut units);
+        }
+        // The scan must see the units it is about, or it proves nothing.
+        assert!(units.iter().any(|(name, _)| name == "athanor-bar.service"));
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        for (executable, unit, _) in &shipped.0 {
+            if transient(executable, unit) {
+                continue;
+            }
+            let file = |name: &str| match unit.strip_suffix(TEMPLATES) {
+                Some(prefix) => name.starts_with(prefix) && name.ends_with("@.service"),
+                None => name == unit,
+            };
+            let executable = executable.to_string_lossy();
+            assert!(
+                units
+                    .iter()
+                    .any(|(name, starts)| file(name) && *starts == [executable.as_ref()]),
+                "{executable} {unit}: no unit file of the tree runs it as its one ExecStart, and \
+                 the line is not in TRANSIENT"
+            );
+        }
     }
 }
