@@ -1,10 +1,10 @@
 # The greeter UI on Sal: Implementation Plan
 
-**Status:** proposed on 2026-11-26, awaiting the maintainer's approval. The greeter reads the password at login, which is the greeter's login path in `AGENTS.md`, "Stop and ask before editing". No code is written until the maintainer approves this plan.
+**Status:** approved by the maintainer on 2026-11-28 (#1591), with one change: P3 names the icon theme `Adwaita` in place of `Cosmic` (section 1, item 6). Proposed on 2026-11-26. The greeter reads the password at login, which is the greeter's login path in `AGENTS.md`, "Stop and ask before editing". P1, the revision of decision 41, is approved by its own pull request (ADR-0074).
 
 **Decided on 2026-11-26.** The maintainer decided questions G1, G2 and G3 (section 6), the session-menu timing (section 1, item 7) and the confinement rule of #1558, written below as decided.
 
-**Depends on #1558.** #1558 confines the lock in process with Landlock and keeps out of its unit the directives that create a user namespace under a per-user manager; the polkit agent and this greeter follow the same rule (maintainer decision, 2026-11-26). The greeter has no unit, so the part of the rule that applies to it is the in-process one (section 3.2).
+**Depends on #1558.** The work starts before #1558 closes (maintainer decision, 2026-11-28). #1558 confines the lock in process with Landlock and keeps out of its unit the directives that create a user namespace under a per-user manager; the polkit agent and this greeter follow the same rule (maintainer decision, 2026-11-26). The greeter has no unit, so the part of the rule that applies to it is the in-process one (section 3.2).
 
 **Goal:** `athanor-greeter-ui` draws with `athanor-sal` instead of GTK4, with the same behaviour. Orca must say no less than it says for the GTK greeter (OS8). The port:
 - retires the own-allow entry `crate athanor-greeter-ui` (`forge/config/own-allow.txt`);
@@ -67,7 +67,7 @@ The port is the prerequisite of #1356, the greeter on Sulphur's greeter mode (`d
 
 These hold once #1356 lands.
 
-**Decision 41 (`doc_own_stack.md:2233-2264`).** The grant that admits the greeter to the mode is decided with this port, by a revision of `doc_own_stack.md`. It lists three options not taken, and one rejected outright: the greeter under `athanor-sulphur.service`. G1 decides that choice (section 6).
+**Decision 41 (`doc_own_stack.md:2252-2283`).** The grant that admits the greeter to the mode is decided with this port, by a revision of `doc_own_stack.md`. It lists three options not taken, and one rejected outright: the greeter under `athanor-sulphur.service`. G1 decides that choice (section 6).
 
 **What the GTK greeter already holds:**
 - *No account pictures.* It decodes no image an account supplied (`forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/ui.rs#Avatar`).
@@ -102,7 +102,7 @@ These hold once #1356 lands.
    - *Where it is proved.* In the development VM with `us(intl)` (section 7). The export goes in P4.
 6. **The icon theme.**
    - *Today.* The greeter draws the theme `Cosmic` (`ui.rs`, `ICON_THEME`), from `cosmic-icon-theme`, which its spec requires.
-   - *After the port.* Sal's `IconTheme::system` reads the same installed theme (`system/athanor-sal/src/icon.rs`), so the `Requires` stays. The own-allow entry `rpm cosmic-icon-theme` has its own retirement, which is not this plan's.
+   - *After the port* (maintainer decision, 2026-11-28). The port names the theme `Adwaita`, as the bar and the launcher do, and Sal's `IconTheme::system` reads it (`system/athanor-sal/src/icon.rs`); P3's goldens are drawn with it. The spec's `Requires: cosmic-icon-theme` becomes `adwaita-icon-theme`, as `doc_software.md` asks of each package that names that theme, and the greeter UI's `Requires` is the one that "goes when its port to Sal names `Adwaita`" (`doc_software.md`, the icon theme of release 1.0). The own-allow entry `rpm cosmic-icon-theme` stays: other packages still require the theme, and it leaves with the last of them, which is not this plan's.
    - *What else stays.* `athanor-style` and `rpm gtk4-layer-shell` stay on the list: the dock and cosmic-comp still use them.
 7. **The session menu.**
    - *The approved text.* SN14 (`doc_session.md:191-193`): the greeter offers the menu only when `/usr/bin/athanor-sulphur-session` is installed, tested as `session_command` tests its paths (`auth.rs:97-113`). The menu is a button named "Session" beside the password field, after it in the focus chain, exposed to AT-SPI as a menu button with its checked entry; it holds the two sessions as a radio group with the default checked, cosmic-comp's entry with its one line "Workspace overview and Alt+Tab". `StartSession`'s `cmd` is the checked entry's path, read when `StartSession` is sent. SN14 revision 5 removes the menu, but in the change that takes cosmic-comp's session off the greeter (`:190`), not in this port.
@@ -160,7 +160,7 @@ The spec drops:
 - `Requires: gtk4 gtk4-layer-shell`;
 - `BuildRequires: gtk4-devel glib2-devel gtk4-layer-shell-devel`.
 
-It keeps `greetd`, `athanor-calmo` and `cosmic-icon-theme`.
+It keeps `greetd` and `athanor-calmo`, and `Requires: cosmic-icon-theme` becomes `adwaita-icon-theme` (section 1, item 6).
 
 **Modules:**
 - **`model`** (new, toolkit-free, moved out of `ui.rs` in P2). It holds what the card computes without drawing:
@@ -336,7 +336,7 @@ The last pull request of this plan, P4, retires no entry. The entry this plan re
 
 ## 6. Questions, decided by the maintainer on 2026-11-26
 
-**G1. The grant that admits the greeter to Sulphur's greeter mode** (decision 41 leaves it to this port, `doc_own_stack.md:2233-2264`).
+**G1. The grant that admits the greeter to Sulphur's greeter mode** (decision 41 leaves it to this port, `doc_own_stack.md:2252-2283`).
 - (a) A grant of the mode's own. At start, the compositor reads its own logind session scope from its cgroup, and admits only a client whose executable is `/usr/bin/athanor-greeter-ui` and which runs in that scope. No allow-list line.
 - (b) A fixed-name scope made with `systemd-run --user --scope` in the `greetd` user's manager, named by a line of the shipped allow-list.
 - (c) A `session-*.scope` unit form in OS4's grammar.
