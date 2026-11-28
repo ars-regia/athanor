@@ -7,7 +7,6 @@
 
 mod clipboard;
 mod dialog;
-mod globals;
 mod layout;
 mod modifiers;
 
@@ -89,11 +88,10 @@ use smithay_client_toolkit::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::ops::RangeInclusive;
 use wayland_client::{
-    globals::{registry_queue_init, BindError},
+    globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_surface},
-    Connection, Dispatch, EventQueue, Proxy, QueueHandle,
+    Connection, Proxy, QueueHandle,
 };
 
 /// What a single window does with each event; it may change the widgets. See [`run_window`].
@@ -617,9 +615,8 @@ impl<O: PartialEq, S: Copy + PartialEq> PerOutput<O, S> {
 /// The surfaces open, and what opening one takes. The application reaches the widgets of each
 /// through it.
 pub struct Shell {
-    conn: Connection,
-    /// The registry, which [`Shell::bind_global`] binds an application's global from.
-    registry: wl_registry::WlRegistry,
+    pub(super) conn: Connection,
+    pub(super) registry: wl_registry::WlRegistry,
     /// [`RENDERER`] asks for vello_gpu.
     #[cfg(feature = "gpu")]
     gpu: bool,
@@ -914,40 +911,6 @@ impl Shell {
     /// [`Application::layout_changed`] tells when it changes.
     pub fn keyboard_layout(&self) -> Option<(u32, String)> {
         self.layouts.active()
-    }
-
-    /// A queue of the application's own on the driver's connection, for a global bound through
-    /// [`Shell::bind_global`] and the objects made from it, whose events go to the application's
-    /// own `Dispatch` implementations on `D`. The driver reads and flushes the connection; the
-    /// application calls [`EventQueue::dispatch_pending`] in [`Application::turn`], which follows
-    /// each read, and never `roundtrip` nor `blocking_dispatch`, which would read the connection
-    /// behind the driver's back.
-    // ponytail: with the `gpu` feature wgpu may read the connection outside the loop, and an
-    // event it reads for this queue waits for the next turn; no gpu client binds a global today.
-    pub fn event_queue<D>(&self) -> EventQueue<D> {
-        self.conn.new_event_queue()
-    }
-
-    /// Binds a global the driver does not, found by the name of `I`'s interface, at the highest
-    /// version of `version` the compositor offers, on a `queue` of [`Shell::event_queue`]: a
-    /// protocol of the application's own, on the driver's one connection, which a compositor
-    /// that admits clients by their connection, as athanor-sulphur does, admits as it admits the
-    /// driver. A global the compositor does not announce to this client is
-    /// [`BindError::NotPresent`]; one below `version`, or a `version` past what `I`'s description
-    /// knows, is [`BindError::UnsupportedVersion`]. Of a global announced more than once, the
-    /// first.
-    pub fn bind_global<I, D, U>(
-        &self,
-        queue: &QueueHandle<D>,
-        version: RangeInclusive<u32>,
-        data: U,
-    ) -> Result<I, BindError>
-    where
-        I: Proxy + 'static,
-        D: Dispatch<I, U> + 'static,
-        U: Send + Sync + 'static,
-    {
-        globals::bind(&self.registry, queue, version, data)
     }
 
     /// The surface the open menu was opened from, if a menu is open.
@@ -3876,12 +3839,15 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
     }
 }
 
+mod globals;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::widget::Priority;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+    use wayland_client::globals::BindError;
     use wayland_client::protocol::wl_registry;
 
     /// An announcement waits for a surface's adapter while it is not active, which the first
