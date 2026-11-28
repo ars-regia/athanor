@@ -2,7 +2,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        10%{?athanor_content}%{?dist}
+Release:        11%{?athanor_content}%{?dist}
 Summary:        Text console shown when the desktop does not start
 
 License:        GPL-3.0-or-later
@@ -17,8 +17,7 @@ says how to go back to the previous system version: `sudo athanor-update go-back
 It carries the greetd drop-in that starts the console, the target, and the unit that
 writes the message. When greenboot has already queued the previous version after a failed
 health check, the message says to restart instead. The package also enables greenboot's
-units through its preset. The graphical kiosk it replaces is kept as source in the frozen
-crate forge/specs/athanor-recovery/athanor-recovery-1.0.0, out of the workspace and the image.
+units through its preset. It replaces a graphical kiosk, whose source is deleted.
 
 %prep
 # Nothing to unpack: the package is a set of files.
@@ -50,6 +49,9 @@ install -D -m 0644 %{sources}/usr/lib/systemd/system-preset/80-athanor-recovery.
 /usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %changelog
+* Sat Nov 28 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- The description no longer names the kiosk's source, which is deleted (#1605).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
   surface, and a red accent's fill carries white text at 4.5:1 (#571).

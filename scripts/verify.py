@@ -3177,10 +3177,8 @@ def check_shell_failures():
 CSS_DIRS = ["system", "forge/specs"]
 CSS_TOKENS = "system/athanor-style/calmo/tokens.toml"
 CSS_BUDGETS = {
-    "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {"px": 31, "font-px": 2},
     "system/athanor-style/calmo/templates/surfaces.css.in": {"px": 71, "font-px": 13},
     "system/athanor-style/src/accent_template.css": {"px": 2},
-    "system/athanor-style/src/style.css": {"px": 178, "font-px": 15, "duration": 9, "curve": 15},
 }
 # A literal length in pixels; `${token}px` in a template, or `{}px` in Rust, is not one.
 CSS_PX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)px\b")
