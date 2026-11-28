@@ -2,7 +2,7 @@
 id: ADR-0143
 title: "Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console"
 date: 2026-11-20
-status: accepted
+status: amended by ADR-0151
 issues: [1066, 1347, 1350, 1353, 1355, 1357, 835]
 areas: [security, build, process, kernel, shell, docs]
 ---

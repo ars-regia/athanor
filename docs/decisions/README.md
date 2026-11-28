@@ -199,7 +199,7 @@ confirmed by the status of ADR-Y.
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
 | ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098, ADR-0104, ADR-0127 | build, signing, security |
-| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103 | security, update, product |
+| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103, ADR-0151 | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
 | ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | amended by ADR-0098 | security, process |
@@ -221,7 +221,7 @@ confirmed by the status of ADR-Y.
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
 | ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
-| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112, ADR-0113, ADR-0115, ADR-0117, ADR-0119, ADR-0121, ADR-0132, ADR-0138, ADR-0141, ADR-0142 | platform, kernel, build, signing, security, shell, apps, docs |
+| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112, ADR-0113, ADR-0115, ADR-0117, ADR-0119, ADR-0121, ADR-0132, ADR-0138, ADR-0141, ADR-0142, ADR-0151 | platform, kernel, build, signing, security, shell, apps, docs |
 | ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
 | ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112, ADR-0115, ADR-0121, ADR-0123, ADR-0128 | platform, build, signing, security, shell, docs, process |
 | ADR-0106 | 0106 | [Update chain decisions for release 0.3](0106-update-chain-decisions-2026-10-09.md) | amended by ADR-0115 | update, build, signing, security, kernel |
@@ -259,13 +259,14 @@ confirmed by the status of ADR-Y.
 | ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | amended by ADR-0141, ADR-0143, ADR-0147 | shell, security, process, docs |
 | ADR-0139 | 0139 | [Pull requests that change only files under docs/ do not count against the open pull request limit](0139-docs-pull-requests-outside-the-limit.md) | accepted | process, docs |
 | ADR-0140 | 0140 | [Cache the Rust builds of the shell jobs in CI through the rig's compiler cache](0140-cache-the-shell-jobs-rust-builds.md) | accepted | build, process, security |
-| ADR-0141 | 0141 | [Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets](0141-everything-own-in-1-0.md) | amended by ADR-0143 | shell, security, apps, process, docs |
+| ADR-0141 | 0141 | [Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets](0141-everything-own-in-1-0.md) | amended by ADR-0143, ADR-0151 | shell, security, apps, process, docs |
 | ADR-0142 | 0142 | [The move to Fedora 45 turns sshd off on upgraded machines, as Fedora's desktop preset does](0142-fedora-45-upgrade-turns-sshd-off.md) | accepted | security, network |
-| ADR-0143 | 0143 | [Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console](0143-pre-1-0-audit-decisions.md) | accepted | security, build, process, kernel, shell, docs |
+| ADR-0143 | 0143 | [Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console](0143-pre-1-0-audit-decisions.md) | amended by ADR-0151 | security, build, process, kernel, shell, docs |
 | ADR-0144 | 0144 | [The QEMU guest agent is off until a person turns it on, and then answers an allow-list](0144-qemu-guest-agent-off-by-default.md) | accepted | security |
 | ADR-0145 | 0145 | [A small amendment to an approved specification is approved in the pull request of its code](0145-small-spec-amendment-in-the-code-pull-request.md) | accepted | process, docs |
 | ADR-0146 | 0146 | [The merge queue builds the specs, not the kernel or the shell, and the shell is covered by a push alert](0146-merge-queue-builds-the-specs-only.md) | accepted | process, build |
-| ADR-0147 | 0147 | [The keyring prompter is in 1.0, and colour management and HDR come after it](0147-keyring-prompter-in-1-0-colour-after.md) | accepted | security, shell, process, docs |
+| ADR-0147 | 0147 | [The keyring prompter is in 1.0, and colour management and HDR come after it](0147-keyring-prompter-in-1-0-colour-after.md) | amended by ADR-0151 | security, shell, process, docs |
 | ADR-0148 | 0148 | [Release 1.0 ships no noexec mount, and fs-verity only if btrfs takes it without a migration](0148-no-noexec-mounts-in-1-0.md) | accepted | security, kernel, platform |
 | ADR-0149 | 0149 | [The forge's userspace binaries keep their symbols in a signed debuginfo artifact next to the image, never on it](0149-userspace-debuginfo-artifact.md) | accepted | build, signing, docs |
 | ADR-0150 | 0150 | [One Athanor preference store before release 1.0, in place of the COSMIC stores](0150-athanor-preference-store.md) | accepted | shell, session, security, storage |
+| ADR-0151 | 0151 | [The empty own allow-list is the first target of 1.0, and the file manager, the keyring prompter and the work that gates no release move to 1.1](0151-own-allow-first-scope-of-1-0.md) | accepted | process, shell, apps, security, settings, docs |

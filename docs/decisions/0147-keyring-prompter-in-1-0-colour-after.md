@@ -2,7 +2,7 @@
 id: ADR-0147
 title: "The keyring prompter is in 1.0, and colour management and HDR come after it"
 date: 2026-11-21
-status: accepted
+status: amended by ADR-0151
 issues: [1355]
 areas: [security, shell, process, docs]
 ---

@@ -641,7 +641,7 @@ composefs install about 20 minutes.
   item 1 states.
 - The rule of phase 3 fails, as this plan expected. It is deferred to #1363 and does not block
   Fedora 45.
-- The items that did not run are 1.0 issues, #1364 to #1369.
+- The items that did not run are 1.0 issues, #1364 to #1369. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* They move to 1.1: S1 passed on 2026-11-20 without them.
 
 **Runs.** On this machine's dev VM, from the branch image of section 1, then from `iso-v0`:
 

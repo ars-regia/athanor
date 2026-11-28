@@ -715,13 +715,13 @@ under athanor-sulphur through OV33. cosmic-workspaces itself leaves the image in
 takes cosmic-comp's session off the greeter, the last session that runs it, or in OV19 step 5's change
 if that session has already left: its entry in `forge/config/packages.json`, its line in
 `forge/config/own-allow.txt`, and its opening in `scripts/devvm/compositor-acceptance.sh` leave
-together. Acceptance item 14 is read after that change.
+together. Acceptance item 14 is read after that change. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* The COSMIC overview leaves the image with #1587, in the one train of the overview, the window switcher, the application library, the launcher switch and the removal of the fallback session (#1588, #1589, #1590, #1602).
 
 **OV35. The window switcher once cosmic-comp leaves** (ADR-0141 decision 3; revision 4).
 Section 8 holds, with athanor-sulphur's binding (OV21). The binding under cosmic-comp, OV26's grant
 for its one write, OV28 steps 5 and 6 and the cosmic-comp half of acceptance items 6 to 16 are
 built and judged only while cosmic-comp's session is in the image; once it has left, they are not
-built, and each acceptance item that names both sessions is judged under athanor-sulphur.
+built, and each acceptance item that names both sessions is judged under athanor-sulphur. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* None of them is built: the fallback session leaves in the same train as the switcher (#1588, #1602), so OV28 steps 5 and 6, the binding and grant under the fallback compositor, and the lock of `athanor_sulphur_client::shortcuts` are not built.
 
 ### Construction
 

@@ -2,7 +2,7 @@
 id: ADR-0141
 title: "Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets"
 date: 2026-11-18
-status: amended by ADR-0143
+status: amended by ADR-0143, ADR-0151
 issues: []
 areas: [shell, security, apps, process, docs]
 ---
