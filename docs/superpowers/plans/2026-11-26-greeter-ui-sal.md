@@ -67,7 +67,7 @@ The port is the prerequisite of #1356, the greeter on Sulphur's greeter mode (`d
 
 These hold once #1356 lands.
 
-**Decision 41 (`doc_own_stack.md:2252-2283`).** The grant that admits the greeter to the mode is decided with this port, by a revision of `doc_own_stack.md`. It lists three options not taken, and one rejected outright: the greeter under `athanor-sulphur.service`. G1 decides that choice (section 6).
+**Decision 41 (`doc_own_stack.md:2252-2339`).** The grant that admits the greeter to the mode is decided with this port, by a revision of `doc_own_stack.md`. It lists three options not taken, and one rejected outright: the greeter under `athanor-sulphur.service`. G1 decides that choice (section 6).
 
 **What the GTK greeter already holds:**
 - *No account pictures.* It decodes no image an account supplied (`forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/ui.rs#Avatar`).
@@ -336,7 +336,7 @@ The last pull request of this plan, P4, retires no entry. The entry this plan re
 
 ## 6. Questions, decided by the maintainer on 2026-11-26
 
-**G1. The grant that admits the greeter to Sulphur's greeter mode** (decision 41 leaves it to this port, `doc_own_stack.md:2252-2283`).
+**G1. The grant that admits the greeter to Sulphur's greeter mode** (decision 41 leaves it to this port, `doc_own_stack.md:2252-2339`).
 - (a) A grant of the mode's own. At start, the compositor reads its own logind session scope from its cgroup, and admits only a client whose executable is `/usr/bin/athanor-greeter-ui` and which runs in that scope. No allow-list line.
 - (b) A fixed-name scope made with `systemd-run --user --scope` in the `greetd` user's manager, named by a line of the shipped allow-list.
 - (c) A `session-*.scope` unit form in OS4's grammar.
