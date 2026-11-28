@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
 
-use athanor_control_center::{grants, launch_dir, parse_mode, parse_page, Mode, RFKILL};
+use athanor_control_center::{grants, launch_dir, parse_mode, parse_page, theme_grants, Mode, RFKILL};
 use athanor_layout::loader::{self, Paths, Source};
 use athanor_sal::driver;
 use athanor_services::battery::BACKLIGHT_ROOT;
@@ -25,7 +25,7 @@ use athanor_services::Runtime;
 use athanor_style::appearance::Appearance;
 use athanor_sulphur_client::glib_loop::GlibSource;
 use athanor_sulphur_client::shortcuts::{self, Binding};
-use athanor_sulphur_client::{theme, Client};
+use athanor_sulphur_client::Client;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, dirs, journal, sandbox};
 use wayland_client::Connection;
@@ -114,8 +114,10 @@ fn main() -> ExitCode {
         tracing::warn!(error = %err, dir = %state.display(), "cannot create the state directory");
     }
     // Before a thread starts. Reads stay open (CC2); writes only where `grants` says.
-    // The unit's ConfigurationDirectory= creates it; a run outside it needs it here.
-    let theme_dirs = theme::theme_dirs();
+    // The unit's ConfigurationDirectory= creates them; a run outside it needs them here. The
+    // directories are the COSMIC theme's and the preference store's subdirectory of
+    // `appearance.toml` (ADR-0150, CC2), never the store's directory, which holds the bindings.
+    let theme_dirs = theme_grants();
     for dir in &theme_dirs {
         if let Err(err) = std::fs::create_dir_all(dir) {
             tracing::warn!(error = %err, dir = %dir.display(), "cannot create the COSMIC theme directory");

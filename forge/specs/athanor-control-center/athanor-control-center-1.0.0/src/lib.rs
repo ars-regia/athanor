@@ -127,6 +127,20 @@ pub fn grants(dirs: &Dirs, state: &Path, theme_dirs: &[PathBuf], rfkill: bool) -
     Grants { write, devices }
 }
 
+/// The directories the appearance apply function writes: COSMIC's theme directories and the
+/// store's subdirectory of `appearance.toml` (`theme::DIR`), made if absent. Never the store's
+/// directory, which also holds the bindings and the other families' files.
+pub fn theme_grants() -> Vec<PathBuf> {
+    let mut dirs = athanor_sulphur_client::theme::theme_dirs();
+    match athanor_sulphur_client::theme::confinement_dir() {
+        Ok(dir) => dirs.push(dir),
+        Err(error) => {
+            tracing::warn!(%error, "cannot prepare the preference store's appearance directory");
+        }
+    }
+    dirs
+}
+
 /// The parent of the launch sockets of BR2.2, where `Client::launch` makes one per application:
 /// the Settings button writes there.
 pub fn launch_dir(dirs: &Dirs) -> PathBuf {
@@ -312,6 +326,52 @@ mod tests {
                 "{declared:?} lacks {dir:?}"
             );
         }
+    }
+
+    /// The store's subdirectory of `appearance.toml`, which the ruleset grants, is a
+    /// configuration directory of the unit, and the store's directory is not: the unit makes
+    /// writable what the process may write, and the bindings are not that.
+    #[test]
+    fn the_unit_declares_the_appearance_directory_and_not_the_store_as_configuration_directories() {
+        use athanor_sulphur_client::{store::RELATIVE, theme::DIR};
+        let unit = include_str!("../data/athanor-control-center.service");
+        let declared: Vec<&str> = unit
+            .lines()
+            .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
+            .flat_map(str::split_whitespace)
+            .collect();
+        let appearance = format!("{RELATIVE}/{DIR}");
+        assert!(declared.contains(&appearance.as_str()), "{declared:?}");
+        assert!(!declared.contains(&RELATIVE), "{declared:?}");
+    }
+
+    /// The grants hold the store's subdirectory of `appearance.toml` and not the store's
+    /// directory, so the control center cannot write `bindings.toml` or `input.toml`.
+    #[test]
+    fn the_grants_hold_the_appearance_directory_and_not_the_stores() {
+        use athanor_sulphur_client::{store::Store, theme::DIR};
+        let root = std::env::temp_dir().join(format!("athanor-cc-grants-{}", std::process::id()));
+        let store = Store::at(root.join("store"));
+        let appearance = store.sub(DIR).dir_for_confinement().expect("the grant");
+        let store_dir = store.dir_for_confinement().expect("the store");
+        let theme = [appearance.clone()];
+        let granted = grants(&dirs(), Path::new("/home/u/state"), &theme, false);
+        assert!(granted.write.contains(&appearance));
+        assert!(!granted.write.contains(&store_dir));
+        assert!(
+            !granted.write.iter().any(|dir| store_dir.starts_with(dir)),
+            "no grant is an ancestor of the store: {:?}",
+            granted.write
+        );
+        // What main.rs grants is that same directory and no other of the store.
+        std::env::set_var("XDG_CONFIG_HOME", root.join("config"));
+        let appearance = athanor_sulphur_client::theme::confinement_dir().expect("the grant");
+        let store_dir = Store::from_env().expect("env").dir_for_confinement().expect("store");
+        let grants = theme_grants();
+        assert!(grants.contains(&appearance), "{grants:?}");
+        assert!(!grants.contains(&store_dir), "{grants:?}");
+        std::env::remove_var("XDG_CONFIG_HOME");
+        std::fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
