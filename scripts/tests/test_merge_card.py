@@ -923,8 +923,8 @@ class Real(unittest.TestCase):
 
 class Categories(unittest.TestCase):
     CATEGORIES = json.loads(merge_card.CATEGORIES.read_text())["categories"]
-    # No submodule and no SELinux file-context file yet; the day there is one, it is listed.
-    NOT_YET = {".gitmodules", "*.fc"}
+    # No submodule, no SELinux file-context file, and no standalone .pam file yet; kept listed.
+    NOT_YET = {".gitmodules", "*.fc", "*.pam"}
 
     def test_every_listed_path_matches_a_tracked_file(self):
         tracked = subprocess.run(
