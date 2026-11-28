@@ -34,7 +34,7 @@ athanor-settings 0
 athanor-settings-core 1
 athanor-shelld 29
 athanor-style 10
-athanor-sulphur 315
+athanor-sulphur 302
 athanor-sulphur-client 25
 athanor-trust-state 0
 athanor-unit 1

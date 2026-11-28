@@ -264,7 +264,7 @@ impl Center {
             }
             Action::SetDark(dark) => {
                 if let Err(error) =
-                    appearance::apply(|choice| choice.dark = dark, cosmic::write_cosmic)
+                    appearance::apply(|choice| choice.dark = dark, cosmic::write)
                 {
                     tracing::warn!(%error, "the theme mode was not changed");
                     let now = self.appearance.dark;

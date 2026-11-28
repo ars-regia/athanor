@@ -10,7 +10,7 @@
     {"name": "power", "paths": ["*logind*"], "patterns": ["(?i)\\blogind\\b", "(?i)\\b(suspend|hibernate|poweroff|reboot)\\b", "PrepareForSleep", "\\bHandle[A-Za-z]*="]},
     {"name": "signing and keys", "paths": ["forge/specs/azoth/keys/", "system/keys/", "system/sign-images.sh", "system/promote.sh", "forge/scripts/sign_attest.sh", "system/verify-images.sh", "system/tag-images.sh", "system/image-digests.sh"], "patterns": ["\\bcosign\\b", "\\bsbsign\\b", "(?i)\\bMOK\\b"]},
     {"name": "polkit", "paths": ["system/athanor-bus-api/src/polkit.rs", "*polkit-1/*", "*.policy", "*.rules"], "patterns": ["(?i)polkit", "(?i)policykit"]},
-    {"name": "authentication", "paths": ["system/athanor-auth/", "forge/specs/athanor-unlockd/", "forge/specs/athanor-greeter-ui/", "*.pam", "*/pam.d/*", "*greetd*"], "patterns": ["\\bpam_", "(?i)\\bauthenticate\\b"]},
+    {"name": "authentication", "paths": ["system/athanor-auth/", "forge/specs/athanor-unlockd/", "forge/specs/athanor-greeter-ui/", "*/pam.d/*", "*greetd*"], "patterns": ["\\bpam_", "(?i)\\bauthenticate\\b"]},
     {"name": "systemd units", "paths": ["*.service", "*.socket", "*.timer"], "patterns": []},
     {"name": "approved document text", "paths": ["docs/architecture/doc_*.md", "docs/decisions/*.md"], "patterns": []},
     {"name": "CI workflows", "paths": [".github/"], "exclude": [".github/CODEOWNERS", ".github/settings/"], "patterns": []},

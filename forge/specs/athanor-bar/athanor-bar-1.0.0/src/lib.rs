@@ -32,6 +32,27 @@ pub use athanor_services::battery;
 mod tests {
     use std::path::Path;
 
+    /// The preference store's subdirectory of `appearance.toml`, which the bar grants itself, is
+    /// one the unit makes writable: `ConfigurationDirectory=athanor` holds it. Its parent, the
+    /// store's directory, is never granted by name.
+    #[test]
+    fn the_unit_makes_the_appearance_directory_of_the_store_writable() {
+        let unit = include_str!("../data/athanor-bar.service");
+        let declared: Vec<&str> = unit
+            .lines()
+            .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
+            .flat_map(str::split_whitespace)
+            .collect();
+        let appearance = Path::new(athanor_sulphur_client::store::RELATIVE)
+            .join(athanor_sulphur_client::theme::DIR);
+        assert!(
+            declared
+                .iter()
+                .any(|name| appearance.starts_with(name)),
+            "{declared:?}"
+        );
+    }
+
     /// The theme directories main.rs grants are ones the unit makes writable: under
     /// ProtectHome=read-only, only its configuration directories are.
     #[test]
