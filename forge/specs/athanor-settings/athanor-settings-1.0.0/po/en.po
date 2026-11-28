@@ -7,6 +7,212 @@ msgstr ""
 "Content-Type: text/plain; charset=ASCII\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+#: ../../../../system/athanor-controls/src/labels.rs:11
+#, rust-format
+msgid "{percent} %"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:29
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:32
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:34
+msgid "Charging"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:35
+msgid "Fully charged"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:42
+#, fuzzy
+msgid "Power saver"
+msgstr "Power"
+
+#: ../../../../system/athanor-controls/src/labels.rs:43
+msgid "Performance"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:44
+msgid "Balanced"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Mute output"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Output"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Output volume"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Input"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Input volume"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Mute microphone"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:234
+#, rust-format
+msgid "{device}, in use"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:390
+msgid "Next track"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:390
+#: ../../../../system/athanor-controls/src/sal/audio.rs:512
+msgid "Pause"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:390
+msgid "Previous track"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:512
+msgid "Play"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:765
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:816
+#: ../../../../system/athanor-controls/src/sal/network.rs:1114
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:108
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:121
+msgid "The action did not complete."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/battery.rs:141
+#, fuzzy
+msgid "Power mode"
+msgstr "Developer mode"
+
+#: ../../../../system/athanor-controls/src/sal/battery.rs:158
+#: ../../../../system/athanor-controls/src/sal/battery.rs:163
+msgid "Screen brightness"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:226
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:749
+#, rust-format
+msgid "{device}, connected"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:338
+#: ../../../../system/athanor-settings-core/src/registry.rs:131
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:341
+#, fuzzy
+msgid "Nearby devices"
+msgstr "USB devices"
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:377
+#: ../../../../system/athanor-controls/src/sal/network.rs:430
+msgid "Cancel"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:378
+msgid "Pair"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:558
+#, rust-format
+msgid "Pair with {device}?"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:560
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:567
+#, rust-format
+msgid "Pairing with {device}"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:569
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:226
+#: ../../../../system/athanor-controls/src/sal/network.rs:1396
+#, rust-format
+msgid "{network}, connected"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:227
+#, rust-format
+msgid "{network}, connecting"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:228
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:229
+#, rust-format
+msgid "{network}, secured"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:376
+#: ../../../../system/athanor-settings-core/src/registry.rs:130
+msgid "Network"
+msgstr "Network"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:380
+msgid "Wi-Fi"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:387
+#, fuzzy
+msgid "Airplane mode"
+msgstr "Display mode"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:420
+msgid "The password was not accepted. Try again."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:423
+msgid "Password"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:431
+#, fuzzy
+msgid "Connect"
+msgstr "Connections"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:712
+#, rust-format
+msgid "Password for {network}"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:729
+msgid "Wired: connected"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:730
+msgid "Wired: not connected"
+msgstr ""
+
 #: ../../../../system/athanor-settings-core/src/registry.rs:33
 msgid "Connections"
 msgstr "Connections"
@@ -26,16 +232,8 @@ msgid "System"
 msgstr "System"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:130
-msgid "Network"
-msgstr "Network"
-
-#: ../../../../system/athanor-settings-core/src/registry.rs:130
 msgid "network;wi-fi;wifi;wireless;ethernet;wired;internet;vpn;wireguard;hotspot;proxy;dns;mobile broadband;"
 msgstr "network;wi-fi;wifi;wireless;ethernet;wired;internet;vpn;wireguard;hotspot;proxy;dns;mobile broadband;"
-
-#: ../../../../system/athanor-settings-core/src/registry.rs:131
-msgid "Bluetooth"
-msgstr "Bluetooth"
 
 #: ../../../../system/athanor-settings-core/src/registry.rs:131
 msgid "bluetooth;pairing;headphones;wireless;"
@@ -319,27 +517,27 @@ msgstr "Not verified: this machine does not verify its updates"
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Signed, but pinned to one build: it receives no updates"
 
-#: src/window.rs:64 src/window.rs:258
+#: src/window.rs:62 src/window.rs:293
 msgid "Settings"
 msgstr "Settings"
 
-#: src/window.rs:71
+#: src/window.rs:69
 msgid "Search settings"
 msgstr "Search settings"
 
-#: src/window.rs:72
+#: src/window.rs:70
 msgid "Pages"
 msgstr "Pages"
 
-#: src/window.rs:261 src/window.rs:262
+#: src/window.rs:296 src/window.rs:297
 msgid "Your account"
 msgstr "Your account"
 
-#: src/window.rs:268 src/window.rs:269 src/window.rs:273
+#: src/window.rs:303 src/window.rs:304 src/window.rs:308
 msgid "This device"
 msgstr "This device"
 
-#: src/window.rs:286
+#: src/window.rs:321
 msgid "Groups"
 msgstr "Groups"
 

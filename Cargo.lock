@@ -775,8 +775,10 @@ dependencies = [
 name = "athanor-settings"
 version = "1.0.0"
 dependencies = [
+ "athanor-controls",
  "athanor-i18n",
  "athanor-sal",
+ "athanor-services",
  "athanor-settings-core",
  "athanor-style",
  "athanor-sulphur-client",

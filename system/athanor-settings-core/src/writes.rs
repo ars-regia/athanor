@@ -202,50 +202,26 @@ impl<T> Handle<T> {
     }
 }
 
-impl Handle<bool> {
-    pub fn check(&self, value: bool) -> Result<bool, Invalid> {
-        Ok(value)
-    }
-}
-
-impl Handle<i32> {
-    pub fn check(&self, value: i32) -> Result<i32, Invalid> {
-        match self.entry.kind {
-            Type::Int(Some((min, max))) if !(min..=max).contains(&value) => {
-                Err(self.invalid(value))
-            }
-            _ => Ok(value),
+impl<T: Value> Handle<T> {
+    /// `value`, when the key's schema accepts it.
+    pub fn check(&self, value: T) -> Result<T, Invalid> {
+        if value.within(self.entry.kind) {
+            Ok(value)
+        } else {
+            Err(self.invalid(value))
         }
-    }
-}
-
-impl Handle<u32> {
-    pub fn check(&self, value: u32) -> Result<u32, Invalid> {
-        match self.entry.kind {
-            Type::UInt(min, max) if !(min..=max).contains(&value) => Err(self.invalid(value)),
-            _ => Ok(value),
-        }
-    }
-}
-
-impl Handle<f64> {
-    pub fn check(&self, value: f64) -> Result<f64, Invalid> {
-        match self.entry.kind {
-            Type::Double(min, max) if (min..=max).contains(&value) => Ok(value),
-            _ => Err(self.invalid(value)),
-        }
-    }
-}
-
-impl Handle<String> {
-    pub fn check(&self, value: String) -> Result<String, Invalid> {
-        Ok(value)
     }
 }
 
 /// The value type of a handle, tied to the schema's type.
-pub trait Value {
+pub trait Value: fmt::Display {
     fn fits(kind: Type) -> bool;
+
+    /// Whether the value lies in the range of `kind`, a type it fits; a type with no range
+    /// takes every value.
+    fn within(&self, _kind: Type) -> bool {
+        true
+    }
 }
 
 impl Value for bool {
@@ -258,17 +234,36 @@ impl Value for i32 {
     fn fits(kind: Type) -> bool {
         matches!(kind, Type::Int(_))
     }
+
+    fn within(&self, kind: Type) -> bool {
+        match kind {
+            Type::Int(Some((min, max))) => (min..=max).contains(self),
+            _ => true,
+        }
+    }
 }
 
 impl Value for u32 {
     fn fits(kind: Type) -> bool {
         matches!(kind, Type::UInt(..))
     }
+
+    fn within(&self, kind: Type) -> bool {
+        match kind {
+            Type::UInt(min, max) => (min..=max).contains(self),
+            _ => true,
+        }
+    }
 }
 
 impl Value for f64 {
     fn fits(kind: Type) -> bool {
         matches!(kind, Type::Double(..))
+    }
+
+    /// NaN is in no range.
+    fn within(&self, kind: Type) -> bool {
+        matches!(kind, Type::Double(min, max) if (min..=max).contains(self))
     }
 }
 

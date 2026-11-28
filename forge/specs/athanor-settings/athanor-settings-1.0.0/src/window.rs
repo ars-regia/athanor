@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use athanor_controls::sal::Turn;
+use athanor_controls::Services;
 use athanor_sal::driver::Role;
 use athanor_sal::{Application, Event, Kind, Shell, SurfaceId, Ui, WidgetId, WindowButton};
 use athanor_settings_core::registry::{Group, Page, Registry};
@@ -17,7 +19,7 @@ use athanor_style::appearance::Appearance;
 use crate::i18n::tr;
 use crate::info::{self, Info};
 use crate::look::{self, Look};
-use crate::pages::{self, Ctx};
+use crate::pages::{self, Ctx, Notifier};
 
 /// The application id, as the name of Settings' `.desktop` file.
 pub const APP_ID: &str = "os.athanor.Settings";
@@ -42,10 +44,6 @@ pub fn resolve(registry: &Registry, text: &str) -> Target {
             Target::Landing
         }
     }
-}
-
-fn listed(page: &Page) -> bool {
-    pages::built(page.id)
 }
 
 /// The first page the window shows.
@@ -95,6 +93,8 @@ pub struct Settings {
     current: Target,
     info: Rc<RefCell<Info>>,
     system: Option<String>,
+    services: Option<Services>,
+    dirty: Notifier,
     /// Every page of the build, made once and kept while the process lives (SE5).
     pages: Vec<(&'static str, Box<dyn pages::Page>)>,
     /// The targets `Show` was called with since the last turn.
@@ -131,6 +131,8 @@ impl Settings {
             current: Target::Landing,
             info,
             system: info::system(),
+            services: None,
+            dirty: Notifier::default(),
             pages: pages::PAGES.iter().map(|page| (page.id, (page.new)())).collect(),
             shows,
             state_dir,
@@ -148,6 +150,34 @@ impl Settings {
         settings
     }
 
+    /// Attaches the shared `athanor-services` handle for pages that read or control system models.
+    pub fn with_services(mut self, services: Option<Services>) -> Self {
+        self.services = services;
+        self
+    }
+
+    fn listed(&self, page: &Page) -> bool {
+        if !pages::built(page.id) {
+            return false;
+        }
+        let ctx = self.ctx();
+        self.pages
+            .iter()
+            .find(|(id, _)| *id == page.id)
+            .is_some_and(|(_, built)| built.present(&ctx))
+    }
+
+    fn ctx(&self) -> Ctx<'_> {
+        Ctx {
+            look: &self.look,
+            registry: &self.registry,
+            info: &self.info,
+            system: self.system.as_deref(),
+            services: self.services.as_ref(),
+            dirty: &self.dirty,
+        }
+    }
+
     /// The sidebar: every listed page under its group's heading, or the hits of `query`.
     fn fill_nav(&mut self, ui: &mut Ui, query: &str) {
         ui.remove_children(self.nav);
@@ -158,7 +188,7 @@ impl Settings {
                     .registry
                     .pages()
                     .iter()
-                    .filter(|page| page.group == group && listed(page))
+                    .filter(|page| page.group == group && self.listed(page))
                     .collect();
                 if pages.is_empty() {
                     continue;
@@ -173,7 +203,7 @@ impl Settings {
             }
         } else {
             for hit in self.registry.search(query) {
-                if !listed(hit.page) {
+                if !self.listed(hit.page) {
                     continue;
                 }
                 let (text, target) = match hit.section {
@@ -234,15 +264,20 @@ impl Settings {
         let Some(id) = self.current.page() else {
             return false;
         };
-        let Some((_, page)) = self.pages.iter_mut().find(|(page, _)| *page == id) else {
-            return false;
-        };
         let ctx = Ctx {
             look: &self.look,
             registry: &self.registry,
             info: &self.info,
             system: self.system.as_deref(),
+            services: self.services.as_ref(),
+            dirty: &self.dirty,
         };
+        let Some((_, page)) = self.pages.iter_mut().find(|(page, _)| *page == id) else {
+            return false;
+        };
+        if !page.present(&ctx) {
+            return false;
+        }
         f(page.as_mut(), &ctx);
         true
     }
@@ -289,7 +324,7 @@ impl Settings {
                 .registry
                 .pages()
                 .iter()
-                .find(|page| page.group == group && listed(page));
+                .find(|page| page.group == group && self.listed(page));
             let Some(first) = first else { continue };
             let label = group.heading().unwrap_or_else(|| first.title.clone());
             let button = ui.add(groups, Kind::Button(label));
@@ -462,8 +497,27 @@ impl Application for Settings {
             self.navigate(ui, target);
         }
         let changed = std::mem::take(&mut self.info.borrow_mut().changed);
-        if changed && shows.is_empty() {
-            self.draw_page(ui);
+        let dirty = self.dirty.take();
+        let mut page_turn = Turn::Unchanged;
+        self.on_page(|page, ctx| {
+            page_turn = page.turn(ctx, ui);
+        });
+        if shows.is_empty() {
+            match page_turn {
+                Turn::Rebuild => self.draw_page(ui),
+                Turn::Updated => {
+                    if changed || dirty {
+                        self.draw_page(ui);
+                    } else {
+                        ui.layout();
+                    }
+                }
+                Turn::Unchanged => {
+                    if changed || dirty {
+                        self.draw_page(ui);
+                    }
+                }
+            }
         }
     }
 }
