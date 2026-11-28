@@ -102,11 +102,9 @@ def buttons_matching(app, Atspi, regex):
     replaces them."""
     return collect(
         app,
-        lambda node: (
-            node.get_role_name() == "button"
-            and regex.search(node.get_name())
-            and showing(node, Atspi)
-        ),
+        lambda node: node.get_role_name() == "button"
+        and regex.search(node.get_name())
+        and showing(node, Atspi),
     )
 
 
@@ -165,11 +163,9 @@ def labelled(app, Atspi, role, label):
 
     return collect(
         app,
-        lambda node: (
-            node.get_role_name() in roles
-            and showing(node, Atspi)
-            and name_of(node) == label
-        ),
+        lambda node: node.get_role_name() in roles
+        and showing(node, Atspi)
+        and name_of(node) == label,
     )
 
 
@@ -199,9 +195,7 @@ def confirm_button(app, Atspi, name):
         for cancel in buttons(app, Atspi, "Cancel"):
             siblings = collect(
                 cancel.get_parent(),
-                lambda node: (
-                    node.get_role_name() == "button" and node.get_name() == name
-                ),
+                lambda node: node.get_role_name() == "button" and node.get_name() == name,
             )
             if siblings:
                 return cancel, siblings[0]
@@ -238,12 +232,7 @@ def high_contrast_key():
 
 def screen_reader_key():
     return subprocess.run(
-        [
-            "gsettings",
-            "get",
-            "org.gnome.desktop.a11y.applications",
-            "screen-reader-enabled",
-        ],
+        ["gsettings", "get", "org.gnome.desktop.a11y.applications", "screen-reader-enabled"],
         capture_output=True,
         text=True,
         check=True,
@@ -269,10 +258,7 @@ def switch_until(app, Atspi, label, reached):
     stderr, so a switch that loses presses shows in the log even when the check passes."""
     for attempt in range(1, 4):
         if attempt > 1:
-            print(
-                f"switch_until: pressing {label!r} again, press {attempt}",
-                file=sys.stderr,
-            )
+            print(f"switch_until: pressing {label!r} again, press {attempt}", file=sys.stderr)
         try:
             found = labelled(app, Atspi, "toggle button", label)
             if found:
@@ -517,10 +503,7 @@ def main():
         check(
             f"the screen reader switch writes {value} to its GNOME key within 2 s",
             switch_until(
-                app,
-                Atspi,
-                "Screen reader",
-                lambda value=value: screen_reader_key() == value,
+                app, Atspi, "Screen reader", lambda value=value: screen_reader_key() == value
             ),
         )
 
@@ -580,9 +563,7 @@ def main():
     # the window, as orca_dock.py starts the dock (bar_session.py --respawn).
     READY_FILE.unlink(missing_ok=True)
     os.kill(pid, signal.SIGKILL)
-    if not check(
-        "the bar starts again with the keyboard", wait_for(READY_FILE.exists, 10)
-    ):
+    if not check("the bar starts again with the keyboard", wait_for(READY_FILE.exists, 10)):
         return 1
     pid = int(PID_FILE.read_text(encoding="utf-8"))
     app = find_application(Atspi, "athanor-bar")
