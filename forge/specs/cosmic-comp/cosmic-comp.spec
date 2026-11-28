@@ -6,12 +6,12 @@
 # above 1.8.0-1.fc45 and below 1.8.0-2.fc45: the Nix builder defines no %%dist.
 %global fedora_release 2.fc45
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
-%global commit 8cb1802caada438bb5cc7670dfabdaca5fad0502
+%global commit 0681eaf68324d2afd8cac175d1e10a22b7d34cdf
 %global cosmic_minver 1.8.0
 
 Name:           cosmic-comp
-Version:        1.11.0
-Release:        %{fedora_release}.athanor3
+Version:        1.12.0
+Release:        %{fedora_release}.athanor1
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
@@ -80,6 +80,9 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Sat Nov 28 2026 Athanor Forge <forge@athanor.os> - 1.12.0-2.fc45.athanor1
+- Fedora's cosmic-comp 1.12.0-2.fc45.
+
 * Wed Nov 25 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor3
 - State in the spec the Rust flags that the forge's RPM macros exported for every build
   (#1350): the same flags, the same payload.
