@@ -36,8 +36,9 @@ pub struct ShortcutCapture {
     pub(crate) recording: Option<KeyModifiers>,
 }
 
-/// The modifier a key is, of the four a [`KeyModifiers`] holds; any other key, AltGr
-/// (`ISO_Level3_Shift`) and the locks included, is an ordinary key of a combination.
+/// The modifier a key is, of the four held ones a [`KeyModifiers`] names; any other key, AltGr
+/// (`ISO_Level3_Shift`) and the locks included, is an ordinary key of a combination, and Caps
+/// Lock's state never enters one.
 fn modifier(keysym: Keysym) -> Option<KeyModifiers> {
     let mut held = KeyModifiers::default();
     match keysym {
@@ -275,6 +276,22 @@ mod tests {
             "F5 is the capture's"
         );
         assert_eq!(ui.shortcut(capture), combination(none, Some("F5")).as_ref());
+    }
+
+    #[test]
+    fn caps_lock_on_enters_neither_a_combination_nor_bare_escape() {
+        let (mut ui, capture) = recording();
+        let caps = held(|m| m.caps_lock = true);
+        let before = ui.shortcut(capture).cloned();
+        assert_eq!(ui.record_press(9, Keysym::Escape, caps), Some(None));
+        assert_eq!(ui.shortcut(capture).cloned(), before, "Escape still cancels");
+        ui.activate(capture);
+        ui.record_press(37, Keysym::Control_L, caps);
+        ui.record_press(24, Keysym::q, held(|m| (m.ctrl, m.caps_lock) = (true, true)));
+        assert_eq!(
+            ui.shortcut(capture),
+            combination(ctrl(), Some("q")).as_ref()
+        );
     }
 
     #[test]
