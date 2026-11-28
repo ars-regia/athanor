@@ -20,7 +20,7 @@ in-place update.
   from 1.0 on (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release`, the single
   source). The 1.0 release sets it to five years after its own date, and the release notes
   of each release state it. Images before 1.0 carry no `SUPPORT_END` and promise no
-  support period.
+  support period. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* `SUPPORT_END` arrives with #1662, in 1.1.
 
 ## Reporting a vulnerability
 

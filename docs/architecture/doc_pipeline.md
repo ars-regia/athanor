@@ -1037,7 +1037,7 @@ placed on the market (PQ7). The end date is published in `SECURITY.md`, in the r
 notes and as `SUPPORT_END` in `/usr/lib/os-release` (`athanor-base-config`). The 1.0
 release adds `SUPPORT_END`; images before it carry none, because no support period is
 promised for them. The acceptance of the 1.0 release asserts it
-(`grep SUPPORT_END /usr/lib/os-release`), the check PB7 leaves to that release.
+(`grep SUPPORT_END /usr/lib/os-release`), the check PB7 leaves to that release. *Amended on 2026-11-28 (proposed, to be approved by the maintainer with the pull request that records it; ADR-0151):* `SUPPORT_END` arrives with #1662, in 1.1.
 
 ## 6. CRA operations
 
