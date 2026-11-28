@@ -1,7 +1,5 @@
-//! Athanor's style crate. `calmo` is the identity; the three modules below are the
-//! pre-Calmo glass theme, kept only because athanor-recovery still loads it. They
-//! predate the lint gate and keep their warnings silenced until recovery is re-skinned
-//! and they are deleted (doc_shell.md, SH4).
+//! Athanor's style crate. `calmo` is the identity; the accent and appearance engines below
+//! predate Calmo and the lint gate, and keep their warnings silenced (doc_shell.md, SH4).
 //!
 //! Without the `gtk` feature only `appearance`, `variant`, `dock` and `sal` remain: what a surface
 //! drawn without GTK reads.
@@ -89,13 +87,8 @@ pub mod accent_engine;
 #[cfg(feature = "gtk")]
 #[allow(clippy::all)]
 pub mod appearance_engine;
-#[cfg(feature = "gtk")]
-#[allow(clippy::all, deprecated)]
-pub mod glass;
 
 #[cfg(feature = "gtk")]
 pub use accent_engine::*;
 #[cfg(feature = "gtk")]
 pub use appearance_engine::*;
-#[cfg(feature = "gtk")]
-pub use glass::*;

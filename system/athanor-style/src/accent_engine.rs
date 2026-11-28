@@ -3,7 +3,18 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
-use crate::glass::get_config_dir;
+
+/// The user's Athanor configuration directory: `$XDG_CONFIG_HOME/athanor`, else
+/// `~/.config/athanor`, else `/var/lib/athanor`.
+pub fn get_config_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg).join("athanor")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config").join("athanor")
+    } else {
+        PathBuf::from("/var/lib/athanor")
+    }
+}
 
 /// RGB Color representation with floating point and hex conversions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
