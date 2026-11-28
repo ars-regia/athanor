@@ -147,8 +147,12 @@ fn main() -> ExitCode {
     // any existing SE6 user configuration/data directories (`doc_settings.md:65-73`).
     let mut write = dirs::private_dirs(&dirs.runtime, &["athanor-settings", "dconf"]);
     let mut se6 = se6_write_dirs(&dirs, data_home(|name| env::var_os(name)).as_deref());
-    if let Ok(store_dir) = Store::from_env().and_then(|store| store.dir_for_confinement()) {
-        se6.push(store_dir);
+    match Store::from_env().and_then(|store| store.dir_for_confinement()) {
+        Ok(store_dir) => se6.push(store_dir),
+        Err(err) => tracing::warn!(
+            error = %err,
+            "cannot resolve sulphur preference store directory for confinement",
+        ),
     }
     let mut existing_dirs: Vec<&Path> = Vec::with_capacity(se6.len().saturating_add(1));
     existing_dirs.push(dirs.cache.as_path());

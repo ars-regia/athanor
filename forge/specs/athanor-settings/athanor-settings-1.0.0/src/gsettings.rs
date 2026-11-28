@@ -69,7 +69,8 @@ impl Store {
         else {
             return Err(absent);
         };
-        if !schema.has_key(handle.key())
+        if schema.path().is_none()
+            || !schema.has_key(handle.key())
             || schema.key(handle.key()).value_type() != *T::static_variant_type()
         {
             return Err(absent);

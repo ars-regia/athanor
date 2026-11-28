@@ -496,26 +496,24 @@ impl Application for Settings {
             let target = resolve(&self.registry, text);
             self.navigate(ui, target);
         }
-        let changed = std::mem::take(&mut self.info.borrow_mut().changed);
+        let changed = std::mem::take(&mut self.info.borrow_mut().changed) && shows.is_empty();
         let dirty = self.dirty.take();
         let mut page_turn = Turn::Unchanged;
         self.on_page(|page, ctx| {
             page_turn = page.turn(ctx, ui);
         });
-        if shows.is_empty() {
-            match page_turn {
-                Turn::Rebuild => self.draw_page(ui),
-                Turn::Updated => {
-                    if changed || dirty {
-                        self.draw_page(ui);
-                    } else {
-                        ui.layout();
-                    }
+        match page_turn {
+            Turn::Rebuild => self.draw_page(ui),
+            Turn::Updated => {
+                if changed || dirty {
+                    self.draw_page(ui);
+                } else {
+                    ui.layout();
                 }
-                Turn::Unchanged => {
-                    if changed || dirty {
-                        self.draw_page(ui);
-                    }
+            }
+            Turn::Unchanged => {
+                if changed || dirty {
+                    self.draw_page(ui);
                 }
             }
         }
