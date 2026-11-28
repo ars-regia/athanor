@@ -507,7 +507,7 @@ def main():
             ),
         )
 
-    # A regular file where Dark's v2 directory belongs makes the compositor's write fail:
+    # A regular file where Dark's v2 directory belongs makes the write of COSMIC's keys fail:
     # create_dir_all meets a file. Dark is written first, so COSMIC's themes keep the old
     # contrast; the store, which the shell reads, holds the choice (VL4). The directory is
     # moved aside, not removed: the bar's Landlock grant is bound to its inode, so only the
@@ -541,7 +541,7 @@ def main():
             wait_for(
                 lambda: (
                     client_log.exists()
-                    and "cannot write the compositor's theme keys"
+                    and "cannot write COSMIC's theme keys; the applications"
                     in client_log.read_text(encoding="utf-8", errors="replace")
                 ),
                 3,

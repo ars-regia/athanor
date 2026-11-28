@@ -63,13 +63,14 @@ fn apply_writes_the_store_then_the_compositor() {
     assert_eq!(ours.string("accent-mode"), "wallpaper");
     assert_eq!(ours.string("accent-computed"), "#336699");
 
-    // The compositor's failure leaves the store written and the result Ok.
+    // The compositor's failure leaves the store written and is the result.
     let back = Appearance::default();
-    appearance::apply(
+    let failed = appearance::apply(
         |current| *current = back,
-        |_| Err(io::Error::other("no cosmic")),
+        |_| Err(io::Error::other("no compositor")),
     )
-    .expect("apply");
+    .expect_err("the compositor's error is returned");
+    assert_eq!(failed.to_string(), "no compositor");
     assert_eq!(Appearance::read(), back);
     assert_eq!(interface.string("color-scheme"), "default");
     assert_eq!(ours.string("accent-computed"), "");
