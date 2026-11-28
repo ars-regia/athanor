@@ -52,8 +52,18 @@ pub(crate) fn key(
     component_name: &str,
     name: &str,
 ) -> io::Result<Option<String>> {
+    key_at(dirs, component_name, 1, name)
+}
+
+/// `key` of a component whose keys are at `version`.
+pub(crate) fn key_at(
+    dirs: &[PathBuf],
+    component_name: &str,
+    version: u32,
+    name: &str,
+) -> io::Result<Option<String>> {
     for dir in dirs {
-        let path = component(dir, component_name).join(name);
+        let path = versioned(dir, component_name, version).join(name);
         match read(&path) {
             Ok(text) => return Ok(Some(text)),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}

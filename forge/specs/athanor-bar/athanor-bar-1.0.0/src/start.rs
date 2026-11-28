@@ -147,10 +147,21 @@ pub fn prepare() -> Prepared {
             tracing::warn!(error = %err, dir = %dir.display(), "cannot create the COSMIC theme directory");
         }
     }
+    // The subdirectory of the preference store where the apply function writes
+    // `appearance.toml` (ADR-0150), not the store's directory: made here if it is absent, and
+    // granted by the directory it resolves to, a link followed. The unit's
+    // ConfigurationDirectory=athanor makes it writable; the grant of the favourites' directory
+    // above is the parent's, `~/.config/athanor`, which holds the store, so this one names what
+    // the bar writes and does not narrow what it may.
+    let store_dir = theme::confinement_dir()
+        .map_err(|err| {
+            tracing::warn!(error = %err, "cannot prepare the preference store's appearance directory");
+        })
+        .ok();
     // Before any thread starts. Writes only (athanor-unit::sandbox): the launch sockets, the
     // bar's own runtime directory and dconf, never the rest of the runtime directory (the
-    // compositor's and the bus's sockets); the caches, the favourites, the COSMIC theme
-    // keys and the first-session layout and marker. No /tmp and no DRM node: Sal draws with
+    // compositor's and the bus's sockets); the caches, the favourites, the preference store,
+    // the COSMIC theme keys and the first-session layout and marker. No /tmp and no DRM node: Sal draws with
     // vello_cpu into shared memory from memfd_create. Each is granted by
     // the descriptor its check opened: the parent of the launch sockets (BR2.2), made the way
     // launch() makes it, and dconf's are private to the user (`dirs::private_dir`).
@@ -161,6 +172,7 @@ pub fn prepare() -> Prepared {
         favorites_dir.as_path(),
     ]
     .into_iter()
+    .chain(store_dir.iter().map(PathBuf::as_path))
     .chain(cosmic_dirs.iter().map(PathBuf::as_path))
     .chain(first_session_dirs.iter().map(PathBuf::as_path))
     .collect();
